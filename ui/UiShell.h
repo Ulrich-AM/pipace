@@ -9,6 +9,7 @@
 #include <windows.h>
 
 #include "ui/UiCommands.h"
+#include "render/WorldVisual.h"
 #include "ui/UiLayout.h"
 
 #include "fluid/FluidEngine.h"
@@ -90,8 +91,7 @@ struct View {
     int brushRadius = 3;
     bool paused = false;
     bool settingsOpen = false;
-    bool liquidGlow = false;
-    bool flatOutline = false;
+    WorldLook worldLook;
     size_t speedIndex = 3;
     float speedValue = 1.0f;
     int hoverX = -1;

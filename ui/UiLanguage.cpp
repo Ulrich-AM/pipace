@@ -249,7 +249,14 @@ void seedEnglish() {
 
     set("sec_world", L"World");
     set("sec_view", L"View");
-    set("sec_look", L"Look");
+    set("sec_look", L"Appearance");
+    set("lbl_style", L"Style");
+    set("lbl_effects", L"Effects");
+    set("style_flat", L"Flat");
+    set("style_noisy", L"Noisy");
+    set("style_detailed", L"Detail");
+    set("style_realistic", L"Real");
+    set("style_alpha", L"Alpha");
     set("sec_quality", L"Quality");
     set("sec_solver", L"Solver");
     set("sec_gas_sim", L"Air solver");
@@ -286,8 +293,8 @@ void seedEnglish() {
     set("btn_gas_pressure", L"Gas P");
     set("btn_gas_amount", L"Gas Amt");
     set("btn_gas_velocity", L"Gas Vel");
-    set("btn_glow", L"Glow");
-    set("btn_flat_outline", L"Flat outline");
+    set("btn_glow_liquids", L"Glowing Liquids");
+    set("btn_outlines", L"Outlines");
     set("btn_rigid_overlay", L"Rigid overlay");
     set("btn_vorticity", L"Vorticity");
     set("btn_adv_none", L"Adv None");
@@ -384,8 +391,13 @@ void seedEnglish() {
     set("tip_reset", L"Reload the default walls and an empty basin.");
     set("tip_slosh", L"Give the liquid a sideways shove to test sloshing.");
     set("tip_walled", L"Close the grid edges. Off: liquid, spray, air, and solids can leave into the void. On: the borders act as walls.");
-    set("tip_glow", L"Draw a soft highlight on water. Costs extra paint time; Low quality turns this off.");
-    set("tip_flat", L"Cheap water/wall drawing: flat fill and a 1-pixel outline. Skips glow, depth shading, and hole-close.");
+    set("tip_glow", L"Adds a soft glow around liquids.");
+    set("tip_outlines", L"Draw outlines around liquids and solids.");
+    set("tip_style_flat", L"One flat color per material.");
+    set("tip_style_noisy", L"Flat colors with subtle texture.");
+    set("tip_style_detailed", L"Adds depth and shape shading.");
+    set("tip_style_realistic", L"Shows richer depth, flow, and material detail.");
+    set("tip_style_alpha", L"Flat colors with opacity based on amount.");
     set("tip_overlay", L"Draw extra rigid-body debug marks on top of the current view.");
     set("tip_mat_wood", L"Set the next drawn body to wood: light, absorbent, weakens when wet.");
     set("tip_mat_stone", L"Set the next drawn body to stone: heavier than wood.");
@@ -394,7 +406,7 @@ void seedEnglish() {
     set("tip_vorticity", L"Add a little swirl back into the liquid. Off by default. Extra cost when on.");
     set("tip_advection", L"How velocity is carried with the flow. Semi-Lagrangian is the usual choice. BFECC/MacCormack cost more.");
     set("tip_residual", L"Merge leftover thin liquid into neighbors. Keeps conservation. Turn off only to inspect crumbs.");
-    set("tip_quality_low", L"Cheaper sim for slow machines: fewer pressure/substep/limiter passes, no air, flat drawing, 20 Hz.");
+    set("tip_quality_low", L"Cheaper sim for slow machines: fewer pressure/substep/limiter passes, no air, 20 Hz. Appearance stays as you set it.");
     set("tip_quality_med", L"Default fidelity. Same world laws as Low/High, with the usual solver budget.");
     set("tip_quality_high", L"More pressure iterations. Same gravity and conservation, slightly stiffer water, more CPU.");
     set("tip_quality_auto", L"Starts at Medium. If a tick stays overloaded, drops to Low knobs until the machine catches up.");

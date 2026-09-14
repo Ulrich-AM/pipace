@@ -11,6 +11,7 @@ add_executable(water_test WIN32
   ui/UiAssets.cpp
   gas/GasEngine.cpp
   thermal/ThermalEngine.cpp
+  render/WorldRenderer.cpp
 )
 target_include_directories(water_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(water_test PRIVATE cxx_std_17)

@@ -990,13 +990,25 @@ void drawSettingsPanel(HDC dc, ShellState &shell, View const &view, RECT const &
 
     section(left0, left1, yL, tr("sec_look"));
     x = left0;
-    button(left0, left1, x, yL, 56, tr("btn_glow"), MenuCmd::Glow, view.liquidGlow);
-    button(left0, left1, x, yL, 96, tr("btn_flat_outline"), MenuCmd::FlatOutline, view.flatOutline);
+    {
+        RECT sLab{left0, yL, left1, yL + 16};
+        drawLabel(dc, sLab, tr("lbl_style"), kDimText, DT_LEFT | DT_BOTTOM | DT_SINGLELINE);
+        yL += 18; x = left0;
+    }
+    button(left0, left1, x, yL, 48, tr("style_flat"), MenuCmd::StyleFlat, view.worldLook.style == WorldRenderStyle::FlatColor);
+    button(left0, left1, x, yL, 56, tr("style_noisy"), MenuCmd::StyleNoisy, view.worldLook.style == WorldRenderStyle::NoisyFlat);
+    button(left0, left1, x, yL, 60, tr("style_detailed"), MenuCmd::StyleDetailed, view.worldLook.style == WorldRenderStyle::Detailed);
+    button(left0, left1, x, yL, 48, tr("style_realistic"), MenuCmd::StyleRealistic, view.worldLook.style == WorldRenderStyle::Realistic);
+    button(left0, left1, x, yL, 52, tr("style_alpha"), MenuCmd::StyleAlpha, view.worldLook.style == WorldRenderStyle::AlphaFlat);
+    yL += rowH + 4; x = left0;
+    {
+        RECT eLab{left0, yL, left1, yL + 16};
+        drawLabel(dc, eLab, tr("lbl_effects"), kDimText, DT_LEFT | DT_BOTTOM | DT_SINGLELINE);
+        yL += 18; x = left0;
+    }
+    button(left0, left1, x, yL, 120, tr("btn_glow_liquids"), MenuCmd::Glow, view.worldLook.glowingLiquids);
+    button(left0, left1, x, yL, 80, tr("btn_outlines"), MenuCmd::Outlines, view.worldLook.outlines);
     button(left0, left1, x, yL, 96, tr("btn_rigid_overlay"), MenuCmd::Overlay, rigid.debugOverlay);
-    button(left0, left1, x, yL, 56, tr("wood_btn"), MenuCmd::MatWood, rigid.drawMaterial == MATERIAL_WOOD, RGB(158, 112, 62));
-    button(left0, left1, x, yL, 56, tr("stone_btn"), MenuCmd::MatStone, rigid.drawMaterial == MATERIAL_STONE, RGB(118, 122, 128));
-    button(left0, left1, x, yL, 56, tr("glass_btn"), MenuCmd::MatGlass, rigid.drawMaterial == MATERIAL_GLASS, RGB(168, 204, 214));
-    button(left0, left1, x, yL, 56, tr("metal_btn"), MenuCmd::MatMetal, rigid.drawMaterial == MATERIAL_METAL, RGB(148, 152, 158));
     yL += rowH + 8; x = left0;
 
     section(left0, left1, yL, tr("sec_solver"));
@@ -1226,7 +1238,12 @@ char const *tipKeyForCmd(MenuCmd cmd) {
         case MenuCmd::Slosh: return "tip_slosh";
         case MenuCmd::WalledBorders: return "tip_walled";
         case MenuCmd::Glow: return "tip_glow";
-        case MenuCmd::FlatOutline: return "tip_flat";
+        case MenuCmd::Outlines: return "tip_outlines";
+        case MenuCmd::StyleFlat: return "tip_style_flat";
+        case MenuCmd::StyleNoisy: return "tip_style_noisy";
+        case MenuCmd::StyleDetailed: return "tip_style_detailed";
+        case MenuCmd::StyleRealistic: return "tip_style_realistic";
+        case MenuCmd::StyleAlpha: return "tip_style_alpha";
         case MenuCmd::Overlay: return "tip_overlay";
         case MenuCmd::MatWood: return "tip_mat_wood";
         case MenuCmd::MatStone: return "tip_mat_stone";

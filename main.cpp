@@ -11,6 +11,7 @@
 #include "ui/UiShell.h"
 #include "ui/UiTheme.h"
 #include "ui/UiLanguage.h"
+#include "render/WorldRenderer.h"
 
 #include <algorithm>
 #include <array>
@@ -42,10 +43,9 @@ int lastPaintX = -1, lastPaintY = -1;
 int lineStartX = -1, lineStartY = -1;
 int lineEndX = -1, lineEndY = -1;
 int hoverX = -1, hoverY = -1;
-bool liquidGlow = false;
-bool flatOutline = false;
+WorldLook worldLook;
+WorldRenderer worldRenderer;
 bool settingsOpen = false;
-std::vector<uint8_t> prevVisualLiquid(static_cast<size_t>(GW * GH), 0);
 HWND mainWindow = nullptr;
 HDC backDc = nullptr;
 HBITMAP backBitmap = nullptr;
@@ -111,8 +111,7 @@ ui::View makeView() {
     v.brushRadius = brushRadius;
     v.paused = paused;
     v.settingsOpen = settingsOpen;
-    v.liquidGlow = liquidGlow;
-    v.flatOutline = flatOutline;
+    v.worldLook = worldLook;
     v.speedIndex = speedScaleIndex;
     v.speedValue = speedScales[speedScaleIndex];
     v.hoverX = hoverX;
@@ -125,38 +124,29 @@ ui::View makeView() {
 
 void worldTick();
 void invalidate();
-void applySimQuality(int level, bool touchLook);
+void applySimQuality(int level);
 void setQualityPreset(QualityPreset preset);
 void adaptAutoQuality(double worldMs);
 void paintEnergyDisc(int cx, int cy);
 
-void applySimQuality(int level, bool touchLook) {
+void applySimQuality(int level) {
     applyFluidQualityKnobs(engine.config, level);
     applyThermalQualityKnobs(thermal.config, level);
     engine.residualConsolidationEnabled = true;
-    if (level <= 0) {
-        gas.config.simMode = GasSimMode::Off;
-        if (touchLook) {
-            flatOutline = true;
-            liquidGlow = false;
-        }
-    } else {
-        gas.config.simMode = GasSimMode::Full;
-        if (touchLook && level == 1) flatOutline = false;
-    }
+    gas.config.simMode = (level <= 0) ? GasSimMode::Off : GasSimMode::Full;
 }
 
 void setQualityPreset(QualityPreset preset) {
     engine.config.quality = preset;
     if (preset == QualityPreset::Auto) {
         engine.config.autoQualityLevel = 1;
-        applySimQuality(1, true);
+        applySimQuality(1);
     } else if (preset == QualityPreset::Low) {
-        applySimQuality(0, true);
+        applySimQuality(0);
     } else if (preset == QualityPreset::High) {
-        applySimQuality(2, true);
+        applySimQuality(2);
     } else {
-        applySimQuality(1, true);
+        applySimQuality(1);
     }
 }
 
@@ -170,11 +160,11 @@ void adaptAutoQuality(double worldMs) {
     int level = engine.config.autoQualityLevel;
     if (slowStreak >= 8 && level > 0) {
         engine.config.autoQualityLevel = 0;
-        applySimQuality(0, false);
+        applySimQuality(0);
         slowStreak = 0;
     } else if (fastStreak >= 24 && level < 1) {
         engine.config.autoQualityLevel = 1;
-        applySimQuality(1, false);
+        applySimQuality(1);
         fastStreak = 0;
     }
 }
@@ -210,8 +200,13 @@ void handleMenuCommand(ui::MenuCmd cmd) {
         case MenuCmd::ViewGasVelocity: debugView = DebugView::GasVelocity; break;
         case MenuCmd::ThermalOn: thermal.config.enabled = true; break;
         case MenuCmd::ThermalOff: thermal.config.enabled = false; break;
-        case MenuCmd::Glow: liquidGlow = !liquidGlow; break;
-        case MenuCmd::FlatOutline: flatOutline = !flatOutline; break;
+        case MenuCmd::Glow: worldLook.glowingLiquids = !worldLook.glowingLiquids; break;
+        case MenuCmd::Outlines: worldLook.outlines = !worldLook.outlines; break;
+        case MenuCmd::StyleFlat: worldLook.style = WorldRenderStyle::FlatColor; break;
+        case MenuCmd::StyleNoisy: worldLook.style = WorldRenderStyle::NoisyFlat; break;
+        case MenuCmd::StyleDetailed: worldLook.style = WorldRenderStyle::Detailed; break;
+        case MenuCmd::StyleRealistic: worldLook.style = WorldRenderStyle::Realistic; break;
+        case MenuCmd::StyleAlpha: worldLook.style = WorldRenderStyle::AlphaFlat; break;
         case MenuCmd::Overlay: rigid.debugOverlay = !rigid.debugOverlay; break;
         case MenuCmd::MatWood: shell.applyPalette(ui::PaletteId::Wood, activeTool, rigid.drawMaterial); break;
         case MenuCmd::MatStone: shell.applyPalette(ui::PaletteId::Stone, activeTool, rigid.drawMaterial); break;
@@ -619,11 +614,19 @@ uint32_t gasAmountColor(float amount) {
 }
 
 void fillWorldPixels() {
-    float pressureScale = 0.0f, divergenceScale = 0.0f;
-    bool const flatPaint = flatOutline && debugView == DebugView::Normal;
-    bool const needFieldScale = debugView == DebugView::Pressure || debugView == DebugView::Divergence;
     constexpr int n4x[4] = {-1, 1, 0, 0};
     constexpr int n4y[4] = {0, 0, -1, 1};
+    bool const cosmeticWorld = debugView == DebugView::Normal || debugView == DebugView::Temperature;
+    if (cosmeticWorld) {
+        WorldLook look = worldLook;
+        if (debugView == DebugView::Temperature) {
+            look.glowingLiquids = false;
+            look.outlines = false;
+        }
+        worldRenderer.paintNormal(engine, rigid, look);
+    } else {
+    float pressureScale = 0.0f, divergenceScale = 0.0f;
+    bool const needFieldScale = debugView == DebugView::Pressure || debugView == DebugView::Divergence;
     if (needFieldScale) {
         for (int i = 0; i < GW * GH; ++i) {
             pressureScale = std::max(pressureScale, std::abs(engine.pressure[i]));
@@ -631,72 +634,11 @@ void fillWorldPixels() {
         }
         pressureScale = std::max(pressureScale, 1e-4f); divergenceScale = std::max(divergenceScale, 1e-4f);
     }
-    static std::vector<uint8_t> visualLiquid(static_cast<size_t>(GW * GH), 0);
-    static std::vector<int> liquidDepth(static_cast<size_t>(GW * GH), -1);
-    static std::vector<int> depthQueue;
-    if (debugView == DebugView::Normal) {
-        std::fill(visualLiquid.begin(), visualLiquid.end(), 0);
-        for (int y = 0; y < GH; ++y) for (int x = 0; x < GW; ++x) {
-            int i = FluidEngine::ci(x, y);
-            if (engine.solid[i] || engine.dynamicSolid[i]) continue;
-            float amount = engine.fill[i];
-            if (amount >= MIN_RENDER_FILL) visualLiquid[static_cast<size_t>(i)] = 1;
-            else if (!flatPaint && amount >= MIN_ACTIVE_FILL && prevVisualLiquid[static_cast<size_t>(i)]) visualLiquid[static_cast<size_t>(i)] = 1;
-        }
-        prevVisualLiquid = visualLiquid;
-    }
-    auto visibleLiquid = [&](int x, int y) {
-        if (!FluidEngine::inside(x, y)) return false;
-        int i = FluidEngine::ci(x, y);
-        if (debugView == DebugView::Normal) return visualLiquid[static_cast<size_t>(i)] != 0;
-        return !engine.solid[i] && !engine.dynamicSolid[i] && engine.fill[i] >= MIN_RENDER_FILL;
-    };
-    std::fill(liquidDepth.begin(), liquidDepth.end(), -1);
-    if (debugView == DebugView::Normal && !flatPaint) {
-        depthQueue.clear();
-        if (depthQueue.capacity() < static_cast<size_t>(GW * GH) / 4)
-            depthQueue.reserve(static_cast<size_t>(GW * GH) / 4);
-        constexpr int ox[4] = {-1, 1, 0, 0};
-        constexpr int oy[4] = {0, 0, -1, 1};
-        for (int y = 0; y < GH; ++y) for (int x = 0; x < GW; ++x) {
-            if (!visibleLiquid(x, y)) continue;
-            bool surface = false;
-            for (int k = 0; k < 4; ++k) {
-                if (!visibleLiquid(x + ox[k], y + oy[k])) { surface = true; break; }
-            }
-            if (!surface) continue;
-            int i = FluidEngine::ci(x, y);
-            liquidDepth[static_cast<size_t>(i)] = 0;
-            depthQueue.push_back(i);
-        }
-        for (size_t head = 0; head < depthQueue.size(); ++head) {
-            int i = depthQueue[head];
-            int x = i % GW, y = i / GW;
-            int d = liquidDepth[static_cast<size_t>(i)];
-            for (int k = 0; k < 4; ++k) {
-                int nx = x + ox[k], ny = y + oy[k];
-                if (!visibleLiquid(nx, ny)) continue;
-                int ni = FluidEngine::ci(nx, ny);
-                if (liquidDepth[static_cast<size_t>(ni)] >= 0) continue;
-                liquidDepth[static_cast<size_t>(ni)] = d + 1;
-                depthQueue.push_back(ni);
-            }
-        }
-    }
     for (int y = 0; y < GH; ++y) for (int x = 0; x < GW; ++x) {
         int index = FluidEngine::ci(x, y); uint32_t color = rgb(10, 17, 28);
         if (engine.solid[index]) {
-            if (flatPaint) {
-                bool edge = false;
-                for (int k = 0; k < 4; ++k) {
-                    int nx = x + n4x[k], ny = y + n4y[k];
-                    if (!FluidEngine::inside(nx, ny) || !engine.solid[FluidEngine::ci(nx, ny)]) { edge = true; break; }
-                }
-                color = edge ? rgb(58, 62, 70) : rgb(96, 100, 108);
-            } else {
-                int shade = 88 + static_cast<int>(FluidEngine::hashCell(x, y, 1) & 15u);
-                color = rgb(shade, shade + 5, shade + 12);
-            }
+            int shade = 88 + static_cast<int>(FluidEngine::hashCell(x, y, 1) & 15u);
+            color = rgb(shade, shade + 5, shade + 12);
         }
         else if (debugView == DebugView::GasPressure && !engine.dynamicSolid[index]) {
             color = gasPressureColor(gas.pressure[static_cast<size_t>(index)]);
@@ -712,80 +654,15 @@ void fillWorldPixels() {
             float speed = std::sqrt(engine.cellU(x, y) * engine.cellU(x, y) + engine.cellV(x, y) * engine.cellV(x, y)); float q = std::clamp(speed / 30.0f, 0.0f, 1.0f); color = rgb(int(255 * q), int(190 * (1.0f - std::abs(q - 0.5f) * 2.0f)), int(255 * (1.0f - q)));
         } else if (debugView == DebugView::Divergence && engine.fill[index] >= MIN_RENDER_FILL) {
             float q = std::clamp(engine.divergenceField[index] / divergenceScale, -1.0f, 1.0f); color = q >= 0 ? rgb(245, int(80 * (1.0f - q)), 50) : rgb(40, int(80 * (1.0f + q)), 245);
-        } else if (debugView == DebugView::Normal ? visualLiquid[static_cast<size_t>(index)] != 0 : engine.fill[index] >= MIN_RENDER_FILL) {
-            if (flatPaint) {
-                bool edge = false;
-                for (int k = 0; k < 4; ++k) {
-                    if (!visibleLiquid(x + n4x[k], y + n4y[k])) { edge = true; break; }
-                }
-                int lr, lg, lb;
-                if (edge) liquidAppearance(engine, index, kWaterRimR, kWaterRimG, kWaterRimB, lr, lg, lb);
-                else liquidAppearance(engine, index, kWaterR, kWaterG, kWaterB, lr, lg, lb);
-                color = rgb(lr, lg, lb);
-            } else {
-                int depth = liquidDepth[static_cast<size_t>(index)];
-                int lr, lg, lb;
-                if (debugView == DebugView::Normal && depth >= 0) {
-                    if (depth == 0) liquidAppearance(engine, index, kWaterRimR, kWaterRimG, kWaterRimB, lr, lg, lb);
-                    else {
-                        float u = 1.0f - std::min(1.0f, static_cast<float>(depth) / 8.0f);
-                        uint32_t base = lerpRgb(kWaterDarkR, kWaterDarkG, kWaterDarkB, kWaterLightR, kWaterLightG, kWaterLightB, u);
-                        int wr = (base >> 16) & 255, wg = (base >> 8) & 255, wb = base & 255;
-                        liquidAppearance(engine, index, wr, wg, wb, lr, lg, lb);
-                    }
-                } else {
-                    liquidAppearance(engine, index, kWaterR, kWaterG, kWaterB, lr, lg, lb);
-                }
-                color = rgb(lr, lg, lb);
-            }
+        } else if (engine.fill[index] >= MIN_RENDER_FILL) {
+            int lr, lg, lb;
+            liquidAppearance(engine, index, kWaterR, kWaterG, kWaterB, lr, lg, lb);
+            color = rgb(lr, lg, lb);
         }
         if (debugView == DebugView::Fill && !engine.solid[index]) color = fillDebugColor(engine.fill[index]);
         if (debugView == DebugView::Chunks && engine.chunkActivity[(y / CHUNK) * CHUNK_W + x / CHUNK] && !engine.solid[index]) color = engine.fill[index] >= MIN_RENDER_FILL ? rgb(35, 180, 225) : rgb(25, 55, 47);
         if (debugView == DebugView::Chunks && (x % CHUNK == 0 || y % CHUNK == 0)) color = rgb(80, 110, 90);
         engine.pixels[index] = color;
-    }
-
-    if (debugView == DebugView::Normal && liquidGlow && !flatPaint) {
-        constexpr float glowRadius = 5.0f;
-        std::vector<float> glowDist(static_cast<size_t>(GW * GH), 1.0e9f);
-        std::vector<int> glowQueue;
-        glowQueue.reserve(static_cast<size_t>(GW * GH) / 4);
-        auto seedGlow = [&](int x, int y) {
-            if (!FluidEngine::inside(x, y) || engine.solid[FluidEngine::ci(x, y)] || engine.dynamicSolid[FluidEngine::ci(x, y)]) return;
-            int i = FluidEngine::ci(x, y);
-            if (glowDist[static_cast<size_t>(i)] <= 0.0f) return;
-            glowDist[static_cast<size_t>(i)] = 0.0f;
-            glowQueue.push_back(i);
-        };
-        for (int y = 0; y < GH; ++y) for (int x = 0; x < GW; ++x)
-            if (visibleLiquid(x, y)) seedGlow(x, y);
-        for (SplashParticle const &p : engine.splashes) seedGlow(static_cast<int>(p.x), static_cast<int>(p.y));
-        for (size_t head = 0; head < glowQueue.size(); ++head) {
-            int i = glowQueue[head];
-            int x = i % GW, y = i / GW;
-            float d = glowDist[static_cast<size_t>(i)];
-            for (int oy = -1; oy <= 1; ++oy) for (int ox = -1; ox <= 1; ++ox) {
-                if (ox == 0 && oy == 0) continue;
-                int nx = x + ox, ny = y + oy;
-                if (!FluidEngine::inside(nx, ny)) continue;
-                int ni = FluidEngine::ci(nx, ny);
-                if (engine.solid[ni] || engine.dynamicSolid[ni]) continue;
-                float nd = d + ((ox != 0 && oy != 0) ? 1.41421356f : 1.0f);
-                if (nd > glowRadius || nd >= glowDist[static_cast<size_t>(ni)]) continue;
-                glowDist[static_cast<size_t>(ni)] = nd;
-                glowQueue.push_back(ni);
-            }
-        }
-        for (int y = 0; y < GH; ++y) for (int x = 0; x < GW; ++x) {
-            int index = FluidEngine::ci(x, y);
-            float d = glowDist[static_cast<size_t>(index)];
-            if (d > glowRadius) continue;
-            if (d <= 0.0f) continue;
-            if (engine.solid[index] || engine.dynamicSolid[index]) continue;
-            float u = 1.0f - d / glowRadius;
-            engine.pixels[index] = mixToward(engine.pixels[index], kWaterLightR, kWaterLightG, kWaterLightB,
-                std::min(1.0f, u * u * (1.20f + 0.45f * u)));
-        }
     }
     for (SplashParticle const &p : engine.splashes) {
         int x = static_cast<int>(p.x), y = static_cast<int>(p.y);
@@ -800,7 +677,7 @@ void fillWorldPixels() {
         float ib = std::clamp(p.dyeB / vol, 0.0f, 1.0f);
         float dyeI = std::clamp(std::max(ir, std::max(ig, ib)), 0.0f, 1.0f);
         if (dyeI > 0.02f) tintChannels(lr, lg, lb, int(ir * 255.0f), int(ig * 255.0f), int(ib * 255.0f), dyeI);
-        engine.pixels[FluidEngine::ci(x, y)] = debugView == DebugView::Normal ? rgb(lr, lg, lb) : rgb(115, 220, 255);
+        engine.pixels[FluidEngine::ci(x, y)] = rgb(115, 220, 255);
     }
     auto occupantAt = [&](int x, int y) {
         if (!FluidEngine::inside(x, y)) return -1;
@@ -810,7 +687,7 @@ void fillWorldPixels() {
         return body >= 0 && occupantAt(x, y) == body;
     };
     std::vector<int> rigidDepth(static_cast<size_t>(GW * GH), -1);
-    if (debugView != DebugView::Rigid && !flatPaint) {
+    if (debugView != DebugView::Rigid) {
         std::vector<int> depthQueue;
         depthQueue.reserve(static_cast<size_t>(GW * GH) / 8);
         constexpr int ox[4] = {-1, 1, 0, 0};
@@ -884,32 +761,21 @@ void fillWorldPixels() {
             }
             // Wet, degraded, and structurally cracked pixels darken from real state.
             float stain = (1.0f - 0.46f * wetness) * (1.0f - 0.38f * dmg) * (1.0f - 0.62f * crack);
-            if (flatPaint) {
-                int body = occupantAt(x, y);
-                bool edge = body < 0;
-                if (body >= 0) {
-                    for (int k = 0; k < 4; ++k) {
-                        if (!sameBody(x + n4x[k], y + n4y[k], body)) { edge = true; break; }
-                    }
-                }
-                float s = (edge ? 0.58f : 1.0f) * stain;
-                engine.pixels[index] = scaleRgb(mat.colorR, mat.colorG, mat.colorB, s);
-            } else {
-                int depth = std::max(0, rigidDepth[static_cast<size_t>(index)]);
-                float s = 1.22f;
-                if (depth > 0) {
-                    float u = 1.0f - std::min(1.0f, static_cast<float>(depth) / 7.0f);
-                    s = 0.62f + 0.38f * u;
-                }
-                int cr = std::max(0, static_cast<int>(mat.colorR * (1.0f - 0.16f * wetness)));
-                int cg = std::max(0, static_cast<int>(mat.colorG * (1.0f - 0.22f * wetness)));
-                int cb = std::max(0, static_cast<int>(mat.colorB * (1.0f - 0.10f * wetness)));
-                engine.pixels[index] = scaleRgb(cr, cg, cb, s * stain);
+            int depth = std::max(0, rigidDepth[static_cast<size_t>(index)]);
+            float s = 1.22f;
+            if (depth > 0) {
+                float u = 1.0f - std::min(1.0f, static_cast<float>(depth) / 7.0f);
+                s = 0.62f + 0.38f * u;
             }
+            int cr = std::max(0, static_cast<int>(mat.colorR * (1.0f - 0.16f * wetness)));
+            int cg = std::max(0, static_cast<int>(mat.colorG * (1.0f - 0.22f * wetness)));
+            int cb = std::max(0, static_cast<int>(mat.colorB * (1.0f - 0.10f * wetness)));
+            engine.pixels[index] = scaleRgb(cr, cg, cb, s * stain);
         } else if (pendingMat != MATERIAL_EMPTY) {
             MaterialDefinition const &mat = materialDef(pendingMat);
             engine.pixels[index] = rgb(std::min(255, mat.colorR + 40), std::min(255, mat.colorG + 40), std::min(255, mat.colorB + 20));
         }
+    }
     }
     if (rigid.debugOverlay || debugView == DebugView::Rigid) {
         auto plot = [&](int x, int y, uint32_t color) {
@@ -1400,6 +1266,10 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR commandLine, int show)
     if (commandLine && wcsstr(commandLine, L"--solid-diag")) { rigid.runSolidDiagnostics(engine); return 0; }
     if (commandLine && wcsstr(commandLine, L"--thermal-diag")) { thermal.runDiagnostics(engine, rigid, gas); return 0; }
     if (commandLine && wcsstr(commandLine, L"--gas-diag")) { gas.runDiagnostics(engine, rigid); return 0; }
+    if (commandLine && wcsstr(commandLine, L"--look-bench")) {
+        runWorldLookBenchmark(engine, rigid, worldRenderer);
+        return 0;
+    }
     if (commandLine && wcsstr(commandLine, L"--benchmark")) { engine.runHeadlessBenchmark(); return 0; }
     if (commandLine && wcsstr(commandLine, L"--advection-benchmark")) { engine.runAdvectionBenchmark(); return 0; }
     if (commandLine && wcsstr(commandLine, L"--liquid-diag")) { engine.runLiquidBugDiagnostics(); return 0; }
