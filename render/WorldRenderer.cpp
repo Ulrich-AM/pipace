@@ -79,9 +79,9 @@ void applyDye(MaterialVisual &vis, float ir, float ig, float ib) {
 }
 
 MaterialVisual sampleLiquidCell(FluidEngine const &fluid, int index) {
-    MaterialVisual vis = kVisualWater;
+    MaterialVisual vis = visualForSubstance(SUBSTANCE_WATER);
     float h = fluid.honeyFraction(index);
-    if (h > 0.001f) lerpVisual(vis, kVisualHoney, h);
+    if (h > 0.001f) lerpVisual(vis, visualForSubstance(SUBSTANCE_HONEY), h);
     float f = std::max(fluid.fill[static_cast<size_t>(index)], 1.0e-8f);
     applyDye(vis,
         std::clamp(fluid.dyeR[static_cast<size_t>(index)] / f, 0.0f, 1.0f),
@@ -91,10 +91,10 @@ MaterialVisual sampleLiquidCell(FluidEngine const &fluid, int index) {
 }
 
 MaterialVisual sampleSplash(SplashParticle const &p) {
-    MaterialVisual vis = kVisualWater;
+    MaterialVisual vis = visualForSubstance(SUBSTANCE_WATER);
     float vol = std::max(p.volume, 1.0e-8f);
     float h = std::clamp(p.honey / vol, 0.0f, 1.0f);
-    if (h > 0.001f) lerpVisual(vis, kVisualHoney, h);
+    if (h > 0.001f) lerpVisual(vis, visualForSubstance(SUBSTANCE_HONEY), h);
     applyDye(vis,
         std::clamp(p.dyeR / vol, 0.0f, 1.0f),
         std::clamp(p.dyeG / vol, 0.0f, 1.0f),
@@ -444,7 +444,7 @@ void WorldRenderer::paintNormal(FluidEngine &fluid, RigidBodyEngine const &rigid
         MaterialId pendingMat = rigid.pending[static_cast<size_t>(index)];
         MaterialId occMat = rigid.worldCellMaterial(x, y);
         if (occMat != MATERIAL_EMPTY) {
-            MaterialVisual vis = visualForSolid(occMat);
+            MaterialVisual vis = visualForSubstance(substanceForMaterialId(occMat));
             float wetness = 0.0f;
             MaterialDefinition const &mat = materialDef(occMat);
             if (mat.moistureCapacity > 1.0e-8f)
@@ -495,7 +495,7 @@ void WorldRenderer::paintNormal(FluidEngine &fluid, RigidBodyEngine const &rigid
             float stain = wetDarkenMul(style, wetness) * (1.0f - 0.38f * dmg) * (1.0f - 0.62f * crack);
             fluid.pixels[static_cast<size_t>(index)] = scaleRgb(cr, cg, cb, stain);
         } else if (pendingMat != MATERIAL_EMPTY) {
-            MaterialVisual vis = visualForSolid(pendingMat);
+            MaterialVisual vis = visualForSubstance(substanceForMaterialId(pendingMat));
             fluid.pixels[static_cast<size_t>(index)] = packRgb(std::min(255, vis.r + 40),
                 std::min(255, vis.g + 40), std::min(255, vis.b + 20));
         }
@@ -525,7 +525,7 @@ void WorldRenderer::paintNormal(FluidEngine &fluid, RigidBodyEngine const &rigid
             } else {
                 int body = occupantAt(x, y);
                 if (body < 0) continue;
-                dark = visualForSolid(rigid.worldCellMaterial(x, y)).outlineDarken;
+                dark = visualForSubstance(substanceForMaterialId(rigid.worldCellMaterial(x, y))).outlineDarken;
                 for (int k = 0; k < 4; ++k) {
                     if (!sameBody(x + kN4x[k], y + kN4y[k], body)) { edge = true; break; }
                 }

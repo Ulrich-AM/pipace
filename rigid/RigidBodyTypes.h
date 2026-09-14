@@ -10,6 +10,8 @@ constexpr MaterialId MATERIAL_STONE = 2;
 constexpr MaterialId MATERIAL_GLASS = 3;
 constexpr MaterialId MATERIAL_METAL = 4;
 constexpr MaterialId MATERIAL_COUNT = 5;
+// Compatibility (Prompt 1): rigid source masks still store MaterialId.
+// Map to the shared engine identity with substanceForMaterial().
 
 enum class StructuralDamageType : uint8_t {
     Impact = 0,
@@ -63,6 +65,7 @@ struct MaterialDefinition {
 };
 
 inline MaterialDefinition const &materialDef(MaterialId id) {
+    // Compatibility (Prompt 1): rigid mechanical/moisture table. Identity is SubstanceId.
     static MaterialDefinition const defs[MATERIAL_COUNT] = {
         {"empty", 0.00f, 0, 0, 0,     0.00f, 0.00f, 0.00f, 0.00f, 0.00f, 0.00f, 0.00f, 0.00f, 0.00f, 0.00f, 0.00f, 0.00f, 0.00f, 0.00f, 1.00f, 1.00f, 1.00f, 0.00f},
         {"wood",  0.45f, 158, 112, 62, 0.48f, 0.08f, 0.42f, 0.52f, 0.34f, 0.55f, 0.70f, 0.48f, 0.50f, 0.55f, 0.68f, 0.62f, 0.26f, 0.0010f, 0.62f, 1.30f, 0.70f, 0.00f},

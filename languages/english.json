@@ -185,6 +185,8 @@
   "ins_mat_honey": "Honey",
   "ins_mat_air": "Air",
   "ins_mat_none": "(none)",
+  "ins_substance": "Substance: {0}",
+  "ins_substance_id": "Substance ID: {0}",
   "ins_pressure": "Pressure: {0}",
   "ins_surface": "Surface: {0}",
   "ins_volume": "Volume {0} / {1}",

@@ -13,7 +13,7 @@ constexpr float GAS_REFERENCE_PRESSURE_PA = 101325.0f;
 
 // Future mixtures occupy the same cell and are transported together.
 // Do not add per-species engines; extend amount into species amounts later.
-enum class GasSpecies : uint8_t { Air = 0 };
+enum class GasSpecies : uint8_t { Air = 0 }; // engine identity: SUBSTANCE_AIR
 constexpr int GAS_SPECIES_COUNT = 1;
 
 enum class GasBoundary : uint8_t {

@@ -231,6 +231,8 @@ void seedEnglish() {
     set("ins_mat_honey", L"Honey");
     set("ins_mat_air", L"Air");
     set("ins_mat_none", L"(none)");
+    set("ins_substance", L"Substance: {0}");
+    set("ins_substance_id", L"Substance ID: {0}");
     set("ins_pressure", L"Pressure: {0}");
     set("ins_surface", L"Surface: {0}");
     set("ins_volume", L"Volume {0} / {1}");

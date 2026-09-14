@@ -10,6 +10,8 @@ inline LiquidProperties kHoneyLiquid() {
 }
 
 struct FluidConfig {
+    // Compatibility (Prompt 1): these are the current liquid-phase tables for
+    // SUBSTANCE_WATER / SUBSTANCE_HONEY. Identity is SubstanceId.
     LiquidProperties water{1.0f, 0.006f, 0.055f};
     LiquidProperties honey = kHoneyLiquid();
     float cellsPerMeter = 4.0f;

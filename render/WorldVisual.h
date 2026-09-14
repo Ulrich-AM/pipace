@@ -1,6 +1,7 @@
 #pragma once
 
 #include "rigid/RigidBodyTypes.h"
+#include "substance/SubstanceTypes.h"
 
 #include <cstdint>
 
@@ -21,6 +22,7 @@ struct WorldLook {
 };
 
 // Cosmetic only. Physics lives on MaterialDefinition / LiquidProperties.
+// Physics must not include this header for substance identity.
 struct MaterialVisual {
     int r = 128;
     int g = 128;
@@ -39,6 +41,8 @@ inline MaterialVisual const kVisualWall{96, 100, 108, 0.18f, 0.28f, 0.40f, false
 inline MaterialVisual const kVisualWater{22, 126, 214, 0.10f, 0.55f, 0.72f, true, 0.85f, 0.30f, 1.0f};
 inline MaterialVisual const kVisualHoney{176, 110, 22, 0.09f, 0.50f, 0.65f, true, 0.80f, 0.28f, 1.0f};
 
+// Compatibility (Prompt 1): rigid MaterialId visual. Prefer visualForSubstance
+// when the caller already has a SubstanceId.
 inline MaterialVisual visualForSolid(MaterialId id) {
     MaterialDefinition const &mat = materialDef(id);
     MaterialVisual v;
@@ -74,4 +78,17 @@ inline MaterialVisual visualForSolid(MaterialId id) {
         v.outlineDarken = 0.26f;
     }
     return v;
+}
+
+inline MaterialVisual visualForSubstance(SubstanceId id) {
+    switch (id) {
+        case SUBSTANCE_WATER: return kVisualWater;
+        case SUBSTANCE_HONEY: return kVisualHoney;
+        case SUBSTANCE_AIR: return kVisualVoid;
+        case SUBSTANCE_WOOD: return visualForSolid(MATERIAL_WOOD);
+        case SUBSTANCE_STONE: return visualForSolid(MATERIAL_STONE);
+        case SUBSTANCE_GLASS: return visualForSolid(MATERIAL_GLASS);
+        case SUBSTANCE_METAL: return visualForSolid(MATERIAL_METAL);
+        default: return visualForSolid(MATERIAL_EMPTY);
+    }
 }

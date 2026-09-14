@@ -173,6 +173,7 @@ struct FluidEngine {
     void addLiquidFill(int index, float dFill, float dHeat);
     float takeLiquidVolume(int index, float amount);
     float honeyFraction(int index) const;
+    SubstanceId dominantLiquidSubstance(int index) const;
     float mixDensity(int index) const;
     float mixSpecificHeat(int index) const;
     void clearEmptyLiquidCell(int index);

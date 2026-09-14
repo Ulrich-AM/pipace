@@ -1,5 +1,6 @@
 #include "ui/UiShell.h"
 #include "thermal/ThermalEngine.h"
+#include "substance/SubstanceRegistry.h"
 
 #include "ui/UiAssets.h"
 #include "ui/UiLanguage.h"
@@ -631,6 +632,11 @@ void drawShell(HDC dc, ShellState &shell, View const &view) {
         int hx = view.hoverX, hy = view.hoverY;
         int hi = FluidEngine::ci(hx, hy);
         ins(trf("info_cell", std::to_wstring(hx), std::to_wstring(hy)));
+        auto insSubstance = [&](SubstanceId id) {
+            SubstanceDefinition const &def = substanceDef(id);
+            ins(trf("ins_substance", tr(def.displayNameKey)));
+            ins(trf("ins_substance_id", std::to_wstring(def.id)));
+        };
         if (rg && view.gas) {
             ThermalCellSample s = ThermalEngine::sampleCell(*e, *rg, *view.gas, hx, hy);
             if (view.debugView == DebugView::Temperature) {
@@ -641,16 +647,11 @@ void drawShell(HDC dc, ShellState &shell, View const &view) {
                 ins(trf("ins_dT", dTbuf));
                 wchar_t const *matName = tr("ins_mat_none");
                 if (s.kind == ThermalSampleKind::Liquid)
-                    matName = (e->honeyFraction(hi) > 0.5f) ? tr("ins_mat_honey") : tr("ins_mat_water");
-                else if (s.kind == ThermalSampleKind::Gas) matName = tr("ins_mat_air");
-                else if (s.kind == ThermalSampleKind::Wall) matName = tr("stone");
-                else if (s.kind == ThermalSampleKind::Rigid) {
-                    if (s.materialId == MATERIAL_STONE) matName = tr("stone");
-                    else if (s.materialId == MATERIAL_GLASS) matName = tr("glass");
-                    else if (s.materialId == MATERIAL_METAL) matName = tr("metal");
-                    else if (s.materialId == MATERIAL_WOOD) matName = tr("wood");
-                    else matName = tr("ins_mat_none");
-                }
+                    matName = tr(substanceDef(e->dominantLiquidSubstance(hi)).displayNameKey);
+                else if (s.kind == ThermalSampleKind::Gas) matName = tr(substanceDef(SUBSTANCE_AIR).displayNameKey);
+                else if (s.kind == ThermalSampleKind::Wall) matName = tr(substanceDef(SUBSTANCE_STONE).displayNameKey);
+                else if (s.kind == ThermalSampleKind::Rigid)
+                    matName = tr(substanceDef(substanceForMaterial(s.materialId)).displayNameKey);
                 ins(trf("ins_material", matName));
                 if (s.capacityJK > MIN_THERMAL_CAPACITY)
                     ins(trf("ins_thermal_energy", shortFloat(s.energyJ, 0)));
@@ -660,17 +661,18 @@ void drawShell(HDC dc, ShellState &shell, View const &view) {
                 ins(trf("ins_temp", shortFloat(s.temperatureK, 1)));
             }
         }
-        if (e->solid[static_cast<size_t>(hi)]) ins(tr("ins_kind_wall"));
+        if (e->solid[static_cast<size_t>(hi)]) {
+            ins(tr("ins_kind_wall"));
+            insSubstance(SUBSTANCE_STONE);
+        }
         int body = rg ? rg->occupant[static_cast<size_t>(hi)] : -1;
         if (body >= 0 && rg && body < static_cast<int>(rg->bodies.size())) {
             RigidBody const &b = rg->bodies[static_cast<size_t>(body)];
             MaterialId mat = rg->worldCellMaterial(hx, hy);
-            wchar_t const *matName = tr("wood");
-            if (mat == MATERIAL_STONE) matName = tr("stone");
-            else if (mat == MATERIAL_GLASS) matName = tr("glass");
-            else if (mat == MATERIAL_METAL) matName = tr("metal");
+            wchar_t const *matName = tr(substanceDef(substanceForMaterial(mat)).displayNameKey);
             ins(tr("ins_kind_rigid"));
             ins(trf("ins_material", matName));
+            insSubstance(substanceForMaterial(mat));
             ins(trf("ins_id", std::to_wstring(b.id)));
             ins(trf("ins_component", std::to_wstring(b.id)));
             ins(trf("ins_mass", shortFloat(b.mass, 2)));
@@ -722,6 +724,7 @@ void drawShell(HDC dc, ShellState &shell, View const &view) {
                 int waterPct = 100 - honeyPct;
                 ins(trf("ins_comp_water", std::to_wstring(waterPct)));
                 ins(trf("ins_comp_honey", std::to_wstring(honeyPct)));
+                insSubstance(e->dominantLiquidSubstance(hi));
             }
         }
         ins(trf("ins_volume", shortFloat(e->currentVolume, 1), shortFloat(e->expectedVolume, 1)));
@@ -738,6 +741,7 @@ void drawShell(HDC dc, ShellState &shell, View const &view) {
         if (g && !e->solid[static_cast<size_t>(hi)] && body < 0) {
             int gi = hi;
             ins(tr("ins_gas_material"));
+            insSubstance(SUBSTANCE_AIR);
             ins(trf("ins_gas_amount", shortFloat(g->amount[static_cast<size_t>(gi)], 3)));
             ins(trf("ins_gas_vol", shortFloat(g->volume[static_cast<size_t>(gi)], 3)));
             ins(trf("ins_gas_pa", shortFloat(g->pressurePa(gi), 0)));

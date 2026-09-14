@@ -12,6 +12,7 @@ add_executable(pipace WIN32
   gas/GasEngine.cpp
   thermal/ThermalEngine.cpp
   render/WorldRenderer.cpp
+  substance/SubstanceRegistry.cpp
 )
 target_include_directories(pipace PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(pipace PRIVATE cxx_std_17)

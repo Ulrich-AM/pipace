@@ -36,6 +36,8 @@ PIPACE/
   rigid/
     RigidBodyTypes.h       # MaterialId, pixel-mask RigidBody, merged runs, contacts
     RigidBodyEngine.h/.cpp # Drawable pixel-native rigid bodies + world/fluid coupling
+  substance/
+    SubstanceTypes.h / SubstanceRegistry.h/.cpp  # SubstanceId identity + built-in registry
   CMakeLists.txt / build.bat / run.bat
   README.md
   AGENTS.md
@@ -72,7 +74,7 @@ This project is mid **behavior-preserving modularization** (roadmap Phase 6).
 2. Extract one subsystem at a time; compile and run benchmarks after each step.
 3. `FluidEngine` owns arrays and scratch buffers — avoid reintroducing file-scope simulation globals.
 4. Next peel order: pressure → volume transport → advection → surface/splash → chunks → render → UI → tests (into separate `.cpp` files under `fluid/` / `render/` / `ui/` / `tests/`).
-5. Target layout (not all present yet): `fluid/`, `world/`, `rigid/`, `gas/`, `chemistry/`, `render/`, `ui/`, `tests/`.
+5. Target layout (not all present yet): `fluid/`, `world/`, `rigid/`, `gas/`, `substance/`, `chemistry/`, `render/`, `ui/`, `tests/`.
 
 ## Known issues (do not “fix” by redesigning the solver)
 

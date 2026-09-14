@@ -1,5 +1,7 @@
 #pragma once
 
+#include "substance/SubstanceTypes.h"
+
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -86,6 +88,7 @@ inline ThermalProperties const &kMetalThermal() {
     return p;
 }
 inline ThermalProperties const &kWallThermal() {
+    // Compatibility: static world walls use the stone thermal table (SUBSTANCE_STONE).
     return kStoneThermal();
 }
 inline ThermalProperties const &kEmptyThermal() {
@@ -93,15 +96,23 @@ inline ThermalProperties const &kEmptyThermal() {
     return p;
 }
 
-// MaterialId values match rigid/RigidBodyTypes.h (0 empty, 1 wood, 2 stone, 3 glass, 4 metal).
-inline ThermalProperties const &thermalForMaterial(uint16_t materialId) {
-    switch (materialId) {
-        case 1: return kWoodThermal();
-        case 2: return kStoneThermal();
-        case 3: return kGlassThermal();
-        case 4: return kMetalThermal();
+inline ThermalProperties const &thermalForSubstance(SubstanceId id) {
+    switch (id) {
+        case SUBSTANCE_WATER: return kWaterThermal();
+        case SUBSTANCE_HONEY: return kHoneyThermal();
+        case SUBSTANCE_AIR: return kAirThermal();
+        case SUBSTANCE_WOOD: return kWoodThermal();
+        case SUBSTANCE_STONE: return kStoneThermal();
+        case SUBSTANCE_GLASS: return kGlassThermal();
+        case SUBSTANCE_METAL: return kMetalThermal();
         default: return kEmptyThermal();
     }
+}
+
+// Compatibility (Prompt 1): MaterialId -> SubstanceId -> thermal table.
+// Prefer thermalForSubstance at new call sites. Constants are unchanged.
+inline ThermalProperties const &thermalForMaterial(uint16_t materialId) {
+    return thermalForSubstance(substanceForMaterialId(materialId));
 }
 
 inline float cellLengthM(float cellsPerMeter) {

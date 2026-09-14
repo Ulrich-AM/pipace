@@ -161,6 +161,10 @@ float FluidEngine::honeyFraction(int index) const {
     return std::clamp(honey[static_cast<size_t>(index)] / f, 0.0f, 1.0f);
 }
 
+SubstanceId FluidEngine::dominantLiquidSubstance(int index) const {
+    return substanceForHoneyFraction(honeyFraction(index));
+}
+
 float FluidEngine::mixDensity(int index) const {
     float h = honeyFraction(index);
     return (1.0f - h) * config.water.density + h * config.honey.density;
