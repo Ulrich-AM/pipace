@@ -1,0 +1,654 @@
+PIPACE - SACE CONCEPT NOTES
+============================
+Working conceptual reference. This is not a final implementation specification.
+
+SACE
+----
+SACE = Somewhat Accurate Calculator for Elements.
+
+SACE is not primarily a separate sandbox, menu, or minigame. It is a background
+chemistry/material solver used by PIPACE while the simulation is running. When
+substances meet under relevant conditions, PIPACE asks SACE what should happen.
+Once SACE has resolved an interaction, the result should be cached and reused
+instead of performing the expensive calculation every time ordinary pixels of
+the same substances meet.
+
+A dedicated mixer station, laboratory instrument, console, or debug screen may
+allow the player to watch SACE work. Those are interfaces to SACE, not SACE
+itself.
+
+
+CORE PHILOSOPHY
+===============
+SACE should be:
+- Exact/reference-based where chemistry is already known.
+- Rule/template-based where a known family of chemistry applies.
+- Generative/estimated when PIPACE encounters something not already defined.
+- Honest about uncertainty when a prediction is weak.
+- Cached so expensive reasoning is not repeated unnecessarily.
+- Capable of creating previously undefined substances.
+- Separate from the physical engines that move solids, liquids, gases, etc.
+
+SACE answers:
+- What are these substances?
+- Can they react under the current conditions?
+- What reaction is likely?
+- How quickly should it happen?
+- What products form?
+- Is this product already known?
+- If it is new, what properties should it have?
+
+The phase engines answer:
+- How does the resulting solid/liquid/gas physically move?
+
+
+PIPACE "ELEMENTS"
+=================
+In player-facing terminology, an "Element" may mean any distinct spawnable
+material/substance, including:
+- Actual chemical elements.
+- Molecules/compounds.
+- Ionic substances.
+- Mixtures and solutions.
+- Alloys.
+- Polymers.
+- Network solids.
+- Generated/unknown materials.
+
+Internally, prefer a less ambiguous term such as Substance, Material,
+ChemicalSpecies, or MaterialDefinition.
+
+
+NAMES ARE NOT CHEMICAL IDENTITY
+===============================
+A newly generated substance does not automatically receive its real-world name.
+
+If the player synthesizes something chemically equivalent to caffeine, but
+caffeine is not a predefined named material, PIPACE may simply show:
+
+    Element #2A7
+
+Internally SACE may know its formula, structure, composition, properties, and
+canonical identity. The player could rename it "Caffeine", "Coffee Stuff", or
+anything else without changing its chemistry.
+
+PLAYER NAME = metadata.
+CHEMICAL IDENTITY = simulation data.
+
+
+GENERATED ELEMENT IDs
+=====================
+Generated substances receive hexadecimal display IDs:
+
+    Element #A
+    Element #F
+    Element #10
+    Element #3AF
+    Element #19BC
+
+The display ID is separate from the canonical substance signature. Independently
+produced samples of the same underlying substance should resolve to the same
+underlying SubstanceID when SACE can establish equivalence.
+
+
+THREE MAIN PARTS OF SACE
+========================
+1. IDENTITY / REPRESENTATION
+
+Determines what a substance actually contains. Possible information:
+- Elemental composition.
+- Molecular formula.
+- Molecular graph.
+- Atoms and bonds.
+- Mixture components and fractions.
+- Polymer repeating units and chain information.
+- Structural class.
+- Phase-independent material identity.
+
+Identity/composition should remain as accurate as practical. Approximate
+physical properties should not be the only information inherited by later
+reactions.
+
+2. REACTION RESOLUTION
+
+Given reactants plus conditions such as temperature, pressure, phase,
+concentration, catalyst, ignition/energy, electrical conditions, light/UV,
+surface area, and time, determine:
+- Whether a reaction is plausible.
+- Which reaction family/path applies.
+- Reaction rate.
+- Reactant consumption.
+- Products.
+- Energy released or absorbed.
+
+3. PROPERTY CALCULATION
+
+For a new substance, estimate the properties required by PIPACE:
+- Density.
+- Likely/standard phase.
+- Melting and boiling points.
+- Viscosity.
+- Surface tension.
+- Heat capacity.
+- Thermal/electrical conductivity.
+- Flammability/reactivity.
+- Mechanical properties for solids.
+- Other properties required by future systems.
+
+
+AVOIDING COMPOUNDING ERROR
+==========================
+Dangerous design:
+
+    A + B -> C
+    C is represented only by guessed properties.
+    C + D -> E
+    E is guessed from C's already-guessed properties.
+    E + F -> G
+    ...
+
+Error compounds through every generation.
+
+Preferred design:
+
+    A + B -> C
+
+C stores its tracked composition/structure as well as estimated properties.
+When C later reacts with D, SACE reasons from C's composition/structure and D's
+composition/structure, not merely from estimated density, boiling point, color,
+etc.
+
+PROPERTIES MAY BE APPROXIMATE.
+IDENTITY/COMPOSITION SHOULD REMAIN AS EXACT AS PRACTICAL.
+
+A poor boiling-point estimate should not automatically corrupt the chemical
+identity of every later product.
+
+
+CANONICALIZATION
+================
+When SACE generates a result, determine whether the substance already exists:
+
+    generated representation
+            |
+            v
+    canonical signature
+            |
+       +----+----+
+       |         |
+     exists     new
+       |         |
+       v         v
+    reuse ID   calculate/store new Element
+
+A long synthesis path that reaches an already known structure should resolve to
+that existing underlying substance. Different structures with the same formula
+must still be allowed to remain different substances.
+
+
+FORMULA IS NOT ENOUGH
+=====================
+Molecular formula should not uniquely define all substances. Different
+structures may share a formula but have different properties.
+
+Long-term SACE should support molecular graph/structure information where
+meaningful:
+
+Atom:
+    element / atomic number
+
+Bond:
+    atom A
+    atom B
+    bond type
+
+Molecule:
+    atoms
+    bonds
+
+SACE should not be architected around "formula == unique substance".
+
+
+MIXTURES
+========
+Not every combination is a chemical reaction. A + B may:
+- React into C.
+- Dissolve.
+- Form a solution.
+- Remain immiscible.
+- Form an alloy.
+- Form a suspension.
+- Form a multi-component mixture.
+- Do essentially nothing.
+
+Mixtures should not be forced into fake molecular formulas. They may instead
+store component SubstanceIDs and fractions. Different ratios may produce
+meaningfully different properties. A stable generated mixture may still be
+presented as a PIPACE "Element" and receive an Element #HEX identifier.
+
+
+KNOWN CHEMISTRY FIRST
+=====================
+Do not begin by asking SACE to invent all chemistry. Start with a curated
+foundation of known substances and reactions.
+
+Useful early reaction families may include:
+- Combustion.
+- Acid/base.
+- Redox.
+- Precipitation.
+- Dissolution.
+- Gas generation.
+- Decomposition.
+- Electrolysis.
+- Simple organic transformations.
+- Polymerization.
+
+Do not manually create a gigantic table of every possible chemical pair.
+
+Use a hierarchy:
+
+LEVEL 1 - EXPLICIT KNOWN REACTION
+Highest confidence. Important known chemistry can be defined directly.
+
+LEVEL 2 - REACTION FAMILY / TEMPLATE
+SACE recognizes chemical/structural features and applies a known reaction class.
+
+LEVEL 3 - GENERATED / ESTIMATED REACTION
+Used when no explicit reaction or sufficiently specific template exists.
+Lowest confidence.
+
+EXACT WHERE KNOWN.
+RULE-BASED WHERE UNDERSTOOD.
+APPROXIMATE WHERE NECESSARY.
+ADMIT UNCERTAINTY WHEN APPROPRIATE.
+
+
+REACTION TEMPLATES
+==================
+Instead of storing every possible A+B result, SACE should eventually understand
+broader reaction families, for example:
+
+    acid + base
+        -> salt + water
+
+    suitable monomer + polymerization conditions
+        -> polymer
+
+    combustible material + oxidizer + ignition
+        -> combustion products + energy
+
+Exact implementation can use explicit chemistry rules and structural matching.
+
+
+REACTION CONDITIONS AND KINETICS
+================================
+Two substances touching does not imply they instantly react completely.
+
+SACE may consider:
+- Temperature.
+- Pressure.
+- Concentration.
+- Catalyst.
+- Phase.
+- Exposed surface area.
+- Reaction time.
+- Ignition.
+- Electrical current.
+- Light/UV.
+- Solvent/environment.
+
+Example:
+
+    A + B at room temperature
+        -> negligible reaction
+
+    heat applied
+        -> appreciable reaction
+
+    catalyst introduced
+        -> faster reaction
+
+Where practical, reactions should have rates rather than universal instant
+conversion. The rate can be an approximation influenced by temperature,
+concentration, catalyst, surface area, and other relevant conditions.
+
+
+SURFACE AREA
+============
+Solid reactions may depend on exposed surface area. A solid block and a fine
+powder of the same material should not necessarily react at the same effective
+rate.
+
+The pixel world naturally provides approximate reaction interfaces: exposed
+material boundaries become potential reaction sites.
+
+
+REACTION CACHE
+==============
+SACE should not perform an expensive calculation every time two ordinary pixels
+touch.
+
+    substances interact
+           |
+           v
+    check reaction cache
+           |
+      +----+----+
+      |         |
+    found     unknown
+      |         |
+      v         v
+    use rule   ask SACE
+                  |
+                  v
+             store result
+                  |
+                  v
+            reuse later
+
+The cache may need to distinguish important condition regimes, not only the two
+SubstanceIDs. Possible factors include phase, temperature range, pressure range,
+catalyst, and concentration regime.
+
+Exact cache mechanics belong in the implementation-focused PIPACE work.
+
+
+NEW SUBSTANCE CACHE
+===================
+Generated substances should also be cached. If Element #3AF has already been
+calculated and the same underlying substance forms again, retrieve its existing
+SubstanceDefinition rather than recalculating it.
+
+This improves both performance and identity consistency.
+
+
+CONFIDENCE / UNCERTAINTY
+========================
+SACE should not pretend every prediction is equally trustworthy. Confidence may
+exist per property:
+
+    Composition:       HIGH
+    Structure:         HIGH
+    Density:           MEDIUM
+    Boiling point:     LOW
+    Reaction behavior: MEDIUM
+
+Possible property sources:
+- Reference.
+- Empirical estimate.
+- Structural estimate.
+- Mixture estimate.
+- Fallback.
+
+Possible console output:
+
+    [SACE] New substance: Element #3B2
+    [SACE] Structure confidence: HIGH
+    [SACE] Density confidence: MEDIUM
+    [SACE] Boiling-point confidence: LOW
+    [SACE] Assessment: probably fine.
+
+
+WHEN SACE DOES NOT KNOW
+=======================
+SACE should be allowed to admit uncertainty instead of inventing fake precision.
+
+Possible classifications:
+
+KNOWN SUBSTANCE
+    Reference data available.
+
+GENERATED SUBSTANCE
+    Structure/composition understood; some properties estimated.
+
+AMBIGUOUS SUBSTANCE
+    Composition mostly known but exact structure uncertain.
+
+COMPLEX MIXTURE
+    Multiple components; no single molecular identity.
+
+UNKNOWN RESIDUE
+    SACE cannot confidently characterize the result.
+
+Example:
+
+    Element #9CF
+    Composition: complicated
+    State: probably liquid
+    Confidence: 18%
+    SACE: "This has gotten out of hand."
+
+
+PROVENANCE / DISCOVERY HISTORY
+==============================
+Generated substances may remember how they were first produced:
+- Parent reactants/components.
+- Synthesis route.
+- Temperature.
+- Pressure.
+- Catalyst.
+- Discovery time/session.
+- First known reaction path.
+
+This could eventually power a substance notebook.
+
+A later synthesis route may still produce the same canonical substance without
+creating a chemically different identity.
+
+
+DEDICATED MIXER / SACE MONITOR
+==============================
+SACE remains a background solver, but laboratory equipment may expose its
+activity:
+
+    SACE MONITOR
+    ------------
+
+    Inputs:
+        Element #18
+        Element #4B
+
+    Temperature:
+        412 K
+
+    Pressure:
+        1.03 atm
+
+    Status:
+        Reaction detected
+
+    Product:
+        Element #92
+
+    Reaction rate:
+        Slow
+
+    Confidence:
+        83%
+
+    Cache:
+        HIT
+
+A debug console may show similar information. This is an observation interface,
+not a separate SACE sandbox.
+
+
+POLYMERS / COMPLEX SUBSTANCES
+=============================
+SACE should eventually support substances such as polyethylene without
+representing every atom in a macroscopic polymer chain individually.
+
+Possible polymer representation:
+- Monomer.
+- Repeating unit.
+- Average degree of polymerization.
+- Molecular-weight approximation/distribution.
+- Branching.
+- Crosslink density.
+- Crystallinity where useful.
+
+Polyethylene example:
+
+    repeating unit:
+        [-CH2-CH2-]n
+
+Conceptually, chain length, branching, crosslinking, etc. can alter physical
+properties. Exact polymer science is not required initially. The important rule
+is that polymers are not forced into the same representation as small molecules.
+
+Long-term representation classes might include:
+- AtomicSpecies.
+- SmallMolecule.
+- IonicMaterial.
+- Mixture.
+- Solution.
+- Alloy.
+- Polymer.
+- NetworkSolid.
+- UnknownGeneratedMaterial.
+
+These do not necessarily require separate movement engines. They mainly tell
+SACE how the substance is represented chemically/materially.
+
+
+REAL SYNTHESIS / LABORATORY BEHAVIOR
+====================================
+The long-term goal is for real chemistry and procedure to matter.
+
+If a player wants to create something such as ethanol and it is not already a
+named/spawnable material, the intended experience is not:
+
+    arbitrary A + B -> ethanol magically appears
+
+The player should need a chemically plausible synthesis route using appropriate
+reactants and conditions. This may involve mixing, heating, cooling, catalysts,
+pressure, separation/distillation, electrolysis, controlled addition, or other
+processes.
+
+SACE evaluates chemistry continuously while ordinary PIPACE physics handles the
+flask, liquids, gases, heat, rigid bodies, etc.
+
+The final product may simply appear as Element #HEX until the player chooses to
+identify/name it.
+
+
+CONSERVATION
+============
+Ordinary SACE reactions should aim to preserve:
+- Atom counts.
+- Mass.
+- Electric charge where modeled.
+- Energy approximately.
+
+Products should not appear merely because they seem statistically plausible.
+They must be constructible from available reactants under the modeled reaction.
+
+
+RELATIONSHIP WITH PIPACE
+========================
+
+    reactants meet
+         |
+         v
+       SACE
+         |
+         +--> reaction?
+         +--> products?
+         +--> reaction rate?
+         +--> energy?
+         +--> new substance?
+                  |
+                  v
+             property calculation
+                  |
+                  v
+          SubstanceDefinition
+                  |
+        +---------+---------+
+        |         |         |
+      solid     liquid     gas
+      engine    engine    engine
+
+SACE does not need to know exactly how the liquid solver performs advection.
+The liquid engine does not need to know how SACE derived a molecule. They
+communicate through substance properties and local world state.
+
+
+SACE PERSONALITY
+================
+The chemistry should remain serious enough to be useful. The presentation can
+acknowledge that SACE is approximate.
+
+Possible messages:
+
+    "SACE is thinking."
+    "Consulting several questionable equations."
+    "New substance detected."
+    "State: Probably liquid."
+    "Confidence: Concerningly high."
+    "SACE could not determine the boiling point. It probably boils eventually."
+    "This has gotten out of hand."
+
+Jokes must never alter simulation behavior.
+
+
+LONG-TERM IDEAL
+===============
+The ideal SACE is neither:
+
+    a gigantic manually authored table of every possible reaction
+
+nor:
+
+    a random material generator that freely invents chemistry.
+
+It is a hybrid:
+
+    CURATED KNOWN CHEMISTRY
+              +
+    REACTION FAMILIES / RULES
+              +
+    STRUCTURAL / COMPOSITION REASONING
+              +
+    GENERATED UNKNOWN SUBSTANCES
+              +
+    PROPERTY ESTIMATION
+              +
+    CANONICALIZATION
+              +
+    CACHING
+              +
+    UNCERTAINTY TRACKING
+
+
+SHORT VERSION
+=============
+When substances interact:
+
+1. Check whether their interaction under these conditions is already cached.
+2. If cached, use the existing reaction rule.
+3. If unknown, ask SACE.
+4. Prefer an explicit known reaction if available.
+5. Otherwise try a known reaction family/template.
+6. Otherwise estimate a plausible reaction only when appropriate.
+7. Conserve atoms/mass/charge as modeled.
+8. Determine products and reaction rate.
+9. Check whether each product already has a canonical SubstanceID.
+10. If genuinely new, generate an Element #HEX identity.
+11. Calculate/estimate the physical properties PIPACE needs.
+12. Store confidence and provenance.
+13. Cache the reaction and generated substance.
+14. Hand the resulting material to the appropriate phase engine.
+15. Never repeatedly derive later chemistry solely from accumulated guessed
+    physical properties when deeper composition/structure information exists.
+
+
+END NOTE
+========
+SACE should make PIPACE's chemical world expandable rather than infinite by
+brute force.
+
+The developer supplies a trustworthy foundation.
+SACE supplies the connective tissue.
+The player discovers what emerges.

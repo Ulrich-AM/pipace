@@ -1,0 +1,991 @@
+PIPACE FLUID ENGINE — NEXT PROMPT PREP
+Current prototype basis: main(2).cpp (~1065 lines)
+Purpose: summarize what is already working, what should be fixed next, what should NOT be over-tuned, and where the project should go afterward.
+
+======================================================================
+1. CURRENT STATE
+======================================================================
+
+The liquid prototype is already much more than a simple falling-sand water rule.
+It currently behaves like a pixel-native hybrid free-surface fluid solver:
+
+- Fractional liquid fill per cell
+- Staggered MAC velocity grid
+- Semi-Lagrangian velocity advection
+- Optional BFECC velocity advection
+- Physical gravity scaling
+- Spatial viscosity/diffusion support
+- Incompressible pressure projection
+- Red-black Gauss-Seidel / SOR pressure solve
+- Fractional free-surface pressure treatment
+- Conservative face-flux liquid transport
+- Iterative donor/receiver flux limiter
+- Thin/residual liquid consolidation
+- Surface reconstruction using smoothed fill
+- Surface normals and curvature
+- Surface tension
+- Ballistic splash/spray particles
+- Particle redeposition into the grid
+- Optional vorticity confinement
+- CFL-like adaptive substeps
+- Velocity safety clamp
+- Solid no-through boundary handling
+- Active 16x16 chunks
+- Chunk wake/sleep logic
+- Active solve-region generation with halo
+- Volume tracking and conservation diagnostics
+- Momentum / kinetic-energy diagnostics
+- Multiple debug views
+- Built-in benchmark modes
+- Built-in repeatable test scenes
+
+The water is now visually close to an acceptable baseline. Future work should
+prioritize correctness, performance, architecture, and extensibility rather
+than repeatedly changing the core "feel" of the water unless a specific,
+measurable problem is found.
+
+
+======================================================================
+2. HIGHEST-PRIORITY CURRENT PROBLEMS
+======================================================================
+
+A. PAINTING / ERASING STUTTER
+-----------------------------
+
+Observed:
+- Painting or erasing water/solids can cause obvious lag even though ordinary
+  simulation is relatively smooth.
+
+Current likely cause:
+- finalizePaint() currently runs:
+    enforceSolidBoundaries();
+    rebuildActivityAndMetrics();
+- finalizePaint() is called during mouse movement while painting.
+- This means relatively expensive whole-region / activity work can happen
+  repeatedly for many mouse events.
+
+Recommended direction:
+- Batch painting edits.
+- During mouse movement, only modify cells and mark dirty chunks/regions.
+- Delay expensive boundary rebuilding / activity rebuilding until:
+    * end of mouse drag, OR
+    * once per simulation frame/tick.
+- Track exact dirty bounds around painted cells.
+- Rebuild only nearby solid-face boundary data when possible.
+- Wake only affected chunks + a small halo.
+
+Goal:
+Painting and erasing should feel essentially instantaneous even with a larger
+brush.
+
+
+B. RENDERER RESOURCE CHURN
+--------------------------
+
+Observed in current Win32 rendering:
+- A compatible DC and compatible bitmap are created and destroyed during
+  WM_PAINT.
+
+Recommended direction:
+- Keep a persistent backbuffer / DIB section.
+- Reallocate only when the window size changes.
+- Cache fonts, brushes, and other GDI objects where sensible.
+- Avoid repeated allocation/deallocation every paint.
+
+This is a low-risk optimization because it should not alter fluid physics.
+
+
+C. PRESSURE SOLVER COST
+-----------------------
+
+Current solver:
+- Pressure projection is one of the most expensive stages.
+- It currently scans cells in the active rectangular solve region during each
+  red/black pressure iteration.
+- Pressure stencil coefficients are repeatedly reconstructed even if geometry
+  did not change.
+
+Recommended near-term optimization:
+1. Build reusable active pressure-cell lists.
+2. Build separate red and black pressure-cell lists.
+3. Cache pressure-neighbor coefficients / stencil information.
+4. Rebuild cached pressure topology only when:
+   - fill classification changes materially,
+   - solids change,
+   - active solve topology changes.
+5. Continue using adaptive iteration counts and residual stopping.
+
+Potential later optimization:
+- Parallelize red and black passes across 2-4 worker threads.
+- Only consider PCG or multigrid after simpler optimizations are exhausted,
+  because changing pressure algorithms has greater behavioral risk.
+
+Important:
+Do NOT sacrifice stability or conservation merely to lower benchmark numbers.
+
+
+D. VOLUME TRANSPORT COST
+------------------------
+
+Current volume transport:
+- Computes horizontal and vertical face fluxes.
+- Uses a conservative iterative donor/receiver limiter.
+- May run up to 16 limiting passes.
+
+Recommended optimization:
+- Build a work list containing only faces with nonzero meaningful flux.
+- Run limiter accumulation/scaling only on those faces.
+- Stop early when no meaningful changes remain.
+- Reuse buffers rather than repeatedly clearing large inactive regions.
+- Preserve exact conservative donor/receiver behavior.
+
+Do NOT replace the limiter with scan-ordered direct movement just for speed.
+That would risk reintroducing directional bias and mass errors.
+
+
+E. SURFACE WORK COST
+--------------------
+
+Current surface system performs:
+- smoothed fill generation
+- surface-mask generation
+- normal calculation
+- curvature calculation
+- surface tension
+- spray checks
+
+Recommended direction:
+- Maintain a dedicated list of surface/interface cells.
+- Recompute surface data only in dirty/active areas.
+- Use the same list for:
+    * surface smoothing
+    * normals
+    * curvature
+    * surface tension
+    * spray tests
+    * residual handling where applicable
+
+This can reduce work dramatically for deep bodies of liquid because most
+interior full cells do not need surface calculations.
+
+
+F. ONE-PIXEL-WALL / CORNER LEAK EDGE CASE
+-----------------------------------------
+
+Known concern:
+- Main face-based fluid transport respects solid walls.
+- However, two helper systems can potentially move liquid around thin walls:
+    1. depositVolume() performs a radius search for nearby capacity.
+    2. residual consolidation can select diagonal destinations.
+
+Risk:
+- A droplet colliding with one side of a one-pixel wall may be redeposited on
+  the opposite side.
+- Tiny residual fluid may cross a blocked corner diagonally even though no
+  orthogonal liquid path exists.
+
+Recommended fix:
+- depositVolume() should use connectivity-aware searches.
+- Do not consider a cell reachable merely because it is geometrically close.
+- Flood/BFS through valid non-solid neighbors with a very small bounded search,
+  or otherwise require unobstructed adjacency.
+- For diagonal residual transfer, require at least one valid orthogonal path:
+    source -> orthogonal neighbor -> diagonal target
+  and reject transfers through a fully blocked corner.
+
+Create regression tests specifically for:
+- one-pixel vertical wall
+- one-pixel horizontal wall
+- closed one-pixel box
+- diagonal sealed corner
+- splash hitting thin barrier at high speed
+
+
+G. LIQUID "VISCOSITY" FEEL
+---------------------------
+
+Current water configuration already has very low explicit viscosity.
+The explicit viscosity/diffusion solver is skipped for low-viscosity water.
+
+Therefore:
+- If water still feels slightly too thick, lowering the viscosity constant may
+  have little or no effect.
+- Remaining sluggishness may come from:
+    * semi-Lagrangian numerical dissipation
+    * pressure behavior
+    * flux limiting
+    * surface tension
+    * residual consolidation
+    * resolution itself
+
+Recommended direction:
+- Compare Semi-Lagrangian and BFECC in controlled scenes.
+- Use measurable tests rather than arbitrary parameter tweaking:
+    * falling column speed
+    * dam-break spread distance
+    * slosh decay time
+    * narrow-nozzle outflow
+- Prefer BFECC or targeted numerical improvements if they improve motion
+  without destabilizing the solver.
+
+Avoid entering another endless "change constants until it looks different"
+loop.
+
+
+======================================================================
+3. PERFORMANCE ARCHITECTURE BEFORE THE FINAL GAME
+======================================================================
+
+The final PIPACE game will contain more than liquids:
+- rigid solids
+- falling/powder-like materials
+- chemistry
+- gases
+- temperature
+- phase changes
+- particles
+- potentially many simultaneous interactions
+
+The core rule should therefore be:
+
+    NOTHING EXPENSIVE SHOULD RUN EVERYWHERE ALL THE TIME.
+
+Recommended hierarchy:
+
+LEVEL 0 — SLEEPING
+- No simulation except very cheap wake-condition checks.
+
+LEVEL 1 — DIRTY / POTENTIALLY ACTIVE
+- Chunk-level checks only.
+
+LEVEL 2 — ACTIVE MATERIAL
+- Normal solid/liquid/gas simulation.
+
+LEVEL 3 — CROSS-SYSTEM INTERACTION
+- Liquid + moving rigid body
+- gas + fire
+- chemistry + temperature
+- phase transition
+- etc.
+
+LEVEL 4 — HIGH-ENERGY EVENT
+- explosions
+- high-speed impacts
+- intense splashes
+- fracture
+- extra substeps if required
+
+Quiet areas should become nearly free.
+
+
+======================================================================
+4. RIGID BODY + LIQUID COUPLING — FUTURE REQUIREMENTS
+======================================================================
+
+This should happen only after the existing fluid engine is stable enough and
+modularized.
+
+Main challenge:
+A fast rigid body (for example a cup) must not teleport through water between
+physics samples.
+
+Required future features:
+
+A. MOVING SOLID BOUNDARIES
+- Current solids act like stationary no-through boundaries.
+- Rigid-body boundaries should instead have the local velocity of the body.
+- Fluid pressure should react to that moving boundary.
+
+B. TWO-WAY MOMENTUM COUPLING
+- Solid pushes liquid.
+- Liquid pressure pushes solid.
+- Accumulate fluid pressure forces and torques on wetted rigid-body surfaces.
+
+This enables emergent:
+- buoyancy
+- drag
+- floating
+- objects displacing water
+- splashes from impacts
+- paddles
+- boats
+- containers
+
+C. SWEPT / CONTINUOUS INTERACTION
+- Do not only test the body's final position.
+- Determine the region swept from previous transform to current transform.
+- Wake/interact with every affected fluid chunk.
+- High-speed bodies may require physics substeps or continuous collision logic.
+
+D. SHARED PHYSICS SCHEDULER
+Preferred long-term flow:
+
+    begin physics tick
+      determine required substeps
+      for each substep:
+        update rigid-body motion
+        update moving fluid boundaries
+        run fluid interaction / solve
+        exchange forces and momentum
+      finalize
+    end physics tick
+
+Avoid:
+    simulate rigid bodies completely
+    then simulate fluids completely
+    then hope both states agree
+
+E. CONTAINERS
+A cup/bottle/bucket should not need special "holds water" scripting.
+Its closed solid geometry should naturally contain liquid.
+
+Regression tests to eventually add:
+- cube dropped into pool
+- floating block
+- spinning paddle
+- fast projectile through pool
+- open cup lowered into water
+- cup containing water translated
+- cup rotated slowly
+- cup flung/rotated quickly
+- thin moving wall
+
+
+======================================================================
+5. MODULARIZATION — DO THIS BEFORE THE SYSTEM GROWS MUCH MORE
+======================================================================
+
+Current main.cpp is already ~1000+ lines.
+
+Recommended rough module layout:
+
+PIPACE/
+  main.cpp
+
+  fluid/
+    FluidEngine.h
+    FluidEngine.cpp
+    FluidTypes.h
+    FluidConfig.h
+    Advection.cpp
+    PressureSolver.cpp
+    VolumeTransport.cpp
+    Surface.cpp
+    SplashParticles.cpp
+    FluidChunks.cpp
+
+  physics/
+    RigidBodyWorld.cpp
+    Collision.cpp
+
+  world/
+    World.cpp
+    Materials.cpp
+
+  chemistry/
+    SACE.cpp
+    ChemicalDatabase.cpp
+
+  gas/
+    GasEngine.cpp
+
+  render/
+    Renderer.cpp
+
+  debug/
+    DebugUI.cpp
+    Benchmarks.cpp
+    TestScenes.cpp
+
+Important modularization rule:
+- Do NOT redesign working physics just because files are being separated.
+- First preserve behavior exactly.
+- Move one subsystem at a time.
+- Run the existing benchmark/test scenes after each move.
+- Keep FluidEngine responsible for owning its arrays and scratch buffers rather
+  than leaving everything global.
+
+The purpose of modularization is to make future work safer, not to create
+unnecessary abstraction layers.
+
+
+======================================================================
+6. MULTIPLE LIQUIDS + SACE
+======================================================================
+
+SACE = "Somewhat Accurate Chemical Engine" (working name).
+
+SACE's role:
+- Determine material composition and chemical outcomes.
+- Example conceptual question:
+    "If material A and material B mix under these conditions, what products and
+    energy changes result?"
+
+Fluid engine's role:
+- Move whatever SACE identifies as a liquid.
+
+Long-term division:
+
+    SACE
+      |
+      +--> SOLID PHYSICS
+      +--> LIQUID ENGINE
+      +--> GAS ENGINE
+
+The fluid solver should eventually stop asking:
+    "How does water behave?"
+
+Instead it should ask:
+    "What are the physical properties of this liquid?"
+
+Current useful material properties already include:
+- density
+- viscosity
+- surface tension
+
+Future possible properties:
+- dynamic viscosity
+- compressibility approximation
+- freezing point
+- boiling point
+- vapor pressure
+- heat capacity
+- thermal conductivity
+- latent heat
+- rheology model
+- miscibility / mixture behavior
+
+Important:
+Do not simulate every property at maximum realism every tick.
+Use only the properties needed for convincing macroscopic behavior.
+
+
+======================================================================
+7. EXAMPLES OF FUTURE LIQUID TYPES
+======================================================================
+
+WATER
+- low viscosity
+- normal baseline fluid
+
+HONEY / SYRUP
+- much higher viscosity
+- fewer splashes
+- slower flow
+- faster damping of waves
+
+PITCH / TAR
+- extremely temperature-dependent viscosity
+- hot pitch flows
+- cold pitch approaches solid-like behavior
+- may eventually need a viscoelastic or phase-transition treatment rather than
+  infinitely increasing ordinary Newtonian viscosity
+
+MOLTEN MATERIALS
+- fluid behavior + strong temperature dependence
+- cool into solids
+- transfer heat to nearby substances
+
+CRYOGENIC LIQUIDS
+- phase-change behavior matters greatly
+- strong boiling/evaporation interactions
+
+LIQUID HELIUM
+- ordinary liquid helium can be approximated using low-viscosity liquid
+  behavior
+- superfluid helium cannot be represented correctly simply by setting
+  viscosity to zero
+- if ever implemented, unusual superfluid effects should probably use special
+  gameplay/physics rules rather than a full quantum-fluid solver
+
+
+======================================================================
+8. GAS ENGINE — PROJECT DIRECTION AFTER SOLIDS/LIQUIDS
+======================================================================
+
+Gas is likely the next major material-state engine after solids and liquids
+reach an acceptable baseline.
+
+IMPORTANT DESIGN GOAL:
+The gas engine should be physically inspired and convincing, NOT a full
+compressible CFD simulation.
+
+A truly realistic gas solver would introduce:
+- compressibility
+- acoustic waves
+- very high sound speed
+- tiny CFL timesteps
+- expensive pressure calculations
+- shock physics
+- turbulence
+- diffusion
+- thermal convection
+
+That is unnecessarily expensive for PIPACE.
+
+Recommended gas-cell state:
+- gas composition / mixture fractions
+- temperature
+- approximate pressure
+- density
+- velocity
+
+Recommended normal gas behaviors:
+- spreading through connected open space
+- no passage through solids
+- advection
+- diffusion/mixing
+- buoyancy based on density/temperature
+- approximate pressure equalization
+- heat transport
+- chemical composition transport
+- interaction with SACE
+- phase changes to/from liquids/solids
+
+Intentional liberties:
+- Pressure equalization can be much slower than real acoustic propagation.
+- Real sound waves do not need to be resolved by the normal gas solver.
+- Real molecular diffusion constants do not need strict reproduction.
+- Turbulence can be approximate.
+- Very high-speed shockwaves can use a separate subsystem.
+
+Explosion strategy:
+Use a separate transient shock/pressure-wave model instead of requiring the
+ordinary gas engine to resolve real compressible shocks.
+
+Conceptually:
+
+NORMAL GAS SOLVER
+- pressure equalization
+- flow
+- buoyancy
+- mixing
+- heat
+- chemistry
+
+SHOCK SYSTEM
+- brief expanding pressure impulse
+- pushes materials
+- wakes nearby chunks
+- optionally heats/compresses gas
+- then decays
+
+This separation should keep the normal gas solver cheap.
+
+
+======================================================================
+9. SACE + GAS EXAMPLES
+======================================================================
+
+SACE determines reactions and phase changes; the gas engine moves the products.
+
+Example combustion:
+
+    hydrogen + oxygen + ignition
+        ->
+    water vapor + released energy
+
+SACE:
+- consumes reactants
+- creates products
+- adds thermal/chemical energy
+
+Gas engine:
+- transports gases
+- responds to pressure/density/temperature changes
+
+Example boiling:
+
+    liquid H2O + sufficient thermal conditions
+        ->
+    H2O vapor
+
+Transfer mass:
+    liquid engine -> gas engine
+
+Example condensation:
+
+    H2O vapor + suitable temperature/pressure
+        ->
+    liquid H2O
+
+Transfer mass:
+    gas engine -> liquid engine
+
+This mass transfer should eventually be conservative across material-state
+engines.
+
+
+======================================================================
+10. ACCEPTANCE CRITERIA TO PREVENT ENDLESS TWEAK LOOPS
+======================================================================
+
+For each subsystem, define "good enough" BEFORE adding more features.
+
+LIQUID V1 ACCEPTANCE TARGET:
+- Water falls convincingly.
+- Pools settle without continual violent motion.
+- Volume error stays very small.
+- Water cannot cross intact solids.
+- Narrow passages behave reasonably.
+- Splashes detach and return naturally.
+- Dam-break and slosh tests look convincing.
+- High-speed fluid remains stable.
+- Idle regions sleep correctly.
+- Painting/erasing no longer causes severe stutter.
+- Benchmarks are acceptable on target low-end hardware.
+
+Once those are satisfied:
+STOP tuning ordinary water unless a reproducible bug appears.
+
+GAS V1 ACCEPTANCE TARGET:
+- Gas spreads through connected open space.
+- Gas cannot cross solids.
+- Different gases can coexist/mix.
+- Hot/light gas rises; cold/heavy gas sinks where appropriate.
+- Approximate pressure moves gas from high to low pressure.
+- Gas carries temperature and composition.
+- SACE can create/destroy/transform gaseous materials.
+- Phase transfer is conservative enough for gameplay.
+- Performance is cheaper than or comparable to the liquid solver for similar
+  active regions.
+
+Once those work:
+STOP and integrate before adding advanced CFD behavior.
+
+
+======================================================================
+11. TESTING / BENCHMARKING ROADMAP
+======================================================================
+
+Keep all existing repeatable scenes.
+
+Existing benchmark-style cases include examples such as:
+- resting/still pool
+- small puddle
+- dam break
+- large moving body
+- single droplet
+- narrow nozzle
+
+Add future regression scenes for:
+
+LIQUID CORRECTNESS
+- thin vertical wall
+- thin horizontal wall
+- sealed corner
+- closed container
+- thin channel
+- long resting pool
+- waterfall
+- two communicating reservoirs
+
+PERFORMANCE
+- tiny puddle in huge empty world
+- many isolated puddles
+- large resting pool
+- entire screen filled
+- repeated paint strokes
+- repeated erase strokes
+- heavy splash event
+
+RIGID COUPLING
+- static submerged obstacle
+- falling cube
+- floating cube
+- moving paddle
+- high-speed body
+- rotating cup
+
+MULTI-MATERIAL
+- water + high-viscosity liquid
+- hot/cold viscosity change
+- immiscible liquid test
+- phase transition test
+
+GAS
+- sealed chamber
+- opening valve
+- hot plume
+- heavy gas sinking
+- two gases mixing
+- combustion chamber
+- boiling/condensation
+
+
+======================================================================
+12. RECOMMENDED ORDER OF WORK FROM HERE
+======================================================================
+
+PHASE 1 — FINISH CURRENT WATER BASELINE
+- Fix wall/corner leakage edge cases.
+- Fix painting/erasing stutter.
+- Profile current bottlenecks.
+- Tune only clearly measurable remaining water issues.
+- Preserve conservation and stability.
+
+PHASE 2 — PERFORMANCE PASS
+- active pressure-cell lists
+- red/black pressure lists
+- cached pressure coefficients
+- active flux-face work lists
+- dedicated surface-cell list
+- local dirty-region processing
+- cached renderer resources
+- optimized release build flags
+- optional conservative multithreading after correctness is preserved
+
+PHASE 3 — MODULARIZE
+- split 1000+ line prototype into major subsystems
+- move global simulation state into FluidEngine
+- preserve exact behavior during refactor
+- rerun benchmark suite after every major extraction
+
+PHASE 4 — SOLID / RIGID BODY PHYSICS
+- establish stable rigid-body system
+- chunk-aware collision architecture
+- sleeping
+- continuous/swept collision for fast bodies
+
+PHASE 5 — RIGID BODY <-> LIQUID COUPLING
+- moving solid boundaries
+- two-way pressure/momentum transfer
+- swept fluid interaction
+- container tests
+- buoyancy/drag
+
+PHASE 6 — GENERALIZE LIQUID MATERIALS
+- remove water-specific assumptions
+- obtain physical properties through material definitions / SACE-facing API
+- test honey/pitch/oil-like fluids
+- later support phase changes
+
+PHASE 7 — GAS ENGINE V1
+- cheap physically inspired gas simulation
+- composition
+- temperature
+- pressure approximation
+- advection
+- diffusion/mixing
+- buoyancy
+- sleeping/active chunks
+
+PHASE 8 — SACE INTEGRATION
+- reactions
+- heat generation/absorption
+- gas/liquid/solid state conversion
+- conservation across engines
+- mixture/material-property lookup
+
+PHASE 9 — ADVANCED FEATURES ONLY IF NEEDED
+- non-Newtonian fluids
+- advanced combustion
+- better turbulence
+- specialized cryogenic behavior
+- shockwaves
+- more sophisticated pressure solvers
+- unusual material classes
+
+
+======================================================================
+13. DESIGN PRINCIPLES FOR FUTURE CODEX PROMPTS
+======================================================================
+
+When asking Codex to modify PIPACE:
+
+1. Preserve current behavior unless the task explicitly changes it.
+2. Do not delete conservation logic merely for speed.
+3. Do not replace physics with purely visual cheats unless requested.
+4. Prefer local/chunk-based work over full-grid work.
+5. Avoid allocating memory inside hot loops.
+6. Cache topology/geometry-derived values when possible.
+7. Add metrics before guessing at bottlenecks.
+8. Add regression tests for every fixed physics bug.
+9. Maintain old test scenes so regressions are visible.
+10. Keep expensive optional effects toggleable.
+11. Make physical properties data-driven.
+12. Separate chemistry decisions from movement/physics decisions.
+13. Keep low-end hardware as a target.
+14. Favor convincing macroscopic behavior over microscopic simulation.
+15. Stop tweaking once acceptance criteria are satisfied.
+
+
+======================================================================
+14. GOOD NEXT CODEX PROMPT TARGET
+======================================================================
+
+The next prompt should probably NOT ask Codex to add gases, SACE, rigid-body
+coupling, or multiple liquids yet.
+
+Recommended immediate target:
+
+"Perform a behavior-preserving optimization and correctness pass on the
+existing PIPACE fluid prototype."
+
+It should ask Codex to:
+
+- preserve current water behavior and benchmark scenes
+- fix one-pixel wall / diagonal residual / splash redeposition leakage
+- batch paint/erase updates
+- introduce local dirty-region processing
+- cache renderer allocations
+- build reusable pressure active-cell/red-black lists
+- cache stable pressure stencil information
+- build nonzero-flux work lists
+- build a dedicated surface-cell list
+- preserve conservative transport and expected-volume accounting
+- improve benchmarks and diagnostics where necessary
+- compare before/after benchmark TSV output
+- avoid major solver replacement
+- avoid changing liquid constants unless required for correctness
+- keep all changes modularization-friendly
+
+After that pass succeeds, the following prompt should likely be a
+behavior-preserving modularization/refactor.
+
+
+======================================================================
+15. OVERALL PROJECT DIRECTION
+======================================================================
+
+PIPACE should develop into several cooperating simulation engines rather than
+one gigantic universal solver:
+
+    WORLD / MATERIAL GRID
+             |
+     +-------+-------+
+     |       |       |
+   SOLID   LIQUID    GAS
+   ENGINE  ENGINE   ENGINE
+     \       |       /
+      \      |      /
+           SACE
+      chemistry/material
+          properties
+             |
+         TEMPERATURE
+       / PHASE CHANGES
+             |
+      RENDERING / GAMEPLAY
+
+The major architectural theme should be:
+- local simulation
+- sleeping
+- conservative transfers
+- data-driven materials
+- clear subsystem boundaries
+- shared world/chunk infrastructure
+- cross-system interaction only where needed
+
+The objective is not "simulate every equation in reality."
+The objective is:
+"produce believable, internally consistent, emergent material behavior at
+pixel scale on ordinary hardware."
+
+That should remain the guiding principle for PIPACE.
+
+SIDE NOTE — CURRENTLY OBSERVED FLUID BUGS
+
+A few correctness/visual issues have been observed during normal testing:
+
+1. OCCASIONAL LIQUID LEAKING THROUGH SOLIDS
+
+* This is not intended behavior.
+* The main face-based fluid transport respects solid cells, but helper systems can bypass that protection.
+* `depositVolume()` searches nearby cells by radius and can redeposit liquid on the opposite side of a thin wall without checking whether there is a valid connected path.
+* Residual consolidation can also move tiny liquid amounts diagonally without verifying that an orthogonal path around the corner is open.
+* Fix direction:
+
+  * make redeposition connectivity-aware
+  * prevent diagonal corner-cutting
+  * add regression tests for one-pixel walls, sealed corners, and thin containers
+
+2. INFINITE DROPLETS AT THE WORLD / VOID BOUNDARY
+
+* When splash particles leave the simulation bounds, the current collision/redeposit logic can repeatedly fail to place their remaining volume.
+* The particle can survive, bounce, collide again, and repeat indefinitely, creating what looks like infinite droplets until the region is manually erased.
+* Recommended rule:
+
+  * treat the outside world as an open sink
+  * once liquid genuinely leaves the simulation bounds, remove that volume cleanly and update expected-volume accounting
+  * do not repeatedly bounce/redeposit particles that have escaped the map
+
+3. TEMPORARY ONE-PIXEL “HOLES” INSIDE WATER
+
+* Small isolated empty-looking pixels sometimes appear briefly and then disappear.
+* Likely cause:
+
+  * fractional volume transport temporarily lowers a cell below the visible rendering threshold
+  * the cell may still contain a small amount of liquid numerically
+  * residual consolidation can move that tiny amount elsewhere
+  * neighboring flow later refills the cell
+* This is probably a mixture of a real transient under-filled cell and a rendering-threshold artifact rather than a true simulated air bubble.
+* Fix direction:
+
+  * do not simply fill holes with free water
+  * preserve total volume
+  * investigate render hysteresis so pixels do not flicker between visible/invisible near the fill threshold
+  * optionally add conservative topology-aware hole cleanup for isolated interior cavities
+  * use the Fill debug view to verify whether apparent holes still contain fractional liquid
+
+IMPORTANT:
+All three fixes should preserve the existing water behavior as much as possible. They should be treated as localized correctness fixes, not as reasons to redesign or retune the entire fluid solver.
+
+
+
+
+
+
+NOTES:
+
+
+
+
+
+SIDE NOTE — CURRENTLY OBSERVED FLUID BUGS
+
+A few correctness/visual issues have been observed during normal testing:
+
+1. OCCASIONAL LIQUID LEAKING THROUGH SOLIDS
+
+* This is not intended behavior.
+* The main face-based fluid transport respects solid cells, but helper systems can bypass that protection.
+* `depositVolume()` searches nearby cells by radius and can redeposit liquid on the opposite side of a thin wall without checking whether there is a valid connected path.
+* Residual consolidation can also move tiny liquid amounts diagonally without verifying that an orthogonal path around the corner is open.
+* Fix direction:
+
+  * make redeposition connectivity-aware
+  * prevent diagonal corner-cutting
+  * add regression tests for one-pixel walls, sealed corners, and thin containers
+
+2. INFINITE DROPLETS AT THE WORLD / VOID BOUNDARY
+
+* When splash particles leave the simulation bounds, the current collision/redeposit logic can repeatedly fail to place their remaining volume.
+* The particle can survive, bounce, collide again, and repeat indefinitely, creating what looks like infinite droplets until the region is manually erased.
+* Recommended rule:
+
+  * treat the outside world as an open sink
+  * once liquid genuinely leaves the simulation bounds, remove that volume cleanly and update expected-volume accounting
+  * do not repeatedly bounce/redeposit particles that have escaped the map
+
+3. TEMPORARY ONE-PIXEL “HOLES” INSIDE WATER
+
+* Small isolated empty-looking pixels sometimes appear briefly and then disappear.
+* Likely cause:
+
+  * fractional volume transport temporarily lowers a cell below the visible rendering threshold
+  * the cell may still contain a small amount of liquid numerically
+  * residual consolidation can move that tiny amount elsewhere
+  * neighboring flow later refills the cell
+* This is probably a mixture of a real transient under-filled cell and a rendering-threshold artifact rather than a true simulated air bubble.
+* Fix direction:
+
+  * do not simply fill holes with free water
+  * preserve total volume
+  * investigate render hysteresis so pixels do not flicker between visible/invisible near the fill threshold
+  * optionally add conservative topology-aware hole cleanup for isolated interior cavities
+  * use the Fill debug view to verify whether apparent holes still contain fractional liquid
+
+IMPORTANT:
+All three fixes should preserve the existing water behavior as much as possible. They should be treated as localized correctness fixes, not as reasons to redesign or retune the entire fluid solver.
+

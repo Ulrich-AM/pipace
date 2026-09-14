@@ -1,0 +1,9 @@
+test	result	detail	vx	vy	omega	x	y	sleep	supported	pen	jn	jt	posx	posy
+flat_round	PASS	settled without spontaneous roll	0	0	0	101.122	108.883	1	1	0.2	149.637	-0.00613894	0	-0.0396
+shallow_slope	PASS	moved downhill +x	8.4765	4.99277	1.99736	69.9342	72.0469	0	0	0	0	0	0	0
+reverse_slope	PASS	moved downhill -x	-9.29715	1.14145	-2.23037	120.646	74.8927	0	1	0	373.485	50.7768	0	0
+peanut_flat	PASS	settled without crawl/energy growth	0	0	0	94.761	109.345	1	1	0	195.677	0.0230971	0	0
+no_gravity	PASS	remained stationary	0	0	0	100	52	0	0	0	0	0	0	0
+slight_pen	PASS	resolved overlap without launch	0.315075	-0.175257	0.0887053	100.528	108.438	0	1	0.2	149.239	-0.901533	0	-0.0176
+off_center	PASS	contact impulse produced torque, peak|omega|=3.632154	0	0	0	97.1899	110.433	1	1	0.3	25.8984	-0.00112169	0	-0.0396
+summary	PASS	7 passed, 0 failed

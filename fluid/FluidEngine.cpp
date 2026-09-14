@@ -1,0 +1,2546 @@
+#include "FluidEngine.h"
+#include "DiagOutput.h"
+#include "thermal/ThermalTypes.h"
+
+#include <algorithm>
+#include <array>
+#include <chrono>
+#include <cmath>
+#include <fstream>
+#include <string>
+#include <thread>
+#include <vector>
+
+FluidEngine::FluidEngine()
+    : solid(GW * GH, 0)
+    , solidHeat(GW * GH, 0.0f)
+    , dynamicSolid(GW * GH, 0)
+    , dynamicVelX(GW * GH, 0.0f)
+    , dynamicVelY(GW * GH, 0.0f)
+    , fill(GW * GH, 0.0f)
+    , nextFill(GW * GH, 0.0f)
+    , liquidHeat(GW * GH, 0.0f)
+    , nextHeat(GW * GH, 0.0f)
+    , dyeR(GW * GH, 0.0f)
+    , dyeG(GW * GH, 0.0f)
+    , dyeB(GW * GH, 0.0f)
+    , honey(GW * GH, 0.0f)
+    , nextDyeR(GW * GH, 0.0f)
+    , nextDyeG(GW * GH, 0.0f)
+    , nextDyeB(GW * GH, 0.0f)
+    , nextHoney(GW * GH, 0.0f)
+    , pressure(GW * GH, 0.0f)
+    , divergenceField(GW * GH, 0.0f)
+    , outgoing(GW * GH, 0.0f)
+    , incoming(GW * GH, 0.0f)
+    , donorScale(GW * GH, 1.0f)
+    , receiverScale(GW * GH, 1.0f)
+    , cellForceX(GW * GH, 0.0f)
+    , cellForceY(GW * GH, 0.0f)
+    , curlField(GW * GH, 0.0f)
+    , smoothedFill(GW * GH, 0.0f)
+    , surfaceNormalX(GW * GH, 0.0f)
+    , surfaceNormalY(GW * GH, 0.0f)
+    , surfaceCurvature(GW * GH, 0.0f)
+    , surfaceMask(GW * GH, 0)
+    , pressureBefore(GW * GH, 0.0f)
+    , previousFill(GW * GH, 0.0f)
+    , residualTarget(GW * GH, -1)
+    , residualTransfer(GW * GH, 0.0f)
+    , waterShade(GW * GH, 0)
+    , u((GW + 1) * GH, 0.0f)
+    , v(GW * (GH + 1), 0.0f)
+    , uTemp((GW + 1) * GH, 0.0f)
+    , vTemp(GW * (GH + 1), 0.0f)
+    , uScratch((GW + 1) * GH, 0.0f)
+    , vScratch(GW * (GH + 1), 0.0f)
+    , fluxU((GW + 1) * GH, 0.0f)
+    , fluxV(GW * (GH + 1), 0.0f)
+    , chunkActivity(CHUNK_W * CHUNK_H, 0)
+    , chunkQuietTicks(CHUNK_W * CHUNK_H, 0)
+    , chunkHasFluid(CHUNK_W * CHUNK_H, 0)
+    , chunkSolveMask(CHUNK_W * CHUNK_H, 0)
+    , chunkHaloSource(CHUNK_W * CHUNK_H, 0)
+    , thermalChunkWake(CHUNK_W * CHUNK_H, 0)
+    , pixels(GW * GH, 0)
+{
+    relocateStamp.assign(static_cast<size_t>(GW * GH), 0);
+    relocateQueue.reserve(512);
+    splashes.reserve(1024);
+    pressureRed.reserve(GW * GH / 2);
+    pressureBlack.reserve(GW * GH / 2);
+    pressureStencils.reserve(GW * GH);
+    surfaceCells.reserve(GW * GH / 4);
+    nonzeroFluxUFaces.reserve((GW + 1) * GH / 4);
+    nonzeroFluxVFaces.reserve(GW * (GH + 1) / 4);
+    fluxTouchedCells.reserve(GW * GH / 4);
+    dynamicOccupiedCells.reserve(256);
+    syncWorkerPool();
+}
+
+void FluidEngine::syncWorkerPool() {
+    int total = resolvedWorkerCount();
+    lastResolvedWorkers = total;
+    workerPool.setExtraWorkers(std::max(0, total - 1));
+}
+
+int FluidEngine::maxSelectableWorkers() const {
+    unsigned hc = std::thread::hardware_concurrency();
+    int cores = hc == 0 ? 2 : static_cast<int>(hc);
+    return std::clamp(cores, 1, 8);
+}
+
+int FluidEngine::autoWorkerCount() const {
+    unsigned hc = std::thread::hardware_concurrency();
+    int cores = hc == 0 ? 2 : static_cast<int>(hc);
+    int cells = GW * GH;
+    // Default 200x120 work is too small to beat red/black barriers.
+    if (cells <= 200 * 120) return 1;
+    if (cores <= 2) return 1;
+    if (cores <= 4) return 2;
+    if (cores <= 6) return std::min(4, cores - 1);
+    return std::min(6, cores - 2);
+}
+
+int FluidEngine::resolvedWorkerCount() const {
+    int cap = maxSelectableWorkers();
+    if (config.workerCount <= 0) return std::clamp(autoWorkerCount(), 1, cap);
+    return std::clamp(config.workerCount, 1, cap);
+}
+
+bool FluidEngine::useParallelPressure(int cellCount) const {
+    return workerPool.extraWorkers() > 0 && cellCount >= config.pressureParallelMinCells;
+}
+
+int FluidEngine::splashAtCell(int x, int y) const {
+    if (!inside(x, y)) return 0;
+    int count = 0;
+    for (SplashParticle const &p : splashes) {
+        if (static_cast<int>(std::floor(p.x)) == x && static_cast<int>(std::floor(p.y)) == y) ++count;
+    }
+    return count;
+}
+
+void FluidEngine::flushPaintDirty() {
+    if (!paintDirty) return;
+    paintDirty = false;
+    enforceSolidBoundaries();
+    rebuildActivityAndMetrics();
+}
+
+double FluidEngine::elapsedMs(Clock::time_point start) {
+    return std::chrono::duration<double, std::milli>(Clock::now() - start).count();
+}
+
+void FluidEngine::wakeThermalAt(int x, int y) {
+    if (!inside(x, y)) return;
+    int c = (y / CHUNK) * CHUNK_W + (x / CHUNK);
+    if (c >= 0 && c < static_cast<int>(thermalChunkWake.size())) thermalChunkWake[static_cast<size_t>(c)] = 1;
+}
+
+void FluidEngine::clearEmptyLiquidCell(int index) {
+    if (index < 0 || index >= GW * GH) return;
+    size_t i = static_cast<size_t>(index);
+    if (fill[i] > 1.0e-8f) {
+        honey[i] = std::clamp(honey[i], 0.0f, fill[i]);
+        if (dyeR[i] < 0.0f) dyeR[i] = 0.0f;
+        if (dyeG[i] < 0.0f) dyeG[i] = 0.0f;
+        if (dyeB[i] < 0.0f) dyeB[i] = 0.0f;
+        return;
+    }
+    fill[i] = 0.0f;
+    liquidHeat[i] = 0.0f;
+    dyeR[i] = dyeG[i] = dyeB[i] = 0.0f;
+    honey[i] = 0.0f;
+}
+
+float FluidEngine::honeyFraction(int index) const {
+    if (index < 0 || index >= GW * GH) return 0.0f;
+    float f = fill[static_cast<size_t>(index)];
+    if (f <= 1.0e-8f) return 0.0f;
+    return std::clamp(honey[static_cast<size_t>(index)] / f, 0.0f, 1.0f);
+}
+
+float FluidEngine::mixDensity(int index) const {
+    float h = honeyFraction(index);
+    return (1.0f - h) * config.water.density + h * config.honey.density;
+}
+
+float FluidEngine::mixSpecificHeat(int index) const {
+    float h = honeyFraction(index);
+    return (1.0f - h) * config.water.thermal.specificHeat + h * config.honey.thermal.specificHeat;
+}
+
+float FluidEngine::mixViscosity(int index) const {
+    float f = fill[static_cast<size_t>(index)];
+    if (f < MIN_ACTIVE_FILL) return config.water.viscosity;
+    float h = honeyFraction(index);
+    float cap = thermalCapacity(massKg(mixDensity(index), f, config.cellsPerMeter), mixSpecificHeat(index));
+    float T = tempFromEnergy(liquidHeat[static_cast<size_t>(index)], cap);
+    float muW = config.water.viscosityAtTemperature(T);
+    float muH = config.honey.viscosityAtTemperature(T);
+    float a = std::log(std::max(1.0e-8f, muW));
+    float b = std::log(std::max(1.0e-8f, muH));
+    return std::exp((1.0f - h) * a + h * b);
+}
+
+float FluidEngine::mixSurfaceTension(int index) const {
+    float h = honeyFraction(index);
+    return (1.0f - h) * config.water.surfaceTension + h * config.honey.surfaceTension;
+}
+
+void FluidEngine::applyCarry(int index, LiquidCarry const &c) {
+    size_t i = static_cast<size_t>(index);
+    liquidHeat[i] += c.heat;
+    dyeR[i] += c.dyeR;
+    dyeG[i] += c.dyeG;
+    dyeB[i] += c.dyeB;
+    honey[i] += c.honey;
+}
+
+namespace {
+LiquidCarry splitCarry(LiquidCarry &src, float placed, float remaining) {
+    LiquidCarry out{};
+    if (remaining <= 1.0e-20f || placed <= 0.0f) return out;
+    float frac = placed / remaining;
+    out.heat = src.heat * frac; src.heat -= out.heat;
+    out.dyeR = src.dyeR * frac; src.dyeR -= out.dyeR;
+    out.dyeG = src.dyeG * frac; src.dyeG -= out.dyeG;
+    out.dyeB = src.dyeB * frac; src.dyeB -= out.dyeB;
+    out.honey = src.honey * frac; src.honey -= out.honey;
+    return out;
+}
+
+LiquidCarry ambientCarry(FluidEngine const &eng, float placed, bool asHoney) {
+    LiquidCarry c{};
+    LiquidProperties const &liq = asHoney ? eng.config.honey : eng.config.water;
+    float cap = thermalCapacity(massKg(liq.density, placed, eng.config.cellsPerMeter), liq.thermal.specificHeat);
+    c.heat = energyFromTemp(cap, AMBIENT_TEMPERATURE_K);
+    if (asHoney) c.honey = placed;
+    return c;
+}
+} // namespace
+
+LiquidCarry FluidEngine::extractVolume(int index, float amount) {
+    LiquidCarry c{};
+    if (index < 0 || index >= GW * GH || amount <= 0.0f) return c;
+    size_t i = static_cast<size_t>(index);
+    float f0 = fill[i];
+    if (f0 <= 1.0e-20f) return c;
+    float a = std::min(amount, f0);
+    float frac = a / f0;
+    c.heat = liquidHeat[i] * frac;
+    c.dyeR = dyeR[i] * frac;
+    c.dyeG = dyeG[i] * frac;
+    c.dyeB = dyeB[i] * frac;
+    c.honey = honey[i] * frac;
+    fill[i] -= a;
+    liquidHeat[i] -= c.heat;
+    dyeR[i] -= c.dyeR;
+    dyeG[i] -= c.dyeG;
+    dyeB[i] -= c.dyeB;
+    honey[i] -= c.honey;
+    clearEmptyLiquidCell(index);
+    return c;
+}
+
+void FluidEngine::addLiquidFill(int index, float dFill, float dHeat) {
+    if (index < 0 || index >= GW * GH || dFill <= 0.0f) return;
+    fill[static_cast<size_t>(index)] += dFill;
+    liquidHeat[static_cast<size_t>(index)] += dHeat;
+    clearEmptyLiquidCell(index);
+}
+
+void FluidEngine::seedAmbientHeat() {
+    for (int i = 0; i < GW * GH; ++i) {
+        float f = fill[static_cast<size_t>(i)];
+        if (f > 1.0e-8f) {
+            float cap = thermalCapacity(massKg(mixDensity(i), f, config.cellsPerMeter),
+                mixSpecificHeat(i));
+            liquidHeat[static_cast<size_t>(i)] = energyFromTemp(cap, AMBIENT_TEMPERATURE_K);
+        } else {
+            liquidHeat[static_cast<size_t>(i)] = 0.0f;
+            dyeR[static_cast<size_t>(i)] = dyeG[static_cast<size_t>(i)] = dyeB[static_cast<size_t>(i)] = 0.0f;
+            honey[static_cast<size_t>(i)] = 0.0f;
+        }
+        if (solid[static_cast<size_t>(i)]) {
+            float cap = thermalCapacity(massKg(2.20f, 1.0f, config.cellsPerMeter), kWallThermal().specificHeat);
+            solidHeat[static_cast<size_t>(i)] = energyFromTemp(cap, AMBIENT_TEMPERATURE_K);
+        } else {
+            solidHeat[static_cast<size_t>(i)] = 0.0f;
+        }
+    }
+    std::fill(nextHeat.begin(), nextHeat.end(), 0.0f);
+}
+
+bool FluidEngine::isStaticSolid(int x, int y)  const { return !inside(x, y) || solid[ci(x, y)] != 0; }
+bool FluidEngine::isPaintedSolid(int x, int y)  const { return inside(x, y) && solid[ci(x, y)] != 0; }
+bool FluidEngine::isSolid(int x, int y)  const { return isStaticSolid(x, y) || (inside(x, y) && dynamicSolid[ci(x, y)] != 0); }
+bool FluidEngine::isFluid(int x, int y)  const { return inside(x, y) && !isSolid(x, y) && fill[ci(x, y)] >= MIN_ACTIVE_FILL; }
+bool FluidEngine::isPressureFluid(int x, int y)  const { return inside(x, y) && !isSolid(x, y) && fill[ci(x, y)] >= MIN_PRESSURE_FILL; }
+float FluidEngine::gridGravity()  const { return config.gravityMetersPerSecondSquared * config.cellsPerMeter; }
+float FluidEngine::liquidFaceFraction(float a, float b) { return std::clamp(0.5f * (a + b), 0.08f, 1.0f); }
+bool FluidEngine::openUFace(int x, int y)  const { return x > 0 && x < GW && !isSolid(x - 1, y) && !isSolid(x, y); }
+bool FluidEngine::openVFace(int x, int y)  const { return y > 0 && y < GH && !isSolid(x, y - 1) && !isSolid(x, y); }
+int FluidEngine::activeX0(int halo)  const { return std::max(0, solveX0 - halo); }
+int FluidEngine::activeY0(int halo)  const { return std::max(0, solveY0 - halo); }
+int FluidEngine::activeX1(int halo)  const { return std::min(GW - 1, solveX1 + halo); }
+int FluidEngine::activeY1(int halo)  const { return std::min(GH - 1, solveY1 + halo); }
+
+uint32_t FluidEngine::hashCell(uint32_t x, uint32_t y, uint32_t tick) {
+    uint32_t h = x * 0x8da6b343u ^ y * 0xd8163841u ^ tick * 0xcb1ab31fu;
+    h ^= h >> 13; h *= 0x85ebca6bu; h ^= h >> 16;
+    return h;
+}
+
+int8_t FluidEngine::makeShade(int x, int y)  const {
+    return static_cast<int8_t>(static_cast<int>(hashCell(x, y, tickNo) % 17u) - 8);
+}
+
+float FluidEngine::cellU(int x, int y)  const { return 0.5f * (u[ui(x, y)] + u[ui(x + 1, y)]); }
+float FluidEngine::cellV(int x, int y)  const { return 0.5f * (v[vi(x, y)] + v[vi(x, y + 1)]); }
+
+float FluidEngine::bilinear(std::vector<float> const &a, int width, int height, float x, float y) {
+    x = std::clamp(x, 0.0f, static_cast<float>(width - 1));
+    y = std::clamp(y, 0.0f, static_cast<float>(height - 1));
+    int x0 = static_cast<int>(std::floor(x)), y0 = static_cast<int>(std::floor(y));
+    int x1 = std::min(width - 1, x0 + 1), y1 = std::min(height - 1, y0 + 1);
+    float fx = x - x0, fy = y - y0;
+    float a0 = a[y0 * width + x0] * (1.0f - fx) + a[y0 * width + x1] * fx;
+    float a1 = a[y1 * width + x0] * (1.0f - fx) + a[y1 * width + x1] * fx;
+    return a0 * (1.0f - fy) + a1 * fy;
+}
+
+float FluidEngine::nearestSample(std::vector<float> const &a, int width, int height, float x, float y) {
+    x = std::clamp(x, 0.0f, static_cast<float>(width - 1));
+    y = std::clamp(y, 0.0f, static_cast<float>(height - 1));
+    int ix = std::clamp(static_cast<int>(std::lround(x)), 0, width - 1);
+    int iy = std::clamp(static_cast<int>(std::lround(y)), 0, height - 1);
+    return a[iy * width + ix];
+}
+
+float FluidEngine::sampleU(float worldX, float worldY) const { return bilinear(u, GW + 1, GH, worldX, worldY - 0.5f); }
+float FluidEngine::sampleV(float worldX, float worldY) const { return bilinear(v, GW, GH + 1, worldX - 0.5f, worldY); }
+float FluidEngine::sampleUField(std::vector<float> const &field,float worldX,float worldY) const {return bilinear(field,GW+1,GH,worldX,worldY-0.5f);}
+float FluidEngine::sampleVField(std::vector<float> const &field,float worldX,float worldY) const {return bilinear(field,GW,GH+1,worldX-0.5f,worldY);}
+float FluidEngine::sampleUNearest(float worldX, float worldY) const { return nearestSample(u, GW + 1, GH, worldX, worldY - 0.5f); }
+float FluidEngine::sampleVNearest(float worldX, float worldY) const { return nearestSample(v, GW, GH + 1, worldX - 0.5f, worldY); }
+
+float FluidEngine::clampToSourceExtrema(std::vector<float> const &field,int width,int height,float x,float y,float value){
+    x=std::clamp(x,0.0f,float(width-1));y=std::clamp(y,0.0f,float(height-1));
+    int x0=int(std::floor(x)),y0=int(std::floor(y)),x1=std::min(width-1,x0+1),y1=std::min(height-1,y0+1);
+    float a=field[y0*width+x0],b=field[y0*width+x1],c=field[y1*width+x0],d=field[y1*width+x1];
+    return std::clamp(value,std::min(std::min(a,b),std::min(c,d)),std::max(std::max(a,b),std::max(c,d)));
+}
+
+float FluidEngine::finiteOrZero(float value) {
+    return std::isfinite(value) ? value : 0.0f;
+}
+
+bool FluidEngine::liveUFace(int x, int y) const {
+    return openUFace(x, y) && (isFluid(x - 1, y) || isFluid(x, y));
+}
+
+bool FluidEngine::liveVFace(int x, int y) const {
+    return openVFace(x, y) && (isFluid(x, y - 1) || isFluid(x, y));
+}
+
+float FluidEngine::uFaceOrWall(int x, int y) const {
+    if (x <= 0 || x >= GW || y < 0 || y >= GH || !openUFace(x, y)) return 0.0f;
+    return u[ui(x, y)];
+}
+
+float FluidEngine::vFaceOrWall(int x, int y) const {
+    if (y <= 0 || y >= GH || x < 0 || x >= GW || !openVFace(x, y)) return 0.0f;
+    return v[vi(x, y)];
+}
+
+void FluidEngine::enforceSolidBoundaries() {
+    for (int y = 0; y < GH; ++y) {
+        u[ui(0, y)] = 0.0f; u[ui(GW, y)] = 0.0f;
+        for (int x = 1; x < GW; ++x)
+            if (!openUFace(x, y)) u[ui(x, y)] = 0.0f;
+    }
+    for (int x = 0; x < GW; ++x) {
+        v[vi(x, 0)] = 0.0f; v[vi(x, GH)] = 0.0f;
+        for (int y = 1; y < GH; ++y)
+            if (!openVFace(x, y)) v[vi(x, y)] = 0.0f;
+    }
+    applyMovingBoundaryVelocity();
+}
+
+void FluidEngine::enforceActiveBoundaries(){
+    for(int y=activeY0(1);y<=activeY1(1);++y)for(int x=std::max(0,activeX0(1));x<=std::min(GW,activeX1(1)+1);++x)
+        if(x==0||x==GW||!openUFace(x,y))u[ui(x,y)]=0.0f;
+    for(int y=std::max(0,activeY0(1));y<=std::min(GH,activeY1(1)+1);++y)for(int x=activeX0(1);x<=activeX1(1);++x)
+        if(y==0||y==GH||!openVFace(x,y))v[vi(x,y)]=0.0f;
+    applyMovingBoundaryVelocity();
+}
+
+// Semi-Lagrangian advection follows each MAC face backward through the old
+// velocity field. Nearest sampling skips bilinear interpolation at the source.
+void FluidEngine::advectVelocitySemiLagrangian(float dt, bool nearest) {
+    for (int y = activeY0(1); y <= activeY1(1); ++y)
+        for (int x = std::max(1, activeX0(1)); x <= std::min(GW - 1, activeX1(1) + 1); ++x) {
+        uTemp[ui(x,y)]=0.0f;
+        if (!liveUFace(x, y)) continue;
+        float px = static_cast<float>(x), py = y + 0.5f;
+        float vx = sampleU(px, py), vy = sampleV(px, py);
+        float sx = px - vx * dt, sy = py - vy * dt;
+        uTemp[ui(x, y)] = nearest ? sampleUNearest(sx, sy) : sampleU(sx, sy);
+    }
+    for (int y = std::max(1, activeY0(1)); y <= std::min(GH - 1, activeY1(1) + 1); ++y)
+        for (int x = activeX0(1); x <= activeX1(1); ++x) {
+        vTemp[vi(x,y)]=0.0f;
+        if (!liveVFace(x, y)) continue;
+        float px = x + 0.5f, py = static_cast<float>(y);
+        float vx = sampleU(px, py), vy = sampleV(px, py);
+        float sx = px - vx * dt, sy = py - vy * dt;
+        vTemp[vi(x, y)] = nearest ? sampleVNearest(sx, sy) : sampleV(sx, sy);
+    }
+}
+
+void FluidEngine::advectVelocityFirstOrderUpwind(float dt) {
+    for (int y = activeY0(1); y <= activeY1(1); ++y)
+        for (int x = std::max(1, activeX0(1)); x <= std::min(GW - 1, activeX1(1) + 1); ++x) {
+        uTemp[ui(x, y)] = 0.0f;
+        if (!liveUFace(x, y)) continue;
+        float uc = u[ui(x, y)];
+        float vc = sampleV(static_cast<float>(x), y + 0.5f);
+        float dudx = (uc >= 0.0f) ? (uc - uFaceOrWall(x - 1, y)) : (uFaceOrWall(x + 1, y) - uc);
+        float dudy = (vc >= 0.0f) ? (uc - uFaceOrWall(x, y - 1)) : (uFaceOrWall(x, y + 1) - uc);
+        uTemp[ui(x, y)] = uc - dt * (uc * dudx + vc * dudy);
+    }
+    for (int y = std::max(1, activeY0(1)); y <= std::min(GH - 1, activeY1(1) + 1); ++y)
+        for (int x = activeX0(1); x <= activeX1(1); ++x) {
+        vTemp[vi(x, y)] = 0.0f;
+        if (!liveVFace(x, y)) continue;
+        float vc = v[vi(x, y)];
+        float uc = sampleU(x + 0.5f, static_cast<float>(y));
+        float dvdx = (uc >= 0.0f) ? (vc - vFaceOrWall(x - 1, y)) : (vFaceOrWall(x + 1, y) - vc);
+        float dvdy = (vc >= 0.0f) ? (vc - vFaceOrWall(x, y - 1)) : (vFaceOrWall(x, y + 1) - vc);
+        vTemp[vi(x, y)] = vc - dt * (uc * dvdx + vc * dvdy);
+    }
+}
+
+void FluidEngine::advectVelocityMacCormack(float dt) {
+    advectVelocitySemiLagrangian(dt, false);
+    std::fill(uScratch.begin(), uScratch.end(), 0.0f);
+    std::fill(vScratch.begin(), vScratch.end(), 0.0f);
+    for (int y = activeY0(1); y <= activeY1(1); ++y)
+        for (int x = std::max(1, activeX0(1)); x <= std::min(GW - 1, activeX1(1) + 1); ++x) {
+        if (!liveUFace(x, y)) continue;
+        float px = static_cast<float>(x), py = y + 0.5f;
+        float vx = sampleU(px, py), vy = sampleV(px, py);
+        uScratch[ui(x, y)] = sampleUField(uTemp, px + vx * dt, py + vy * dt);
+    }
+    for (int y = std::max(1, activeY0(1)); y <= std::min(GH - 1, activeY1(1) + 1); ++y)
+        for (int x = activeX0(1); x <= activeX1(1); ++x) {
+        if (!liveVFace(x, y)) continue;
+        float px = x + 0.5f, py = static_cast<float>(y);
+        float vx = sampleU(px, py), vy = sampleV(px, py);
+        vScratch[vi(x, y)] = sampleVField(vTemp, px + vx * dt, py + vy * dt);
+    }
+    for (int y = activeY0(1); y <= activeY1(1); ++y)
+        for (int x = std::max(1, activeX0(1)); x <= std::min(GW - 1, activeX1(1) + 1); ++x) {
+        if (!liveUFace(x, y)) continue;
+        float px = static_cast<float>(x), py = y + 0.5f;
+        float vx = sampleU(px, py), vy = sampleV(px, py);
+        float predicted = uTemp[ui(x, y)];
+        float reversed = uScratch[ui(x, y)];
+        float original = u[ui(x, y)];
+        float corrected = predicted + 0.5f * (original - reversed);
+        if (!std::isfinite(corrected)) corrected = predicted;
+        float sx = px - vx * dt, sy = py - vy * dt;
+        uTemp[ui(x, y)] = clampToSourceExtrema(u, GW + 1, GH, sx, sy - 0.5f, corrected);
+    }
+    for (int y = std::max(1, activeY0(1)); y <= std::min(GH - 1, activeY1(1) + 1); ++y)
+        for (int x = activeX0(1); x <= activeX1(1); ++x) {
+        if (!liveVFace(x, y)) continue;
+        float px = x + 0.5f, py = static_cast<float>(y);
+        float vx = sampleU(px, py), vy = sampleV(px, py);
+        float predicted = vTemp[vi(x, y)];
+        float reversed = vScratch[vi(x, y)];
+        float original = v[vi(x, y)];
+        float corrected = predicted + 0.5f * (original - reversed);
+        if (!std::isfinite(corrected)) corrected = predicted;
+        float sx = px - vx * dt, sy = py - vy * dt;
+        vTemp[vi(x, y)] = clampToSourceExtrema(v, GW, GH + 1, sx - 0.5f, sy, corrected);
+    }
+}
+
+void FluidEngine::advectVelocityBfecc(float dt) {
+    advectVelocitySemiLagrangian(dt, false);
+    std::fill(uScratch.begin(),uScratch.end(),0.0f);std::fill(vScratch.begin(),vScratch.end(),0.0f);
+    for(int y=activeY0(1);y<=activeY1(1);++y)for(int x=std::max(1,activeX0(1));x<=std::min(GW-1,activeX1(1)+1);++x){
+        if(!openUFace(x,y)||(!isFluid(x-1,y)&&!isFluid(x,y)))continue;
+        float px=float(x),py=y+0.5f;
+        float vx=sampleUField(uTemp,px,py),vy=sampleVField(vTemp,px,py);uScratch[ui(x,y)]=sampleUField(uTemp,px+vx*dt,py+vy*dt);
+    }
+    for(int y=std::max(1,activeY0(1));y<=std::min(GH-1,activeY1(1)+1);++y)for(int x=activeX0(1);x<=activeX1(1);++x){
+        if(!openVFace(x,y)||(!isFluid(x,y-1)&&!isFluid(x,y)))continue;
+        float px=x+0.5f,py=float(y);
+        float vx=sampleUField(uTemp,px,py),vy=sampleVField(vTemp,px,py);vScratch[vi(x,y)]=sampleVField(vTemp,px+vx*dt,py+vy*dt);
+    }
+    for(size_t i=0;i<uScratch.size();++i)uScratch[i]=u[i]+0.5f*(u[i]-uScratch[i]);
+    for(size_t i=0;i<vScratch.size();++i)vScratch[i]=v[i]+0.5f*(v[i]-vScratch[i]);
+    for(int y=activeY0(1);y<=activeY1(1);++y)for(int x=std::max(1,activeX0(1));x<=std::min(GW-1,activeX1(1)+1);++x){
+        if(!openUFace(x,y)||(!isFluid(x-1,y)&&!isFluid(x,y)))continue;
+        float px=float(x),py=y+0.5f;
+        float vx=sampleU(px,py),vy=sampleV(px,py),sx=px-vx*dt,sy=py-vy*dt;
+        uTemp[ui(x,y)]=clampToSourceExtrema(u,GW+1,GH,sx,sy-0.5f,sampleUField(uScratch,sx,sy));
+    }
+    for(int y=std::max(1,activeY0(1));y<=std::min(GH-1,activeY1(1)+1);++y)for(int x=activeX0(1);x<=activeX1(1);++x){
+        if(!openVFace(x,y)||(!isFluid(x,y-1)&&!isFluid(x,y)))continue;
+        float px=x+0.5f,py=float(y);
+        float vx=sampleU(px,py),vy=sampleV(px,py),sx=px-vx*dt,sy=py-vy*dt;
+        vTemp[ui(x,y)]=clampToSourceExtrema(v,GW,GH+1,sx-0.5f,sy,sampleVField(vScratch,sx,sy));
+    }
+}
+
+void FluidEngine::commitAdvectedVelocity() {
+    for(int y=activeY0(1);y<=activeY1(1);++y)for(int x=std::max(1,activeX0(1));x<=std::min(GW-1,activeX1(1)+1);++x)
+        u[ui(x,y)]=finiteOrZero(uTemp[ui(x,y)]);
+    for(int y=std::max(1,activeY0(1));y<=std::min(GH-1,activeY1(1)+1);++y)for(int x=activeX0(1);x<=activeX1(1);++x)
+        v[vi(x,y)]=finiteOrZero(vTemp[vi(x,y)]);
+}
+
+void FluidEngine::advectVelocity(float dt) {
+    switch (config.velocityAdvection) {
+        case VelocityAdvection::None:
+            return;
+        case VelocityAdvection::FirstOrderUpwind:
+            advectVelocityFirstOrderUpwind(dt);
+            break;
+        case VelocityAdvection::NearestSemiLagrangian:
+            advectVelocitySemiLagrangian(dt, true);
+            break;
+        case VelocityAdvection::SemiLagrangian:
+            advectVelocitySemiLagrangian(dt, false);
+            break;
+        case VelocityAdvection::MacCormack:
+            advectVelocityMacCormack(dt);
+            break;
+        case VelocityAdvection::BFECC:
+            advectVelocityBfecc(dt);
+            break;
+    }
+    commitAdvectedVelocity();
+}
+
+// Spatial diffusion is real viscosity (shear). Lab-frame damping is only a cheap
+// stand-in for slightly thickened water; it must not run on honey or free-fall
+// becomes linear drag. Air is a free surface (no shear against vacuum).
+void FluidEngine::diffuseVelocity(float dt) {
+    float muRef = std::max(1.0e-8f, config.water.viscosity);
+    float muMax = config.water.viscosity;
+    int y0 = std::max(1, activeY0());
+    int y1 = std::min(GH - 1, activeY1());
+    int x0 = std::max(1, activeX0());
+    int x1 = std::min(GW - 1, activeX1());
+    auto isLiq = [this](int x, int y) {
+        return inside(x, y) && !isSolid(x, y) && fill[static_cast<size_t>(ci(x, y))] >= MIN_ACTIVE_FILL;
+    };
+    for (int y = y0; y <= y1; ++y) for (int x = x0; x <= x1; ++x) {
+        int i = ci(x, y);
+        if (solid[static_cast<size_t>(i)] || dynamicSolid[static_cast<size_t>(i)]) continue;
+        float f = fill[static_cast<size_t>(i)];
+        if (f < MIN_ACTIVE_FILL) continue;
+        float mu = mixViscosity(i);
+        muMax = std::max(muMax, mu);
+        // Honey uses spatial shear below. Damping *velocity* would slow midair blobs.
+        if (honeyFraction(i) > 0.05f) continue;
+        if (mu <= muRef * 1.15f) continue;
+        float damp = 1.0f / (1.0f + (mu / muRef - 1.0f) * dt * 6.0f);
+        if (openUFace(x, y)) u[ui(x, y)] *= damp;
+        if (openUFace(x + 1, y)) u[ui(x + 1, y)] *= damp;
+        if (openVFace(x, y)) v[vi(x, y)] *= damp;
+        if (openVFace(x, y + 1)) v[vi(x, y + 1)] *= damp;
+    }
+    if (muMax < 0.02f) return;
+
+    auto liveU = [&](int x, int y) {
+        return openUFace(x, y) && (isLiq(x - 1, y) || isLiq(x, y));
+    };
+    auto liveV = [&](int x, int y) {
+        return openVFace(x, y) && (isLiq(x, y - 1) || isLiq(x, y));
+    };
+    auto faceMuU = [&](int x, int y) {
+        float s = 0.0f; int n = 0;
+        if (isLiq(x - 1, y)) { s += mixViscosity(ci(x - 1, y)); ++n; }
+        if (isLiq(x, y)) { s += mixViscosity(ci(x, y)); ++n; }
+        return n > 0 ? s / static_cast<float>(n) : config.water.viscosity;
+    };
+    auto faceMuV = [&](int x, int y) {
+        float s = 0.0f; int n = 0;
+        if (isLiq(x, y - 1)) { s += mixViscosity(ci(x, y - 1)); ++n; }
+        if (isLiq(x, y)) { s += mixViscosity(ci(x, y)); ++n; }
+        return n > 0 ? s / static_cast<float>(n) : config.water.viscosity;
+    };
+    auto uShear = [&](int nx, int ny, float u0) {
+        if (nx < 0 || nx > GW || ny < 0 || ny >= GH || !openUFace(nx, ny)) return -u0;
+        if (!liveU(nx, ny)) return 0.0f;
+        return u[ui(nx, ny)] - u0;
+    };
+    auto vShear = [&](int nx, int ny, float v0) {
+        if (nx < 0 || nx >= GW || ny < 0 || ny > GH || !openVFace(nx, ny)) return -v0;
+        if (!liveV(nx, ny)) return 0.0f;
+        return v[vi(nx, ny)] - v0;
+    };
+
+    int iterations = std::clamp(static_cast<int>(std::ceil(muMax * 80.0f)), 1, 6);
+    for (int iteration = 0; iteration < iterations; ++iteration) {
+        uScratch = u; vScratch = v;
+        for (int y = std::max(1, activeY0()); y < activeY1(); ++y)
+            for (int x = std::max(1, activeX0()); x <= std::min(GW - 1, activeX1()); ++x) {
+                if (!liveU(x, y)) continue;
+                float mu = faceMuU(x, y);
+                if (mu < 0.02f) continue;
+                float alpha = std::clamp(mu * dt, 0.0f, 0.20f);
+                float u0 = u[ui(x, y)];
+                uScratch[ui(x, y)] = u0 + alpha * (uShear(x - 1, y, u0) + uShear(x + 1, y, u0)
+                    + uShear(x, y - 1, u0) + uShear(x, y + 1, u0));
+            }
+        for (int y = std::max(1, activeY0()); y <= std::min(GH - 1, activeY1()); ++y)
+            for (int x = std::max(1, activeX0()); x < activeX1(); ++x) {
+                if (!liveV(x, y)) continue;
+                float mu = faceMuV(x, y);
+                if (mu < 0.02f) continue;
+                float alpha = std::clamp(mu * dt, 0.0f, 0.20f);
+                float v0 = v[vi(x, y)];
+                vScratch[vi(x, y)] = v0 + alpha * (vShear(x - 1, y, v0) + vShear(x + 1, y, v0)
+                    + vShear(x, y - 1, v0) + vShear(x, y + 1, v0));
+            }
+        u.swap(uScratch); v.swap(vScratch);
+    }
+}
+
+// Gravity is a body force on vertical faces. Pressure projection, rather than a
+// floor-impact rule, produces the opposing hydrostatic force in a resting pool.
+// Airborne liquid uses the same g as water (Galileo). Density only biases faces
+// that sit between two liquid cells when at least one is not a honey blob, so
+// honey still sinks through water without falling faster in air.
+void FluidEngine::applyGravity(float dt) {
+    float gdt = gridGravity() * dt;
+    float rhoW = std::max(1.0e-6f, config.water.density);
+    for (int y = std::max(1, activeY0(1)); y <= std::min(GH - 1, activeY1(1) + 1); ++y)
+        for (int x = activeX0(1); x <= activeX1(1); ++x)
+        if (openVFace(x, y) && (isFluid(x, y - 1) || isFluid(x, y))) {
+            v[vi(x, y)] += gdt;
+            if (isFluid(x, y - 1) && isFluid(x, y)) {
+                float hA = honeyFraction(ci(x, y - 1));
+                float hB = honeyFraction(ci(x, y));
+                if (hA < 0.90f || hB < 0.90f) {
+                    float rho = 0.5f * (mixDensity(ci(x, y - 1)) + mixDensity(ci(x, y)));
+                    v[vi(x, y)] += gdt * (rho / rhoW - 1.0f);
+                }
+            }
+        }
+}
+
+bool FluidEngine::surfaceCell(int x, int y)  const {
+    if (!isFluid(x, y)) return false;
+    return !isFluid(x - 1, y) || !isFluid(x + 1, y) || !isFluid(x, y - 1) || !isFluid(x, y + 1)
+        || fill[ci(x, y)] < 0.98f;
+}
+
+// Build a persistent 3x3-smoothed color field, a near-surface mask, and
+// curvature. The level-set curvature formula is zero for a flat interface,
+// unlike a raw fill Laplacian, so resting water receives no false capillary kick.
+void FluidEngine::updateSurfaceField() {
+    surfaceCells.clear();
+    int x0 = activeX0(2), y0 = activeY0(2), x1 = activeX1(2), y1 = activeY1(2);
+    for (int y = y0; y <= y1; ++y) for (int x = x0; x <= x1; ++x) surfaceMask[ci(x, y)] = 0;
+    for (int y = std::max(1, y0); y <= std::min(GH - 2, y1); ++y)
+        for (int x = std::max(1, x0); x <= std::min(GW - 2, x1); ++x) {
+            if (fill[ci(x, y)] >= MIN_ACTIVE_FILL && surfaceCell(x, y)) {
+                surfaceMask[ci(x, y)] = 1;
+                surfaceCells.push_back(ci(x, y));
+            }
+        }
+
+    auto smoothAt = [this](int x, int y) {
+        if (x < 1 || y < 1 || x > GW - 2 || y > GH - 2) return;
+        float sum = 0.0f;
+        constexpr int weights[3][3] = {{1, 2, 1}, {2, 4, 2}, {1, 2, 1}};
+        for (int oy = -1; oy <= 1; ++oy) for (int ox = -1; ox <= 1; ++ox)
+            if (!isSolid(x + ox, y + oy)) sum += fill[ci(x + ox, y + oy)] * weights[oy + 1][ox + 1];
+        smoothedFill[ci(x, y)] = sum / 16.0f;
+    };
+    for (int index : surfaceCells) {
+        int x = index % GW, y = index / GW;
+        for (int oy = -1; oy <= 1; ++oy) for (int ox = -1; ox <= 1; ++ox) smoothAt(x + ox, y + oy);
+    }
+
+    for (int index : surfaceCells) surfaceNormalX[index] = surfaceNormalY[index] = surfaceCurvature[index] = 0.0f;
+    for (int index : surfaceCells) {
+        int x = index % GW, y = index / GW;
+        if (x < 2 || y < 2 || x > GW - 3 || y > GH - 3) continue;
+        float cx = 0.5f * (smoothedFill[ci(x + 1, y)] - smoothedFill[ci(x - 1, y)]);
+        float cy = 0.5f * (smoothedFill[ci(x, y + 1)] - smoothedFill[ci(x, y - 1)]);
+        float cxx = smoothedFill[ci(x + 1, y)] - 2.0f * smoothedFill[ci(x, y)] + smoothedFill[ci(x - 1, y)];
+        float cyy = smoothedFill[ci(x, y + 1)] - 2.0f * smoothedFill[ci(x, y)] + smoothedFill[ci(x, y - 1)];
+        float cxy = 0.25f * (smoothedFill[ci(x + 1, y + 1)] - smoothedFill[ci(x + 1, y - 1)] - smoothedFill[ci(x - 1, y + 1)] + smoothedFill[ci(x - 1, y - 1)]);
+        float gradient2 = cx * cx + cy * cy;
+        if (gradient2 < 1e-5f) continue;
+        float invLength = 1.0f / std::sqrt(gradient2);
+        surfaceNormalX[index] = -cx * invLength;
+        surfaceNormalY[index] = -cy * invLength;
+        surfaceCurvature[index] = (cxx * cy * cy - 2.0f * cx * cy * cxy + cyy * cx * cx) / std::pow(gradient2, 1.5f);
+    }
+    workCounts.surfaceCells = static_cast<int>(surfaceCells.size());
+}
+
+void FluidEngine::applySurfaceTension(float dt) {
+    if (surfaceCells.empty()) return;
+    for (int index : surfaceCells) { cellForceX[index] = 0.0f; cellForceY[index] = 0.0f; }
+    for (int index : surfaceCells) {
+        int x = index % GW, y = index / GW;
+        if (x < 2 || y < 2 || x > GW - 3 || y > GH - 3) continue;
+        float magnitude = mixSurfaceTension(index) * std::clamp(surfaceCurvature[index], -2.0f, 2.0f);
+        cellForceX[index] = magnitude * surfaceNormalX[index];
+        cellForceY[index] = magnitude * surfaceNormalY[index];
+    }
+    for (int y = activeY0(1); y <= activeY1(1); ++y)
+        for (int x = std::max(1, activeX0(1)); x <= std::min(GW - 1, activeX1(1) + 1); ++x)
+        if (openUFace(x, y)) u[ui(x, y)] += 0.5f * dt * (cellForceX[ci(x - 1, y)] + cellForceX[ci(x, y)]);
+    for (int y = std::max(1, activeY0(1)); y <= std::min(GH - 1, activeY1(1) + 1); ++y)
+        for (int x = activeX0(1); x <= activeX1(1); ++x)
+        if (openVFace(x, y)) v[vi(x, y)] += 0.5f * dt * (cellForceY[ci(x, y - 1)] + cellForceY[ci(x, y)]);
+}
+
+// Vorticity confinement restores a small fraction of the rotation lost by the
+// dissipative semi-Lagrangian step. It can be toggled with O.
+void FluidEngine::applyVorticityConfinement(float dt) {
+    if (!config.vorticityEnabled) return;
+    int x0 = std::max(1, activeX0(2)), y0 = std::max(1, activeY0(2));
+    int x1 = std::min(GW - 2, activeX1(2)), y1 = std::min(GH - 2, activeY1(2));
+    for (int y = y0; y <= y1; ++y) for (int x = x0; x <= x1; ++x) curlField[ci(x, y)] = 0.0f;
+    for (int y = y0; y <= y1; ++y) for (int x = x0; x <= x1; ++x) {
+        float dvdx = 0.5f * (cellV(x + 1, y) - cellV(x - 1, y));
+        float dudy = 0.5f * (cellU(x, y + 1) - cellU(x, y - 1));
+        curlField[ci(x, y)] = dvdx - dudy;
+    }
+    for (int y = y0; y <= y1; ++y) for (int x = x0; x <= x1; ++x) {
+        cellForceX[ci(x, y)] = 0.0f;
+        cellForceY[ci(x, y)] = 0.0f;
+        if (!isFluid(x, y)) continue;
+        float nx = 0.5f * (std::abs(curlField[ci(x + 1, y)]) - std::abs(curlField[ci(x - 1, y)]));
+        float ny = 0.5f * (std::abs(curlField[ci(x, y + 1)]) - std::abs(curlField[ci(x, y - 1)]));
+        float length = std::sqrt(nx * nx + ny * ny) + 1e-5f;
+        nx /= length; ny /= length;
+        float omega = curlField[ci(x, y)] * config.vorticityStrength;
+        cellForceX[ci(x, y)] = ny * omega;
+        cellForceY[ci(x, y)] = -nx * omega;
+    }
+    for (int y = y0; y <= y1; ++y) for (int x = std::max(1, x0); x <= std::min(GW - 1, x1 + 1); ++x)
+        if (openUFace(x, y)) u[ui(x, y)] += 0.5f * dt * (cellForceX[ci(x - 1, y)] + cellForceX[ci(x, y)]);
+    for (int y = std::max(1, y0); y <= std::min(GH - 1, y1 + 1); ++y) for (int x = x0; x <= x1; ++x)
+        if (openVFace(x, y)) v[vi(x, y)] += 0.5f * dt * (cellForceY[ci(x, y - 1)] + cellForceY[ci(x, y)]);
+}
+
+void FluidEngine::clampVelocity() {
+    for(int y=activeY0(1);y<=activeY1(1);++y)for(int x=activeX0(1);x<=std::min(GW,activeX1(1)+1);++x){float&value=u[ui(x,y)];value=std::clamp(value,-config.maxVelocity,config.maxVelocity);}
+    for(int y=activeY0(1);y<=std::min(GH,activeY1(1)+1);++y)for(int x=activeX0(1);x<=activeX1(1);++x){float&value=v[vi(x,y)];value=std::clamp(value,-config.maxVelocity,config.maxVelocity);}
+}
+
+void FluidEngine::buildPressureWorkLists() {
+    pressureRed.clear();
+    pressureBlack.clear();
+    pressureStencils.clear();
+    int x0 = activeX0(), y0 = activeY0(), x1 = activeX1(), y1 = activeY1();
+    int rectArea = std::max(1, (x1 - x0 + 1) * (y1 - y0 + 1));
+    for (int y = y0; y <= y1; ++y) for (int x = x0; x <= x1; ++x) {
+        if (!isPressureFluid(x, y)) continue;
+        int index = ci(x, y);
+        if (((x + y) & 1) == 0) pressureRed.push_back(index);
+        else pressureBlack.push_back(index);
+    }
+    workCounts.pressureCells = static_cast<int>(pressureRed.size() + pressureBlack.size());
+    useSparsePressure = workCounts.pressureCells * 10 <= rectArea * 7;
+
+    if (!useSparsePressure) return;
+
+    pressureStencils.resize(static_cast<size_t>(workCounts.pressureCells));
+    auto fillStencil = [&](int index, PressureStencil &s) {
+        s.index = index;
+        s.pressureNeighborCount = 0;
+        s.freeNeighborCount = 0;
+        int x = index % GW, y = index / GW;
+        constexpr int dx[4] = {-1, 1, 0, 0};
+        constexpr int dy[4] = {0, 0, -1, 1};
+        for (int n = 0; n < 4; ++n) {
+            int nx = x + dx[n], ny = y + dy[n];
+            if (isSolid(nx, ny)) continue;
+            if (isPressureFluid(nx, ny)) {
+                s.pressureNeighbors[s.pressureNeighborCount++] = ci(nx, ny);
+            } else {
+                s.freeDx[s.freeNeighborCount] = dx[n];
+                s.freeDy[s.freeNeighborCount] = dy[n];
+                ++s.freeNeighborCount;
+            }
+        }
+    };
+    size_t si = 0;
+    for (int index : pressureRed) fillStencil(index, pressureStencils[si++]);
+    for (int index : pressureBlack) fillStencil(index, pressureStencils[si++]);
+}
+
+void FluidEngine::sorPressureColor(std::vector<int> const &cells, float invDt, float sor) {
+    for (int index : cells) {
+        int x = index % GW, y = index / GW;
+        float sum = 0.0f, coefficient = 0.0f;
+        constexpr int dx[4] = {-1, 1, 0, 0};
+        constexpr int dy[4] = {0, 0, -1, 1};
+        for (int n = 0; n < 4; ++n) {
+            int nx = x + dx[n], ny = y + dy[n];
+            if (isSolid(nx, ny)) continue;
+            if (isPressureFluid(nx, ny)) { coefficient += 1.0f; sum += pressure[ci(nx, ny)]; }
+            else { float neighborFill = inside(nx, ny) ? fill[ci(nx, ny)] : 0.0f; coefficient += 1.0f / liquidFaceFraction(fill[index], neighborFill); }
+        }
+        if (coefficient <= 0.0f) continue;
+        float estimate = (sum - divergenceField[index] * invDt) / coefficient;
+        float &p = pressure[index];
+        p += sor * (estimate - p);
+    }
+}
+
+void FluidEngine::sorPressureColorParallel(std::vector<int> const &cells, float invDt, float sor) {
+    if (cells.empty()) return;
+    if (!useParallelPressure(static_cast<int>(cells.size()))) {
+        sorPressureColor(cells, invDt, sor);
+        return;
+    }
+    lastPressureParallel = true;
+    if (!useSparsePressure || pressureStencils.empty()) {
+        workerPool.parallelFor(0, static_cast<int>(cells.size()), [&](int a, int b) {
+            for (int i = a; i < b; ++i) {
+                int index = cells[static_cast<size_t>(i)];
+                int x = index % GW, y = index / GW;
+                float sum = 0.0f, coefficient = 0.0f;
+                constexpr int dx[4] = {-1, 1, 0, 0};
+                constexpr int dy[4] = {0, 0, -1, 1};
+                for (int n = 0; n < 4; ++n) {
+                    int nx = x + dx[n], ny = y + dy[n];
+                    if (isSolid(nx, ny)) continue;
+                    if (isPressureFluid(nx, ny)) { coefficient += 1.0f; sum += pressure[ci(nx, ny)]; }
+                    else { float neighborFill = inside(nx, ny) ? fill[ci(nx, ny)] : 0.0f; coefficient += 1.0f / liquidFaceFraction(fill[index], neighborFill); }
+                }
+                if (coefficient <= 0.0f) continue;
+                float estimate = (sum - divergenceField[index] * invDt) / coefficient;
+                pressure[index] += sor * (estimate - pressure[index]);
+            }
+        });
+        return;
+    }
+
+    size_t offset = (&cells == &pressureBlack) ? pressureRed.size() : 0;
+    workerPool.parallelFor(0, static_cast<int>(cells.size()), [&](int a, int b) {
+        for (int i = a; i < b; ++i) {
+            PressureStencil const &s = pressureStencils[offset + static_cast<size_t>(i)];
+            float sum = 0.0f, coefficient = 0.0f;
+            for (int n = 0; n < s.pressureNeighborCount; ++n) {
+                coefficient += 1.0f;
+                sum += pressure[s.pressureNeighbors[n]];
+            }
+            int x = s.index % GW, y = s.index / GW;
+            for (int n = 0; n < s.freeNeighborCount; ++n) {
+                int nx = x + s.freeDx[n], ny = y + s.freeDy[n];
+                float neighborFill = inside(nx, ny) ? fill[ci(nx, ny)] : 0.0f;
+                coefficient += 1.0f / liquidFaceFraction(fill[s.index], neighborFill);
+            }
+            if (coefficient <= 0.0f) continue;
+            float estimate = (sum - divergenceField[s.index] * invDt) / coefficient;
+            pressure[s.index] += sor * (estimate - pressure[s.index]);
+        }
+    });
+}
+
+float FluidEngine::pressureResidual(float invDt, float dt) const {
+    float maxEquationResidual = 0.0f;
+    auto checkCell = [&](int index) {
+        int x = index % GW, y = index / GW;
+        float sum = 0.0f, coefficient = 0.0f;
+        constexpr int dx[4] = {-1, 1, 0, 0}, dy[4] = {0, 0, -1, 1};
+        for (int n = 0; n < 4; ++n) {
+            int nx = x + dx[n], ny = y + dy[n];
+            if (isSolid(nx, ny)) continue;
+            if (isPressureFluid(nx, ny)) { coefficient += 1.0f; sum += pressure[ci(nx, ny)]; }
+            else { float nf = inside(nx, ny) ? fill[ci(nx, ny)] : 0.0f; coefficient += 1.0f / liquidFaceFraction(fill[index], nf); }
+        }
+        float rhs = divergenceField[index] * invDt;
+        maxEquationResidual = std::max(maxEquationResidual, std::abs(coefficient * pressure[index] - sum + rhs) * dt);
+    };
+    if (useSparsePressure) {
+        for (int index : pressureRed) checkCell(index);
+        for (int index : pressureBlack) checkCell(index);
+    } else {
+        for (int y = activeY0(); y <= activeY1(); ++y) for (int x = activeX0(); x <= activeX1(); ++x)
+            if (isPressureFluid(x, y)) checkCell(ci(x, y));
+    }
+    return maxEquationResidual;
+}
+
+// Projection solves Laplacian(p)=divergence/dt with red-black Gauss-Seidel.
+// Air is a zero-pressure free surface; solid neighbors impose no-through flow.
+void FluidEngine::projectVelocity(float dt) {
+    for (int y = activeY0(1); y <= activeY1(1); ++y)
+        for (int x = activeX0(1); x <= activeX1(1); ++x) {
+            int index = ci(x,y);
+            divergenceField[index]=0.0f;pressureBefore[index]=pressure[index];
+            if (isSolid(x, y) || fill[index] < MIN_PRESSURE_FILL) pressure[index] = 0.0f;
+        }
+
+    auto listStart = Clock::now();
+    buildPressureWorkLists();
+    timingAccum.listsBuild += elapsedMs(listStart);
+
+    float maximumDivergence = 0.0f;
+    if (useSparsePressure) {
+        for (int index : pressureRed) {
+            int x = index % GW, y = index / GW;
+            divergenceField[index] = u[ui(x + 1, y)] - u[ui(x, y)] + v[vi(x, y + 1)] - v[vi(x, y)];
+            maximumDivergence = std::max(maximumDivergence, std::abs(divergenceField[index]));
+        }
+        for (int index : pressureBlack) {
+            int x = index % GW, y = index / GW;
+            divergenceField[index] = u[ui(x + 1, y)] - u[ui(x, y)] + v[vi(x, y + 1)] - v[vi(x, y)];
+            maximumDivergence = std::max(maximumDivergence, std::abs(divergenceField[index]));
+        }
+    } else {
+        for (int y = activeY0(); y <= activeY1(); ++y) for (int x = activeX0(); x <= activeX1(); ++x) {
+            if (!isPressureFluid(x, y)) continue;
+            divergenceField[ci(x, y)] = u[ui(x + 1, y)] - u[ui(x, y)] + v[vi(x, y + 1)] - v[vi(x, y)];
+            maximumDivergence = std::max(maximumDivergence, std::abs(divergenceField[ci(x, y)]));
+        }
+    }
+
+    float invDt = 1.0f / std::max(dt, 1e-5f);
+    constexpr float sor = 1.65f;
+    int budget = maximumDivergence < 0.015f && measuredMaxVelocity < 0.5f ? 8
+        : (maximumDivergence < 0.20f && measuredMaxVelocity < 8.0f ? 14 : config.maxPressureIterations);
+    budget = std::min(budget, config.maxPressureIterations);
+    lastPressureIterations = 0;
+
+    lastPressureParallel = false;
+    auto applyColor = [&](std::vector<int> const &cells) {
+        if (useParallelPressure(static_cast<int>(cells.size()))) {
+            sorPressureColorParallel(cells, invDt, sor);
+            return;
+        }
+        if (useSparsePressure && !pressureStencils.empty()) {
+            size_t offset = (&cells == &pressureBlack) ? pressureRed.size() : 0;
+            for (size_t i = 0; i < cells.size(); ++i) {
+                PressureStencil const &s = pressureStencils[offset + i];
+                float sum = 0.0f, coefficient = 0.0f;
+                for (int n = 0; n < s.pressureNeighborCount; ++n) {
+                    coefficient += 1.0f;
+                    sum += pressure[s.pressureNeighbors[n]];
+                }
+                int x = s.index % GW, y = s.index / GW;
+                for (int n = 0; n < s.freeNeighborCount; ++n) {
+                    int nx = x + s.freeDx[n], ny = y + s.freeDy[n];
+                    float neighborFill = inside(nx, ny) ? fill[ci(nx, ny)] : 0.0f;
+                    coefficient += 1.0f / liquidFaceFraction(fill[s.index], neighborFill);
+                }
+                if (coefficient <= 0.0f) continue;
+                float estimate = (sum - divergenceField[s.index] * invDt) / coefficient;
+                pressure[s.index] += sor * (estimate - pressure[s.index]);
+            }
+            return;
+        }
+        if (!cells.empty()) {
+            sorPressureColor(cells, invDt, sor);
+            return;
+        }
+        int color = (&cells == &pressureBlack) ? 1 : 0;
+        for (int y = activeY0(); y <= activeY1(); ++y) for (int x = activeX0(); x <= activeX1(); ++x) {
+            if (((x + y) & 1) != color || !isPressureFluid(x, y)) continue;
+            float sum = 0.0f, coefficient = 0.0f;
+            constexpr int dx[4] = {-1, 1, 0, 0};
+            constexpr int dy[4] = {0, 0, -1, 1};
+            for (int n = 0; n < 4; ++n) {
+                int nx = x + dx[n], ny = y + dy[n];
+                if (isSolid(nx, ny)) continue;
+                if (isPressureFluid(nx, ny)) { coefficient += 1.0f; sum += pressure[ci(nx, ny)]; }
+                else { float neighborFill = inside(nx, ny) ? fill[ci(nx, ny)] : 0.0f; coefficient += 1.0f / liquidFaceFraction(fill[ci(x, y)], neighborFill); }
+            }
+            if (coefficient <= 0.0f) continue;
+            float rhs = divergenceField[ci(x, y)] * invDt;
+            float estimate = (sum - rhs) / coefficient;
+            float &p = pressure[ci(x, y)];
+            p += sor * (estimate - p);
+        }
+    };
+
+    for (int iteration = 0; iteration < budget; ++iteration) {
+        applyColor(pressureRed);
+        applyColor(pressureBlack);
+        lastPressureIterations = iteration + 1;
+        if (iteration >= 7 && (iteration & 3) == 3) {
+            if (pressureResidual(invDt, dt) < 0.006f) break;
+        }
+    }
+    for (int y = activeY0(1); y <= activeY1(1); ++y)
+        for (int x = std::max(1, activeX0(1)); x <= std::min(GW - 1, activeX1(1) + 1); ++x) {
+        if (!openUFace(x, y)) { u[ui(x, y)] = 0.0f; continue; }
+        bool leftFluid = isPressureFluid(x - 1, y), rightFluid = isPressureFluid(x, y);
+        if (!leftFluid && !rightFluid) { u[ui(x, y)] = 0.0f; continue; }
+        float pLeft = leftFluid ? pressure[ci(x - 1, y)] : 0.0f;
+        float pRight = rightFluid ? pressure[ci(x, y)] : 0.0f;
+        float leftFill = inside(x - 1, y) ? fill[ci(x - 1, y)] : 0.0f, rightFill = inside(x, y) ? fill[ci(x, y)] : 0.0f;
+        float theta = leftFluid && rightFluid ? 1.0f : liquidFaceFraction(leftFill, rightFill);
+        u[ui(x, y)] -= dt * (pRight - pLeft) / (config.water.density * theta);
+    }
+    for (int y = std::max(1, activeY0(1)); y <= std::min(GH - 1, activeY1(1) + 1); ++y)
+        for (int x = activeX0(1); x <= activeX1(1); ++x) {
+        if (!openVFace(x, y)) { v[vi(x, y)] = 0.0f; continue; }
+        bool topFluid = isPressureFluid(x, y - 1), bottomFluid = isPressureFluid(x, y);
+        if (!topFluid && !bottomFluid) { v[vi(x, y)] = 0.0f; continue; }
+        float pTop = topFluid ? pressure[ci(x, y - 1)] : 0.0f;
+        float pBottom = bottomFluid ? pressure[ci(x, y)] : 0.0f;
+        float topFill = inside(x, y - 1) ? fill[ci(x, y - 1)] : 0.0f, bottomFill = inside(x, y) ? fill[ci(x, y)] : 0.0f;
+        float theta = topFluid && bottomFluid ? 1.0f : liquidFaceFraction(topFill, bottomFill);
+        v[vi(x, y)] -= dt * (pBottom - pTop) / (config.water.density * theta);
+    }
+    enforceActiveBoundaries();
+}
+
+// Conservative adjacent-face transport. Donor scaling prevents a cell exporting
+// more fill than it owns; receiver scaling prevents overfilling. The same final
+// flux is subtracted and added, so scan order cannot create or destroy volume.
+void FluidEngine::advectLiquidVolume(float dt) {
+    int x0=activeX0(1),y0=activeY0(1),x1=activeX1(1),y1=activeY1(1);
+    double regionVolumeBefore=0.0;
+    for(int y=y0;y<=y1;++y)for(int x=x0;x<=x1;++x){int i=ci(x,y);previousFill[i]=fill[i];regionVolumeBefore+=fill[i];}
+    for(int y=y0;y<=y1;++y)for(int x=std::max(1,x0+1);x<=std::min(GW-1,x1);++x)fluxU[ui(x,y)]=0.0f;
+    for(int y=std::max(1,y0+1);y<=std::min(GH-1,y1);++y)for(int x=x0;x<=x1;++x)fluxV[vi(x,y)]=0.0f;
+    nonzeroFluxUFaces.clear();
+    nonzeroFluxVFaces.clear();
+    for (int y = y0; y <= y1; ++y) for (int x = std::max(1,x0+1); x <= std::min(GW-1,x1); ++x) {
+        if (!openUFace(x, y)) continue;
+        ++workCounts.activeUFaces;
+        float a = fill[ci(x - 1, y)], b = fill[ci(x, y)];
+        float q = std::clamp(u[ui(x, y)] * dt * liquidFaceFraction(a, b), -1.0f, 1.0f);
+        int donor = q >= 0.0f ? ci(x - 1, y) : ci(x, y);
+        if (fill[donor] <= 1e-7f) continue;
+        float amount = std::min(std::abs(q), fill[donor]);
+        if (amount <= 0.0f) continue;
+        fluxU[ui(x, y)] = std::copysign(amount, q);
+        nonzeroFluxUFaces.push_back(ui(x, y));
+    }
+    for (int y = std::max(1,y0+1); y <= std::min(GH-1,y1); ++y) for (int x = x0; x <= x1; ++x) {
+        if (!openVFace(x, y)) continue;
+        ++workCounts.activeVFaces;
+        float a = fill[ci(x, y - 1)], b = fill[ci(x, y)];
+        float q = std::clamp(v[vi(x, y)] * dt * liquidFaceFraction(a, b), -1.0f, 1.0f);
+        int donor = q >= 0.0f ? ci(x, y - 1) : ci(x, y);
+        if (fill[donor] <= 1e-7f) continue;
+        float amount = std::min(std::abs(q), fill[donor]);
+        if (amount <= 0.0f) continue;
+        fluxV[vi(x, y)] = std::copysign(amount, q);
+        nonzeroFluxVFaces.push_back(vi(x, y));
+    }
+    workCounts.nonzeroFluxU = static_cast<int>(nonzeroFluxUFaces.size());
+    workCounts.nonzeroFluxV = static_cast<int>(nonzeroFluxVFaces.size());
+
+    int possibleU = std::max(1, (y1 - y0 + 1) * std::max(0, std::min(GW - 1, x1) - std::max(1, x0 + 1) + 1));
+    int possibleV = std::max(1, (x1 - x0 + 1) * std::max(0, std::min(GH - 1, y1) - std::max(1, y0 + 1) + 1));
+    bool useSparseFlux = (workCounts.nonzeroFluxU + workCounts.nonzeroFluxV) * 10 <= (possibleU + possibleV) * 4;
+
+    // Iteratively limit the same face fluxes at donors and receivers. Receiver
+    // capacity includes the cell's accepted outgoing flux, enabling A->B->C
+    // through-flow without ever applying a scan-ordered update.
+    workCounts.limiterPasses = 0;
+    int fluxFaceCount = workCounts.nonzeroFluxU + workCounts.nonzeroFluxV;
+    int limiterCap = std::clamp(config.maxLimiterPasses, 1, 16);
+    for (int pass = 0; pass < limiterCap && fluxFaceCount > 0; ++pass) {
+        bool limited = false; float maxFluxChange=0.0f;
+        ++workCounts.limiterPasses;
+        if (useSparseFlux) {
+            fluxTouchedCells.clear();
+            auto mark = [&](int cell) { fluxTouchedCells.push_back(cell); outgoing[cell] = incoming[cell] = 0.0f; };
+            // Reset only cells touched by current nonzero faces.
+            for (int fi : nonzeroFluxUFaces) {
+                int x = fi % (GW + 1), y = fi / (GW + 1);
+                mark(ci(x - 1, y)); mark(ci(x, y));
+            }
+            for (int fi : nonzeroFluxVFaces) {
+                int x = fi % GW, y = fi / GW;
+                mark(ci(x, y - 1)); mark(ci(x, y));
+            }
+            // Dedup not required for correctness (re-zero is fine); accumulate once.
+            for (int fi : nonzeroFluxUFaces) {
+                int x = fi % (GW + 1), y = fi / (GW + 1);
+                float q = fluxU[fi];
+                if (q == 0.0f) continue;
+                int donor = q > 0.0f ? ci(x - 1, y) : ci(x, y);
+                int receiver = q > 0.0f ? ci(x, y) : ci(x - 1, y);
+                outgoing[donor] += std::abs(q); incoming[receiver] += std::abs(q);
+            }
+            for (int fi : nonzeroFluxVFaces) {
+                int x = fi % GW, y = fi / GW;
+                float q = fluxV[fi];
+                if (q == 0.0f) continue;
+                int donor = q > 0.0f ? ci(x, y - 1) : ci(x, y);
+                int receiver = q > 0.0f ? ci(x, y) : ci(x, y - 1);
+                outgoing[donor] += std::abs(q); incoming[receiver] += std::abs(q);
+            }
+            for (int i : fluxTouchedCells) {
+                donorScale[i] = outgoing[i] > fill[i] && outgoing[i] > 0.0f ? fill[i] / outgoing[i] : 1.0f;
+                if (donorScale[i] < 0.999999f) limited = true;
+            }
+            for (int fi : nonzeroFluxUFaces) {
+                float &q = fluxU[fi];
+                int x = fi % (GW + 1), y = fi / (GW + 1);
+                int donor = q > 0 ? ci(x - 1, y) : ci(x, y);
+                float old = q; q *= donorScale[donor]; maxFluxChange = std::max(maxFluxChange, std::abs(old - q));
+            }
+            for (int fi : nonzeroFluxVFaces) {
+                float &q = fluxV[fi];
+                int x = fi % GW, y = fi / GW;
+                int donor = q > 0 ? ci(x, y - 1) : ci(x, y);
+                float old = q; q *= donorScale[donor]; maxFluxChange = std::max(maxFluxChange, std::abs(old - q));
+            }
+
+            for (int i : fluxTouchedCells) outgoing[i] = incoming[i] = 0.0f;
+            for (int fi : nonzeroFluxUFaces) {
+                int x = fi % (GW + 1), y = fi / (GW + 1);
+                float q = fluxU[fi];
+                if (q == 0.0f) continue;
+                int donor = q > 0.0f ? ci(x - 1, y) : ci(x, y);
+                int receiver = q > 0.0f ? ci(x, y) : ci(x - 1, y);
+                outgoing[donor] += std::abs(q); incoming[receiver] += std::abs(q);
+            }
+            for (int fi : nonzeroFluxVFaces) {
+                int x = fi % GW, y = fi / GW;
+                float q = fluxV[fi];
+                if (q == 0.0f) continue;
+                int donor = q > 0.0f ? ci(x, y - 1) : ci(x, y);
+                int receiver = q > 0.0f ? ci(x, y) : ci(x, y - 1);
+                outgoing[donor] += std::abs(q); incoming[receiver] += std::abs(q);
+            }
+            for (int i : fluxTouchedCells) {
+                float capacity = std::max(0.0f, 1.0f - fill[i] + outgoing[i]);
+                receiverScale[i] = incoming[i] > capacity && incoming[i] > 0.0f ? capacity / incoming[i] : 1.0f;
+                if (receiverScale[i] < 0.999999f) limited = true;
+            }
+            for (int fi : nonzeroFluxUFaces) {
+                float &q = fluxU[fi];
+                int x = fi % (GW + 1), y = fi / (GW + 1);
+                int receiver = q > 0 ? ci(x, y) : ci(x - 1, y);
+                float old = q; q *= receiverScale[receiver]; maxFluxChange = std::max(maxFluxChange, std::abs(old - q));
+            }
+            for (int fi : nonzeroFluxVFaces) {
+                float &q = fluxV[fi];
+                int x = fi % GW, y = fi / GW;
+                int receiver = q > 0 ? ci(x, y) : ci(x, y - 1);
+                float old = q; q *= receiverScale[receiver]; maxFluxChange = std::max(maxFluxChange, std::abs(old - q));
+            }
+        } else {
+            for(int y=y0;y<=y1;++y)for(int x=x0;x<=x1;++x){int i=ci(x,y);outgoing[i]=incoming[i]=0.0f;}
+            auto accumulate = [this](float q, int negativeCell, int positiveCell) {
+                if (q == 0.0f) return;
+                int donor = q > 0.0f ? negativeCell : positiveCell;
+                int receiver = q > 0.0f ? positiveCell : negativeCell;
+                outgoing[donor] += std::abs(q); incoming[receiver] += std::abs(q);
+            };
+            for(int y=y0;y<=y1;++y)for(int x=std::max(1,x0+1);x<=std::min(GW-1,x1);++x)accumulate(fluxU[ui(x,y)],ci(x-1,y),ci(x,y));
+            for(int y=std::max(1,y0+1);y<=std::min(GH-1,y1);++y)for(int x=x0;x<=x1;++x)accumulate(fluxV[vi(x,y)],ci(x,y-1),ci(x,y));
+            for(int y=y0;y<=y1;++y)for(int x=x0;x<=x1;++x){int i=ci(x,y);donorScale[i]=outgoing[i]>fill[i]&&outgoing[i]>0.0f?fill[i]/outgoing[i]:1.0f;if(donorScale[i]<0.999999f)limited=true;}
+            for(int y=y0;y<=y1;++y)for(int x=std::max(1,x0+1);x<=std::min(GW-1,x1);++x){float&q=fluxU[ui(x,y)];int donor=q>0?ci(x-1,y):ci(x,y);float old=q;q*=donorScale[donor];maxFluxChange=std::max(maxFluxChange,std::abs(old-q));}
+            for(int y=std::max(1,y0+1);y<=std::min(GH-1,y1);++y)for(int x=x0;x<=x1;++x){float&q=fluxV[vi(x,y)];int donor=q>0?ci(x,y-1):ci(x,y);float old=q;q*=donorScale[donor];maxFluxChange=std::max(maxFluxChange,std::abs(old-q));}
+
+            for(int y=y0;y<=y1;++y)for(int x=x0;x<=x1;++x){int i=ci(x,y);outgoing[i]=incoming[i]=0.0f;}
+            for(int y=y0;y<=y1;++y)for(int x=std::max(1,x0+1);x<=std::min(GW-1,x1);++x)accumulate(fluxU[ui(x,y)],ci(x-1,y),ci(x,y));
+            for(int y=std::max(1,y0+1);y<=std::min(GH-1,y1);++y)for(int x=x0;x<=x1;++x)accumulate(fluxV[vi(x,y)],ci(x,y-1),ci(x,y));
+            for(int y=y0;y<=y1;++y)for(int x=x0;x<=x1;++x){int i=ci(x,y);float capacity=std::max(0.0f,1.0f-fill[i]+outgoing[i]);receiverScale[i]=incoming[i]>capacity&&incoming[i]>0.0f?capacity/incoming[i]:1.0f;if(receiverScale[i]<0.999999f)limited=true;}
+            for(int y=y0;y<=y1;++y)for(int x=std::max(1,x0+1);x<=std::min(GW-1,x1);++x){float&q=fluxU[ui(x,y)];int receiver=q>0?ci(x,y):ci(x-1,y);float old=q;q*=receiverScale[receiver];maxFluxChange=std::max(maxFluxChange,std::abs(old-q));}
+            for(int y=std::max(1,y0+1);y<=std::min(GH-1,y1);++y)for(int x=x0;x<=x1;++x){float&q=fluxV[vi(x,y)];int receiver=q>0?ci(x,y):ci(x,y-1);float old=q;q*=receiverScale[receiver];maxFluxChange=std::max(maxFluxChange,std::abs(old-q));}
+        }
+        if (!limited || maxFluxChange < 1e-5f) break;
+    }
+    for(int y=y0;y<=y1;++y)for(int x=x0;x<=x1;++x){
+        int i=ci(x,y);
+        nextFill[i]=fill[i];
+        nextHeat[i]=liquidHeat[i];
+        nextDyeR[i]=dyeR[i]; nextDyeG[i]=dyeG[i]; nextDyeB[i]=dyeB[i];
+        nextHoney[i]=honey[i];
+    }
+    auto moveField = [](std::vector<float> const &src, std::vector<float> &nxt, int donor, int receiver, float amount, float f0) {
+        float d = (f0 > 1.0e-20f) ? src[static_cast<size_t>(donor)] * (amount / f0) : 0.0f;
+        nxt[static_cast<size_t>(donor)] -= d;
+        nxt[static_cast<size_t>(receiver)] += d;
+        return d;
+    };
+    auto transfer = [this, &moveField](int donor, int receiver, float amount) {
+        nextFill[donor] -= amount;
+        nextFill[receiver] += amount;
+        float f0 = fill[donor];
+        float dq = moveField(liquidHeat, nextHeat, donor, receiver, amount, f0);
+        moveField(dyeR, nextDyeR, donor, receiver, amount, f0);
+        moveField(dyeG, nextDyeG, donor, receiver, amount, f0);
+        moveField(dyeB, nextDyeB, donor, receiver, amount, f0);
+        moveField(honey, nextHoney, donor, receiver, amount, f0);
+        if (std::abs(dq) > 1.0e-4f) {
+            float td = tempFromEnergy(liquidHeat[donor], thermalCapacity(massKg(mixDensity(donor), f0, config.cellsPerMeter), mixSpecificHeat(donor)));
+            if (std::abs(td - AMBIENT_TEMPERATURE_K) > 0.2f) {
+                int dx = donor % GW, dy = donor / GW;
+                int rx = receiver % GW, ry = receiver / GW;
+                wakeThermalAt(dx, dy);
+                wakeThermalAt(rx, ry);
+            }
+        }
+    };
+    if (useSparseFlux) {
+        for (int fi : nonzeroFluxUFaces) {
+            float q = fluxU[fi]; if (q == 0.0f) continue;
+            int x = fi % (GW + 1), y = fi / (GW + 1);
+            transfer(q > 0.0f ? ci(x - 1, y) : ci(x, y), q > 0.0f ? ci(x, y) : ci(x - 1, y), std::abs(q));
+        }
+        for (int fi : nonzeroFluxVFaces) {
+            float q = fluxV[fi]; if (q == 0.0f) continue;
+            int x = fi % GW, y = fi / GW;
+            transfer(q > 0.0f ? ci(x, y - 1) : ci(x, y), q > 0.0f ? ci(x, y) : ci(x, y - 1), std::abs(q));
+        }
+    } else {
+        for (int y = y0; y <= y1; ++y) for (int x = std::max(1,x0+1); x <= std::min(GW-1,x1); ++x) {
+            float q = fluxU[ui(x, y)]; if (q == 0.0f) continue;
+            transfer(q > 0.0f ? ci(x - 1, y) : ci(x, y), q > 0.0f ? ci(x, y) : ci(x - 1, y), std::abs(q));
+        }
+        for (int y = std::max(1,y0+1); y <= std::min(GH-1,y1); ++y) for (int x = x0; x <= x1; ++x) {
+            float q = fluxV[vi(x, y)]; if (q == 0.0f) continue;
+            transfer(q > 0.0f ? ci(x, y - 1) : ci(x, y), q > 0.0f ? ci(x, y) : ci(x, y - 1), std::abs(q));
+        }
+    }
+    double regionVolumeAfter=0.0;
+    double overflowVol=0.0, overflowHeat=0.0, overflowDyeR=0.0, overflowDyeG=0.0, overflowDyeB=0.0, overflowHoney=0.0;
+    for(int y=y0;y<=y1;++y)for(int x=x0;x<=x1;++x){
+        int i=ci(x,y);
+        float old=fill[i];
+        float nf=(solid[i]||dynamicSolid[i])?0.0f:nextFill[i];
+        float nh=nextHeat[i];
+        float ndr=nextDyeR[i], ndg=nextDyeG[i], ndb=nextDyeB[i], nhy=nextHoney[i];
+        if (solid[i]||dynamicSolid[i]) { nh = 0.0f; ndr = ndg = ndb = nhy = 0.0f; }
+        if (nf > 1.0f) {
+            float over = nf - 1.0f;
+            float frac = (nf > 1.0e-20f) ? (over / nf) : 0.0f;
+            overflowVol += over;
+            overflowHeat += nh * frac; nh -= nh * frac;
+            overflowDyeR += ndr * frac; ndr -= ndr * frac;
+            overflowDyeG += ndg * frac; ndg -= ndg * frac;
+            overflowDyeB += ndb * frac; ndb -= ndb * frac;
+            overflowHoney += nhy * frac; nhy -= nhy * frac;
+            nf = 1.0f;
+        }
+        if (nf < 0.0f) nf = 0.0f;
+        if (nf <= 1.0e-8f) { nf = 0.0f; nh = 0.0f; ndr = ndg = ndb = nhy = 0.0f; }
+        if (!std::isfinite(nh) || nh < 0.0f) nh = 0.0f;
+        fill[i]=nf;
+        liquidHeat[i]=nh;
+        dyeR[i]=std::max(0.0f, ndr); dyeG[i]=std::max(0.0f, ndg); dyeB[i]=std::max(0.0f, ndb);
+        honey[i]=std::clamp(nhy, 0.0f, nf);
+        regionVolumeAfter+=fill[i];
+        if(fill[i]>=MIN_RENDER_FILL&&old<MIN_RENDER_FILL)waterShade[i]=makeShade(x,y);
+    }
+    // Roundoff and the final bounds clamp must not leak mass. Redistribute only
+    // the clamp discrepancy across existing liquid, proportionally to capacity.
+    // Heat, dye, and honey ride with the returned volume.
+    double correction=regionVolumeBefore-regionVolumeAfter;
+    if(std::abs(correction)>1e-9){
+        double capacity=0.0;
+        for(int y=y0;y<=y1;++y)for(int x=x0;x<=x1;++x){int i=ci(x,y);if(solid[i]||dynamicSolid[i]||fill[i]<MIN_ACTIVE_FILL)continue;capacity+=correction>0.0?1.0-fill[i]:fill[i];}
+        if(capacity>1e-12)for(int y=y0;y<=y1;++y)for(int x=x0;x<=x1;++x){
+            int i=ci(x,y);
+            if(solid[i]||dynamicSolid[i]||fill[i]<MIN_ACTIVE_FILL)continue;
+            double share=(correction>0.0?1.0-fill[i]:fill[i])/capacity;
+            float dF=float(correction*share);
+            if (dF > 0.0f) {
+                float s = (overflowVol > 1.0e-12) ? static_cast<float>(static_cast<double>(dF) / overflowVol) : 0.0f;
+                fill[i]=std::clamp(fill[i]+dF,0.0f,1.0f);
+                liquidHeat[i]+=static_cast<float>(overflowHeat * s);
+                dyeR[i]+=static_cast<float>(overflowDyeR * s);
+                dyeG[i]+=static_cast<float>(overflowDyeG * s);
+                dyeB[i]+=static_cast<float>(overflowDyeB * s);
+                honey[i]+=static_cast<float>(overflowHoney * s);
+                honey[i]=std::min(honey[i], fill[i]);
+            } else if (dF < 0.0f) {
+                (void)extractVolume(i, -dF);
+            }
+        }
+    }
+}
+
+// Conservatively gather thin residuals instead of deleting them or
+// allowing them to pressure-solve as full cells.
+//
+// Trails behind falling droplets are Eulerian fractional fill left by
+// conservative transport (volume is conserved, but Normal view paints any
+// cell >= MIN_RENDER_FILL as a full pixel). They are not mass creation.
+//
+// Consolidation merges thin cells into connected, *fuller* nearby liquid -
+// never delete mass, never walk into empty air (that extends trails), and
+// never cut diagonally through a sealed solid corner. Equal-fill cells may
+// only coalesce downward so a smear collapses into its leading blob.
+void FluidEngine::consolidateResidualVolume() {
+    if (!residualConsolidationEnabled) return;
+    int x0 = activeX0(1), y0 = activeY0(1), x1 = activeX1(1), y1 = activeY1(1);
+    workCounts.residualTransfers = 0;
+    for (int y = y0; y <= y1; ++y) for (int x = x0; x <= x1; ++x) {
+        int i = ci(x, y);
+        residualTarget[i] = -1;
+        residualTransfer[i] = incoming[i] = 0.0f;
+    }
+
+    // Orthogonal first, then diagonals. Diagonals require an open orthogonal gate.
+    constexpr int dx[8] = {0, -1, 1, 0, -1, 1, -1, 1};
+    constexpr int dy[8] = {1, 0, 0, -1, 1, 1, -1, -1};
+
+    for (int y = std::max(1, activeY0(1)); y <= std::min(GH - 2, activeY1(1)); ++y)
+        for (int x = std::max(1, activeX0(1)); x <= std::min(GW - 2, activeX1(1)); ++x) {
+            int index = ci(x, y);
+            if (solid[index] || dynamicSolid[index] || fill[index] <= 0.0f || fill[index] >= MIN_CONSOLIDATE_FILL) continue;
+
+            // Interior / almost-interior cells are undersaturated pool, not crumbs.
+            // Dumping them into neighbors carves 0.03-0.28 holes in otherwise full water.
+            int visibleNeighbors = 0;
+            constexpr int odx[4] = {-1, 1, 0, 0};
+            constexpr int ody[4] = {0, 0, -1, 1};
+            for (int n = 0; n < 4; ++n) {
+                int nx = x + odx[n], ny = y + ody[n];
+                if (!inside(nx, ny) || isSolid(nx, ny)) continue;
+                if (fill[ci(nx, ny)] >= MIN_RENDER_FILL) ++visibleNeighbors;
+            }
+            if (visibleNeighbors >= 3) continue;
+
+            float vx = cellU(x, y), vy = cellV(x, y);
+            int best = -1;
+            float bestScore = -1e9f;
+
+            for (int n = 0; n < 8; ++n) {
+                int nx = x + dx[n], ny = y + dy[n];
+                if (!inside(nx, ny)) continue;
+                int ni = ci(nx, ny);
+                if (isSolid(nx, ny)) continue;
+                float nf = fill[ni];
+                float room = 1.0f - nf;
+                if (room <= 1e-5f) continue;
+
+                bool diagonal = dx[n] != 0 && dy[n] != 0;
+                if (diagonal) {
+                    bool viaHorizontal = !isSolid(x + dx[n], y);
+                    bool viaVertical = !isSolid(x, y + dy[n]);
+                    if (!viaHorizontal || !viaVertical) continue;
+                }
+
+                // Never step into completely empty air - that stretches falling-stream trails.
+                if (nf <= 1e-7f) continue;
+                // Never pull volume back upward: that undoes falling (a 1-cell drop
+                // would reabsorb the flux it just sent into the cell below).
+                if (dy[n] < 0) continue;
+                // Only coalesce into equal or fuller liquid.
+                if (nf < fill[index] - 1e-5f) continue;
+
+                float score = nf * 250.0f;
+                if (nf >= MIN_RENDER_FILL) score += 400.0f;
+                else if (nf >= MIN_ACTIVE_FILL) score += 120.0f;
+                else score += 30.0f;
+
+                if (dy[n] > 0) score += 20.0f;
+                score += (vx * dx[n] + vy * dy[n]) * 2.0f;
+                if (!diagonal) score += 8.0f;
+                score += room * 15.0f;
+
+                if (score > bestScore) {
+                    bestScore = score;
+                    best = ni;
+                }
+            }
+
+            if (best >= 0) {
+                residualTarget[index] = best;
+                residualTransfer[index] = fill[index];
+                incoming[best] += fill[index];
+            }
+        }
+
+    for (int y = y0; y <= y1; ++y) for (int x = x0; x <= x1; ++x) {
+        int i = ci(x, y);
+        nextFill[i] = fill[i];
+        nextHeat[i] = liquidHeat[i];
+        nextDyeR[i] = dyeR[i]; nextDyeG[i] = dyeG[i]; nextDyeB[i] = dyeB[i];
+        nextHoney[i] = honey[i];
+    }
+    for (int y = y0; y <= y1; ++y) for (int x = x0; x <= x1; ++x) {
+        int i = ci(x, y);
+        if (residualTarget[i] < 0) continue;
+        int receiver = residualTarget[i];
+        float scale = incoming[receiver] > 1.0f - fill[receiver]
+            ? (1.0f - fill[receiver]) / incoming[receiver]
+            : 1.0f;
+        float amount = residualTransfer[i] * std::max(0.0f, scale);
+        if (amount > 1e-8f) ++workCounts.residualTransfers;
+        nextFill[i] -= amount;
+        nextFill[receiver] += amount;
+        float f0 = fill[i];
+        float frac = (f0 > 1.0e-20f) ? (amount / f0) : 0.0f;
+        auto moveN = [&](std::vector<float> const &src, std::vector<float> &nxt) {
+            float d = src[static_cast<size_t>(i)] * frac;
+            nxt[static_cast<size_t>(i)] -= d;
+            nxt[static_cast<size_t>(receiver)] += d;
+        };
+        moveN(liquidHeat, nextHeat);
+        moveN(dyeR, nextDyeR); moveN(dyeG, nextDyeG); moveN(dyeB, nextDyeB);
+        moveN(honey, nextHoney);
+    }
+    for (int y = y0; y <= y1; ++y) for (int x = x0; x <= x1; ++x) {
+        int i = ci(x, y);
+        fill[i] = nextFill[i];
+        liquidHeat[i] = nextHeat[i];
+        dyeR[i] = nextDyeR[i]; dyeG[i] = nextDyeG[i]; dyeB[i] = nextDyeB[i];
+        honey[i] = nextHoney[i];
+        clearEmptyLiquidCell(i);
+    }
+}
+
+// Interior cells can be drained below MIN_RENDER_FILL by limiter/clamp while
+// neighbors still hold plenty of liquid, which reads as a random hole.
+// Borrow from those neighbors (mass-conserving) so enclosed gaps stay continuous.
+void FluidEngine::repairEnclosedUndersaturatedCells() {
+    int x0 = std::max(1, activeX0(1)), y0 = std::max(1, activeY0(1));
+    int x1 = std::min(GW - 2, activeX1(1)), y1 = std::min(GH - 2, activeY1(1));
+    constexpr int dx[4] = {-1, 1, 0, 0};
+    constexpr int dy[4] = {0, 0, -1, 1};
+    for (int y = y0; y <= y1; ++y) for (int x = x0; x <= x1; ++x) {
+        int i = ci(x, y);
+        if (solid[i] || dynamicSolid[i]) continue;
+        if (fill[i] <= 1.0e-8f) continue;
+        int vis[4];
+        int nvis = 0;
+        int closed = 0;
+        int mask = 0;
+        float neighborSum = 0.0f;
+        for (int n = 0; n < 4; ++n) {
+            int nx = x + dx[n], ny = y + dy[n];
+            if (!inside(nx, ny) || isSolid(nx, ny)) { ++closed; continue; }
+            if (fill[ci(nx, ny)] >= MIN_RENDER_FILL) {
+                vis[nvis++] = ci(nx, ny);
+                mask |= 1 << n;
+                ++closed;
+                neighborSum += fill[ci(nx, ny)];
+            }
+        }
+        bool enclosed = closed == 4 && nvis >= 3;
+        bool tunnel = nvis == 2 && closed == 2 && ((mask & 3) == 3 || (mask & 12) == 12);
+        if (!enclosed && !tunnel) continue;
+        float target = MIN_RENDER_FILL;
+        if (enclosed && nvis > 0) target = std::max(MIN_RENDER_FILL, neighborSum / static_cast<float>(nvis));
+        float need = target - fill[i];
+        if (need <= 1e-8f) continue;
+        float extra[4]{};
+        float available = 0.0f;
+        for (int k = 0; k < nvis; ++k) {
+            extra[k] = std::max(0.0f, fill[vis[k]] - MIN_RENDER_FILL);
+            available += extra[k];
+        }
+        if (available <= 1e-8f) continue;
+        float take = std::min(need, available);
+        for (int k = 0; k < nvis; ++k) {
+            if (extra[k] <= 0.0f) continue;
+            float d = take * (extra[k] / available);
+            LiquidCarry c = extractVolume(vis[k], d);
+            fill[i] += d;
+            applyCarry(i, c);
+            honey[i] = std::min(honey[i], fill[i]);
+        }
+    }
+}
+
+// After a large body falls away, isolated Eulerian crumbs/droplets can sit in
+// sleeping chunks with ~zero velocity. Gravity only runs inside the active solve
+// region, so they appear frozen until something wakes them.
+// Promote unsupported isolated liquid into SplashParticles (ballistic gravity)
+// without deleting volume. Connected streams/pools are left alone.
+void FluidEngine::promoteUnsupportedIsolatedLiquid() {
+    if (splashes.size() > 2000) return;
+    constexpr int odx[4] = {-1, 1, 0, 0};
+    constexpr int ody[4] = {0, 0, -1, 1};
+    // Airborne cells in sleeping chunks wake during metrics; only the solve region needs promotion here.
+    int x0 = std::max(1, activeX0()), y0 = std::max(1, activeY0());
+    int x1 = std::min(GW - 2, activeX1()), y1 = std::min(GH - 2, activeY1());
+    for (int y = y0; y <= y1; ++y) for (int x = x0; x <= x1; ++x) {
+        int index = ci(x, y);
+        float amount = fill[index];
+        if (solid[index] || dynamicSolid[index] || amount < 1e-5f) continue;
+
+        int below = ci(x, y + 1);
+        if (isSolid(x, y + 1) || fill[below] >= MIN_SUBSTANTIAL_FILL) continue;
+
+        int liquidNeighbors = 0;
+        for (int n = 0; n < 4; ++n) {
+            int nx = x + odx[n], ny = y + ody[n];
+            if (!inside(nx, ny) || isSolid(nx, ny)) continue;
+            if (fill[ci(nx, ny)] >= MIN_ACTIVE_FILL) ++liquidNeighbors;
+        }
+        // Still touching Eulerian liquid (including a falling blob above/beside).
+        // Promoting those crumbs spawned a splash trail behind droplets.
+        if (liquidNeighbors >= 1) continue;
+
+        float vx = cellU(x, y), vy = cellV(x, y);
+        float speed = std::abs(vx) + std::abs(vy);
+        // Substantial isolated blobs may keep falling as Eulerian cells; only
+        // promote them if they have stalled in mid-air.
+        if (amount >= MIN_SUBSTANTIAL_FILL && speed >= 0.08f) continue;
+
+        SplashParticle p;
+        p.x = x + 0.5f;
+        p.y = y + 0.5f;
+        p.vx = vx;
+        p.vy = std::max(vy, 0.0f);
+        p.volume = amount;
+        p.life = 0.0f;
+        p.originX = x;
+        p.originY = y;
+        LiquidCarry c = extractVolume(index, amount);
+        p.heat = c.heat;
+        p.dyeR = c.dyeR; p.dyeG = c.dyeG; p.dyeB = c.dyeB;
+        p.honey = c.honey;
+        splashes.push_back(p);
+
+        pressure[index] = 0.0f;
+        if (openUFace(x, y)) u[ui(x, y)] *= 0.5f;
+        if (openUFace(x + 1, y)) u[ui(x + 1, y)] *= 0.5f;
+        if (openVFace(x, y)) v[vi(x, y)] *= 0.5f;
+        if (openVFace(x, y + 1)) v[vi(x, y + 1)] = std::max(v[vi(x, y + 1)], 0.0f);
+        wakeChunkAtCell(x, y);
+        if (splashes.size() > 2000) return;
+    }
+}
+
+float FluidEngine::depositVolume(float x, float y, float amount, float momentumX, float momentumY, LiquidCarry *carry) {
+    if (amount <= 1e-7f) return amount;
+    int cx = static_cast<int>(std::floor(x)), cy = static_cast<int>(std::floor(y));
+    // Never seed from a solid: a 1px wall has open cells on both faces.
+    if (!inside(cx, cy) || isSolid(cx, cy)) {
+        int sx = cx, sy = cy;
+        if (std::abs(momentumX) >= std::abs(momentumY) && std::abs(momentumX) > 1e-8f)
+            sx = cx - (momentumX >= 0.0f ? 1 : -1);
+        else if (std::abs(momentumY) > 1e-8f)
+            sy = cy - (momentumY >= 0.0f ? 1 : -1);
+        if (!inside(sx, sy) || isSolid(sx, sy)) return amount;
+        cx = sx;
+        cy = sy;
+    }
+    int index = ci(cx, cy);
+    float room = 1.0f - fill[index];
+    if (room > 1e-5f) {
+        float placed = std::min(room, amount);
+        bool newCell = fill[index] < MIN_RENDER_FILL;
+        LiquidCarry chunk = carry ? splitCarry(*carry, placed, amount) : ambientCarry(*this, placed, false);
+        fill[index] += placed;
+        applyCarry(index, chunk);
+        honey[index] = std::min(honey[index], fill[index]);
+        amount -= placed;
+        if (newCell) waterShade[index] = makeShade(cx, cy);
+        wakeChunkAtCell(cx, cy);
+        u[ui(cx, cy)] += momentumX * placed * 0.25f;
+        u[ui(cx + 1, cy)] += momentumX * placed * 0.25f;
+        v[vi(cx, cy)] += momentumY * placed * 0.25f;
+        v[vi(cx, cy + 1)] += momentumY * placed * 0.25f;
+    }
+    if (amount <= 1e-5f) return amount;
+    return relocateVolumeTopologySafe(cx, cy, amount, momentumX, momentumY, carry, false);
+}
+
+void FluidEngine::spawnSurfaceSpray() {
+    if ((tickNo & 1u) != 0u || splashes.size() > 1000) return;
+    for (int y = std::max(1,activeY0()); y <= std::min(GH-2,activeY1()); ++y)
+        for (int x = std::max(1,activeX0()); x <= std::min(GW-2,activeX1()); ++x) {
+        int index = ci(x, y);
+        if (fill[index] < 0.20f || !surfaceMask[index]) continue;
+        if (honeyFraction(index) > 0.25f) continue;
+        float vx = cellU(x, y), vy = cellV(x, y), speed = std::sqrt(vx * vx + vy * vy);
+        float normalVelocity = std::max(0.0f, vx*surfaceNormalX[index] + vy*surfaceNormalY[index]);
+        float pressureGradient = 0.5f*std::sqrt(
+            std::pow(pressure[ci(x+1,y)]-pressure[ci(x-1,y)],2.0f) +
+            std::pow(pressure[ci(x,y+1)]-pressure[ci(x,y-1)],2.0f));
+        float pressureImpulse = std::abs(pressure[index]-pressureBefore[index]) * PHYSICS_DT;
+        float breakupEnergy = normalVelocity*0.75f + speed*0.16f + pressureGradient*0.035f
+            + std::abs(surfaceCurvature[index])*1.5f + pressureImpulse*0.10f;
+        if (breakupEnergy < 14.0f || (hashCell(x, y, tickNo) & 15u) != 0u) continue;
+        float detached = std::min(0.10f, fill[index] * 0.22f);
+        LiquidCarry c = extractVolume(index, detached);
+        SplashParticle p;
+        p.x = x + 0.5f; p.y = y + 0.5f; p.vx = vx; p.vy = vy;
+        p.volume = detached; p.originX = x; p.originY = y;
+        p.heat = c.heat; p.dyeR = c.dyeR; p.dyeG = c.dyeG; p.dyeB = c.dyeB; p.honey = c.honey;
+        splashes.push_back(p);
+    }
+}
+
+void FluidEngine::updateSplashParticles(float dt) {
+    constexpr int kMaxSplashBounces = 2;
+    auto onOpenVoidRim = [&](float x, float y) {
+        if (config.walledBorders) return false;
+        int gx = static_cast<int>(std::floor(x)), gy = static_cast<int>(std::floor(y));
+        if (!inside(gx, gy)) return true;
+        return gx <= 0 || gx >= GW - 1 || gy <= 0 || gy >= GH - 1;
+    };
+    for (size_t i = 0; i < splashes.size();) {
+        SplashParticle &p = splashes[i];
+        p.vy += gridGravity() * dt;
+        bool remove = false;
+        auto sink = [&]() {
+            expectedVolume = std::max(0.0, expectedVolume - static_cast<double>(p.volume));
+            p.volume = 0.0f;
+            p.heat = 0.0f;
+            p.dyeR = p.dyeG = p.dyeB = 0.0f;
+            p.honey = 0.0f;
+            remove = true;
+        };
+        if (onOpenVoidRim(p.x, p.y)) {
+            sink();
+        } else {
+        float nx = p.x + p.vx * dt, ny = p.y + p.vy * dt;
+        float lastX = p.x, lastY = p.y; bool hit = false, escapedToVoid = false;
+        auto blocked = [&](int gx, int gy) {
+            bool stillInOrigin = gx == p.originX && gy == p.originY && p.life < 0.12f;
+            if (!inside(gx, gy)) {
+                if (config.walledBorders) hit = true;
+                else escapedToVoid = true;
+                return true;
+            }
+            if (isSolid(gx, gy)) { hit = true; return true; }
+            if (!stillInOrigin && isFluid(gx, gy) && fill[ci(gx, gy)] > 0.65f) { hit = true; return true; }
+            return false;
+        };
+        int pgx = static_cast<int>(std::floor(p.x)), pgy = static_cast<int>(std::floor(p.y));
+        float dist = std::max(std::abs(nx - p.x), std::abs(ny - p.y));
+        int steps = std::max(1, static_cast<int>(std::ceil(dist * 4.0f)));
+        for (int s = 1; s <= steps && !hit && !escapedToVoid; ++s) {
+            float t = static_cast<float>(s) / static_cast<float>(steps);
+            float sx = p.x + (nx - p.x) * t, sy = p.y + (ny - p.y) * t;
+            int gx = static_cast<int>(std::floor(sx)), gy = static_cast<int>(std::floor(sy));
+            if (gx == pgx && gy == pgy) { lastX = sx; lastY = sy; continue; }
+            // Diagonal step: both orthogonal cells must be open or this is a corner cut.
+            if (gx != pgx && gy != pgy) {
+                if (blocked(gx, pgy) || blocked(pgx, gy)) break;
+            }
+            if (blocked(gx, gy)) break;
+            lastX = sx;
+            lastY = sy;
+            pgx = gx;
+            pgy = gy;
+        }
+        p.life += dt;
+        if (escapedToVoid || onOpenVoidRim(lastX, lastY)) {
+            sink();
+        } else if (hit || p.life > 3.0f) {
+            LiquidCarry carry{p.heat, p.dyeR, p.dyeG, p.dyeB, p.honey};
+            float remainder = depositVolume(lastX, lastY, p.volume, p.vx, p.vy, &carry);
+            p.heat = carry.heat; p.dyeR = carry.dyeR; p.dyeG = carry.dyeG; p.dyeB = carry.dyeB; p.honey = carry.honey;
+            if (remainder <= 1e-5f) remove = true;
+            else if (!config.walledBorders && (onOpenVoidRim(lastX, lastY) || p.bounceCount >= kMaxSplashBounces)) {
+                expectedVolume = std::max(0.0, expectedVolume - static_cast<double>(remainder));
+                remove = true;
+            } else {
+                p.volume = remainder;
+                p.bounceCount = static_cast<uint8_t>(std::min(255, p.bounceCount + 1));
+                p.vx *= -0.25f;
+                p.vy *= -0.25f;
+                p.x = lastX;
+                p.y = lastY;
+            }
+        } else { p.x = nx; p.y = ny; }
+        }
+        if (remove) { splashes[i] = splashes.back(); splashes.pop_back(); }
+        else {
+            int gx = static_cast<int>(p.x), gy = static_cast<int>(p.y);
+            if (!inside(gx, gy) || fill[ci(gx, gy)] < MIN_SUBSTANTIAL_FILL)
+                wakeChunkAtCell(gx, gy, false);
+            ++i;
+        }
+    }
+}
+
+void FluidEngine::drainWaterIntoVoid() {
+    if (config.walledBorders) return;
+    double removed = 0.0;
+    auto drain = [&](int index) {
+        if (solid[index] || dynamicSolid[index] || fill[index] <= 0.0f) return;
+        float amount = fill[index];
+        fill[index] = 0.0f;
+        liquidHeat[index] = 0.0f;
+        dyeR[index] = dyeG[index] = dyeB[index] = 0.0f;
+        honey[index] = 0.0f;
+        pressure[index] = 0.0f;
+        removed += amount;
+    };
+    for (int y = 0; y < GH; ++y) {
+        drain(ci(0, y));
+        drain(ci(GW - 1, y));
+    }
+    for (int x = 0; x < GW; ++x) {
+        drain(ci(x, 0));
+        drain(ci(x, GH - 1));
+    }
+    expectedVolume = std::max(0.0, expectedVolume - removed);
+}
+
+void FluidEngine::wakeChunkAtCell(int x, int y, bool resetQuiet) {
+    if (!inside(x, y)) return;
+    int cx = x / CHUNK, cy = y / CHUNK;
+    for (int oy = -1; oy <= 1; ++oy) for (int ox = -1; ox <= 1; ++ox) {
+        int nx = cx + ox, ny = cy + oy;
+        if (nx < 0 || nx >= CHUNK_W || ny < 0 || ny >= CHUNK_H) continue;
+        int c = ny * CHUNK_W + nx;
+        if (!chunkActivity[c]) {
+            chunkActivity[c] = 1;
+            chunkQuietTicks[c] = 0;
+        } else if (resetQuiet) {
+            chunkQuietTicks[c] = 0;
+        }
+    }
+}
+
+void FluidEngine::wakeRegion(int x0, int y0, int x1, int y1) {
+    x0 = std::max(0, x0); y0 = std::max(0, y0); x1 = std::min(GW - 1, x1); y1 = std::min(GH - 1, y1);
+    if (x1 < x0 || y1 < y0) return;
+    for (int y = y0; y <= y1; y += CHUNK) wakeChunkAtCell(x0, y);
+    for (int y = y0; y <= y1; y += CHUNK) wakeChunkAtCell(x1, y);
+    for (int x = x0; x <= x1; x += CHUNK) { wakeChunkAtCell(x, y0); wakeChunkAtCell(x, y1); }
+    wakeChunkAtCell((x0 + x1) / 2, (y0 + y1) / 2);
+}
+
+void FluidEngine::clearDynamicOccupancy() {
+    for (int i : dynamicOccupiedCells) {
+        dynamicSolid[i] = 0;
+        dynamicVelX[i] = 0.0f;
+        dynamicVelY[i] = 0.0f;
+    }
+    dynamicOccupiedCells.clear();
+}
+
+void FluidEngine::setDynamicOccupancy(int x, int y, float velX, float velY) {
+    if (!inside(x, y) || solid[ci(x, y)]) return;
+    int i = ci(x, y);
+    if (!dynamicSolid[i]) dynamicOccupiedCells.push_back(i);
+    dynamicSolid[i] = 1;
+    dynamicVelX[i] = velX;
+    dynamicVelY[i] = velY;
+}
+
+void FluidEngine::applyMovingBoundaryVelocity() {
+    for (int i : dynamicOccupiedCells) {
+        int x = i % GW, y = i / GW;
+        float vx = dynamicVelX[i], vy = dynamicVelY[i];
+        u[ui(x, y)] = vx;
+        u[ui(x + 1, y)] = vx;
+        v[vi(x, y)] = vy;
+        v[vi(x, y + 1)] = vy;
+    }
+}
+
+float FluidEngine::relocateVolumeTopologySafe(int x, int y, float amount, float momentumX, float momentumY, LiquidCarry *carry, bool fromOccupiedCell) {
+    if (amount <= 1e-7f) return 0.0f;
+    if (!fromOccupiedCell && (!inside(x, y) || isSolid(x, y))) return amount;
+    if (++relocateEpoch == 0) {
+        std::fill(relocateStamp.begin(), relocateStamp.end(), 0);
+        relocateEpoch = 1;
+    }
+    relocateQueue.clear();
+    auto consider = [&](int nx, int ny) {
+        if (!inside(nx, ny) || isSolid(nx, ny)) return;
+        int ni = ci(nx, ny);
+        if (relocateStamp[static_cast<size_t>(ni)] == relocateEpoch) return;
+        relocateStamp[static_cast<size_t>(ni)] = relocateEpoch;
+        relocateQueue.push_back(ni);
+    };
+    constexpr int dx[4] = {-1, 1, 0, 0};
+    constexpr int dy[4] = {0, 0, -1, 1};
+    if (fromOccupiedCell)
+        for (int n = 0; n < 4; ++n) consider(x + dx[n], y + dy[n]);
+    else {
+        consider(x, y);
+        for (int n = 0; n < 4; ++n) consider(x + dx[n], y + dy[n]);
+    }
+    for (size_t head = 0; head < relocateQueue.size() && amount > 1e-5f && head < 512; ++head) {
+        int i = relocateQueue[head];
+        int cx = i % GW, cy = i / GW;
+        float room = 1.0f - fill[i];
+        if (room > 1e-5f) {
+            float placed = std::min(room, amount);
+            bool newCell = fill[i] < MIN_RENDER_FILL;
+            LiquidCarry chunk = carry ? splitCarry(*carry, placed, amount) : ambientCarry(*this, placed, false);
+            fill[i] += placed;
+            applyCarry(i, chunk);
+            honey[i] = std::min(honey[i], fill[i]);
+            amount -= placed;
+            if (newCell) waterShade[i] = makeShade(cx, cy);
+            u[ui(cx, cy)] += momentumX * placed * 0.25f;
+            u[ui(cx + 1, cy)] += momentumX * placed * 0.25f;
+            v[vi(cx, cy)] += momentumY * placed * 0.25f;
+            v[vi(cx, cy + 1)] += momentumY * placed * 0.25f;
+            wakeChunkAtCell(cx, cy);
+        }
+        for (int n = 0; n < 4; ++n) consider(cx + dx[n], cy + dy[n]);
+    }
+    return amount;
+}
+
+void FluidEngine::displaceFluidFromDynamicSolids() {
+    volumeDisplacedRigid = 0.0;
+    for (int i : dynamicOccupiedCells) {
+        int x = i % GW, y = i / GW;
+        if (!dynamicSolid[i] || fill[i] <= 0.0f) continue;
+        float amount = fill[i];
+        LiquidCarry carry = extractVolume(i, amount);
+        pressure[i] = 0.0f;
+        float remainder = relocateVolumeTopologySafe(x, y, amount, dynamicVelX[i], dynamicVelY[i], &carry, true);
+        volumeDisplacedRigid += (amount - remainder);
+        if (remainder > 1e-5f && splashes.size() < 2000) {
+            SplashParticle p;
+            p.x = x + 0.5f; p.y = y + 0.5f;
+            p.vx = dynamicVelX[i]; p.vy = dynamicVelY[i];
+            p.volume = remainder; p.originX = x; p.originY = y;
+            p.heat = carry.heat; p.dyeR = carry.dyeR; p.dyeG = carry.dyeG; p.dyeB = carry.dyeB; p.honey = carry.honey;
+            splashes.push_back(p);
+            remainder = 0.0f;
+        }
+        if (remainder > 1e-5f) {
+            volumeLostRigid += remainder;
+            expectedVolume = std::max(0.0, expectedVolume - remainder);
+        }
+    }
+}
+
+void FluidEngine::computeSolveRegion() {
+    std::fill(chunkSolveMask.begin(), chunkSolveMask.end(), 0);
+    std::array<int, CHUNK_W * CHUNK_H> queue{};
+    int head = 0, tail = 0;
+    for (int c = 0; c < CHUNK_W * CHUNK_H; ++c) if (chunkActivity[c]) {
+        chunkSolveMask[c] = 1;
+        if (chunkHasFluid[c]) queue[tail++] = c;
+    }
+    while (head < tail) {
+        int c = queue[head++], cx = c % CHUNK_W, cy = c / CHUNK_W;
+        constexpr int dx[4] = {-1, 1, 0, 0}, dy[4] = {0, 0, -1, 1};
+        for (int n = 0; n < 4; ++n) {
+            int nx = cx + dx[n], ny = cy + dy[n];
+            if (nx < 0 || nx >= CHUNK_W || ny < 0 || ny >= CHUNK_H) continue;
+            int nc = ny * CHUNK_W + nx;
+            if (chunkHasFluid[nc] && !chunkSolveMask[nc]) {
+                chunkSolveMask[nc] = 1;
+                queue[tail++] = nc;
+            }
+        }
+    }
+    chunkHaloSource = chunkSolveMask;
+    for (int c = 0; c < CHUNK_W * CHUNK_H; ++c) if (chunkHaloSource[c]) {
+        int cx = c % CHUNK_W, cy = c / CHUNK_W;
+        for (int oy = -1; oy <= 1; ++oy) for (int ox = -1; ox <= 1; ++ox) {
+            int nx = cx + ox, ny = cy + oy;
+            if (nx >= 0 && nx < CHUNK_W && ny >= 0 && ny < CHUNK_H) chunkSolveMask[ny * CHUNK_W + nx] = 1;
+        }
+    }
+    int minCx = CHUNK_W, minCy = CHUNK_H, maxCx = -1, maxCy = -1;
+    for (int c = 0; c < CHUNK_W * CHUNK_H; ++c) if (chunkSolveMask[c]) {
+        minCx = std::min(minCx, c % CHUNK_W);
+        maxCx = std::max(maxCx, c % CHUNK_W);
+        minCy = std::min(minCy, c / CHUNK_W);
+        maxCy = std::max(maxCy, c / CHUNK_W);
+    }
+    hasActiveSolveRegion = maxCx >= 0;
+    if (hasActiveSolveRegion) {
+        solveX0 = minCx * CHUNK;
+        solveY0 = minCy * CHUNK;
+        solveX1 = std::min(GW - 1, (maxCx + 1) * CHUNK - 1);
+        solveY1 = std::min(GH - 1, (maxCy + 1) * CHUNK - 1);
+    }
+}
+
+void FluidEngine::wakeAllFluidChunks() {
+    std::fill(chunkActivity.begin(),chunkActivity.end(),0);std::fill(chunkQuietTicks.begin(),chunkQuietTicks.end(),0);
+    for(int y=0;y<GH;++y)for(int x=0;x<GW;++x)if(fill[ci(x,y)]>0.0f)wakeChunkAtCell(x,y);
+}
+
+void FluidEngine::wakeUntrackedLiquid() {
+    for (int chunk = 0; chunk < CHUNK_W * CHUNK_H; ++chunk) {
+        if (chunkHasFluid[chunk] || chunkActivity[chunk] || chunkSolveMask[chunk]) continue;
+        int cx = chunk % CHUNK_W, cy = chunk / CHUNK_W;
+        int beginX = cx * CHUNK, endX = std::min(GW, beginX + CHUNK);
+        int beginY = cy * CHUNK, endY = std::min(GH, beginY + CHUNK);
+        bool found = false;
+        for (int y = beginY; y < endY && !found; ++y)
+            for (int x = beginX; x < endX && !found; ++x)
+                if (fill[ci(x, y)] > 0.0f) found = true;
+        if (found) wakeChunkAtCell(beginX, beginY);
+    }
+}
+
+void FluidEngine::rebuildActivityAndMetrics(bool advanceSleep) {
+    wakeUntrackedLiquid();
+    std::array<float, CHUNK_W * CHUNK_H> maxSpeed{}, maxDiv{}, maxFillDelta{}, maxPressureDelta{};
+    std::array<uint8_t, CHUNK_W * CHUNK_H> airborneChunk{};
+    activeFluidCells = 0; currentVolume = 0.0; thinCellCount = 0; thinVolume = 0.0;
+    momentumX = momentumY = kineticEnergy = 0.0; measuredMaxVelocity = 0.0f;
+    workCounts.subvisibleCells = 0;
+    for (int chunk = 0; chunk < CHUNK_W * CHUNK_H; ++chunk) {
+        // Also scan the solve halo: liquid can cross into it during this tick and
+        // must wake that chunk immediately rather than becoming frozen/unmeasured.
+        if (!chunkActivity[chunk] && !chunkHasFluid[chunk] && !chunkSolveMask[chunk]) continue;
+        int cx = chunk % CHUNK_W, cy = chunk / CHUNK_W;
+        bool hasAnyFluid = false;
+        bool hasAirborne = false;
+        int beginX = cx * CHUNK, endX = std::min(GW, beginX + CHUNK);
+        int beginY = cy * CHUNK, endY = std::min(GH, beginY + CHUNK);
+        for (int y = beginY; y < endY; ++y) for (int x = beginX; x < endX; ++x) {
+            int index = ci(x, y);
+            float amount = fill[index];
+            currentVolume += amount;
+            if (amount > 0.0f) hasAnyFluid = true;
+            if (amount > 0.0f && amount < MIN_RENDER_FILL) ++workCounts.subvisibleCells;
+            if (amount > 0.0f && amount < 0.10f) { ++thinCellCount; thinVolume += amount; }
+            if (amount > 1e-5f && y + 1 < GH) {
+                auto supported = [&](int sx, int sy) {
+                    if (!inside(sx, sy)) return false;
+                    return isSolid(sx, sy) || fill[ci(sx, sy)] >= MIN_SUBSTANTIAL_FILL;
+                };
+                if (!supported(x, y + 1) && !supported(x - 1, y + 1) && !supported(x + 1, y + 1))
+                    hasAirborne = true;
+            }
+            if (amount < MIN_ACTIVE_FILL) continue;
+            float vx = cellU(x, y), vy = cellV(x, y), speed = std::abs(vx) + std::abs(vy);
+            if (chunkActivity[chunk])
+                measuredMaxVelocity = std::max(measuredMaxVelocity, std::max(std::abs(vx), std::abs(vy)));
+            momentumX += amount * vx; momentumY += amount * vy; kineticEnergy += 0.5 * amount * (vx * vx + vy * vy);
+            maxSpeed[chunk] = std::max(maxSpeed[chunk], speed);
+            maxDiv[chunk] = std::max(maxDiv[chunk], std::abs(divergenceField[index]));
+            maxFillDelta[chunk] = std::max(maxFillDelta[chunk], std::abs(amount - previousFill[index]));
+            maxPressureDelta[chunk] = std::max(maxPressureDelta[chunk], std::abs(pressure[index] - pressureBefore[index]));
+            if (chunkActivity[chunk]) ++activeFluidCells;
+        }
+        chunkHasFluid[chunk] = hasAnyFluid ? 1 : 0;
+        airborneChunk[chunk] = hasAirborne ? 1 : 0;
+        // Unsupported liquid must not sleep mid-air (would look frozen until a neighbor wakes it).
+        if (hasAirborne) { chunkActivity[chunk] = 1; chunkQuietTicks[chunk] = 0; }
+    }
+    for (SplashParticle const &p : splashes) currentVolume += p.volume;
+    workCounts.splashCount = static_cast<int>(splashes.size());
+    if (advanceSleep) {
+        for (int c = 0; c < CHUNK_W * CHUNK_H; ++c) {
+            if (airborneChunk[c]) {
+                chunkActivity[c] = 1;
+                chunkQuietTicks[c] = 0;
+                continue;
+            }
+            bool settled = maxSpeed[c] < 0.06f && maxDiv[c] < 0.008f && maxFillDelta[c] < 0.0004f && maxPressureDelta[c] < 0.04f;
+            bool fillMoved = maxFillDelta[c] > 0.002f;
+            if (chunkActivity[c]) {
+                if (settled)
+                    chunkQuietTicks[c] = static_cast<uint8_t>(std::min(255, int(chunkQuietTicks[c]) + 1));
+                else
+                    chunkQuietTicks[c] = 0;
+                if (chunkQuietTicks[c] >= 36) chunkActivity[c] = 0;
+            } else if (fillMoved) {
+                chunkActivity[c] = 1;
+                chunkQuietTicks[c] = 0;
+            }
+        }
+    }
+    activeChunks = static_cast<int>(std::count(chunkActivity.begin(), chunkActivity.end(), uint8_t{1}));
+    volumeError = currentVolume - expectedVolume;
+    computeSolveRegion();
+}
+
+void FluidEngine::simulationTick() {
+    flushPaintDirty();
+    syncWorkerPool();
+    auto physicsStart=Clock::now();
+    ++tickNo;
+    workCounts.activeUFaces = workCounts.activeVFaces = 0;
+    workCounts.nonzeroFluxU = workCounts.nonzeroFluxV = 0;
+    workCounts.limiterPasses = 0;
+    if(!hasActiveSolveRegion&&splashes.empty()){
+        wakeUntrackedLiquid();
+        rebuildActivityAndMetrics(true);
+        // Airborne leftovers can wake chunks during metrics; if so, continue this tick.
+        if(!hasActiveSolveRegion&&splashes.empty()){timingAccum.physics+=elapsedMs(physicsStart);++timingTicks;return;}
+    }
+    int substeps = std::clamp(static_cast<int>(std::ceil(measuredMaxVelocity * PHYSICS_DT / config.maxTravelPerSubstep)), 1, config.maxSubsteps);
+    lastFluidSubsteps = substeps;
+    substepCapReached = substeps == config.maxSubsteps && measuredMaxVelocity * PHYSICS_DT > config.maxTravelPerSubstep * config.maxSubsteps;
+    float dt = PHYSICS_DT / static_cast<float>(substeps);
+    for (int step = 0; step < substeps; ++step) {
+        auto stage=Clock::now();
+        advectVelocity(dt);
+        timingAccum.advection+=elapsedMs(stage);stage=Clock::now();
+        diffuseVelocity(dt);
+        timingAccum.viscosity+=elapsedMs(stage);stage=Clock::now();
+        applyGravity(dt);
+        timingAccum.forces+=elapsedMs(stage);stage=Clock::now();
+        if (config.surfaceTensionEnabled || config.sprayEnabled) updateSurfaceField();
+        if (config.surfaceTensionEnabled) applySurfaceTension(dt);
+        applyVorticityConfinement(dt);
+        timingAccum.surface+=elapsedMs(stage);stage=Clock::now();
+        clampVelocity();
+        enforceActiveBoundaries();
+        projectVelocity(dt);
+        timingAccum.pressure+=elapsedMs(stage);stage=Clock::now();
+        advectLiquidVolume(dt);
+        timingAccum.transport+=elapsedMs(stage);stage=Clock::now();
+        consolidateResidualVolume();
+        repairEnclosedUndersaturatedCells();
+        promoteUnsupportedIsolatedLiquid();
+        timingAccum.residual+=elapsedMs(stage);stage=Clock::now();
+        drainWaterIntoVoid();
+        timingAccum.drain+=elapsedMs(stage);stage=Clock::now();
+        updateSplashParticles(dt);
+        timingAccum.splashes+=elapsedMs(stage);
+    }
+    if (config.sprayEnabled) spawnSurfaceSpray();
+    auto chunkStage=Clock::now();
+    rebuildActivityAndMetrics(true);
+    timingAccum.chunks+=elapsedMs(chunkStage);timingAccum.physics+=elapsedMs(physicsStart);++timingTicks;
+    if(timingTicks>=60){
+        timingAverage.advection=timingAccum.advection/timingTicks;
+        timingAverage.viscosity=timingAccum.viscosity/timingTicks;
+        timingAverage.forces=timingAccum.forces/timingTicks;
+        timingAverage.surface=timingAccum.surface/timingTicks;
+        timingAverage.pressure=timingAccum.pressure/timingTicks;
+        timingAverage.transport=timingAccum.transport/timingTicks;
+        timingAverage.residual=timingAccum.residual/timingTicks;
+        timingAverage.drain=timingAccum.drain/timingTicks;
+        timingAverage.splashes=timingAccum.splashes/timingTicks;
+        timingAverage.chunks=timingAccum.chunks/timingTicks;
+        timingAverage.listsBuild=timingAccum.listsBuild/timingTicks;
+        timingAverage.physics=timingAccum.physics/timingTicks;
+        timingAverage.thermal=timingAccum.thermal/timingTicks;
+        double renderKeep=timingAverage.render;
+        timingAccum=TimingAverages{};
+        timingAverage.render=renderKeep;
+        timingTicks=0;
+    }
+}
+
+void FluidEngine::zeroFluidState() {
+    std::fill(fill.begin(), fill.end(), 0.0f); std::fill(nextFill.begin(), nextFill.end(), 0.0f);
+    std::fill(liquidHeat.begin(), liquidHeat.end(), 0.0f); std::fill(nextHeat.begin(), nextHeat.end(), 0.0f);
+    std::fill(dyeR.begin(), dyeR.end(), 0.0f); std::fill(dyeG.begin(), dyeG.end(), 0.0f); std::fill(dyeB.begin(), dyeB.end(), 0.0f);
+    std::fill(honey.begin(), honey.end(), 0.0f);
+    std::fill(nextDyeR.begin(), nextDyeR.end(), 0.0f); std::fill(nextDyeG.begin(), nextDyeG.end(), 0.0f); std::fill(nextDyeB.begin(), nextDyeB.end(), 0.0f);
+    std::fill(nextHoney.begin(), nextHoney.end(), 0.0f);
+    std::fill(pressure.begin(), pressure.end(), 0.0f); std::fill(divergenceField.begin(), divergenceField.end(), 0.0f);
+    std::fill(u.begin(), u.end(), 0.0f); std::fill(v.begin(), v.end(), 0.0f);
+    splashes.clear(); expectedVolume = 0.0; tickNo = 1;
+}
+
+void FluidEngine::clearWorld() {
+    std::fill(solid.begin(), solid.end(), 0);
+    std::fill(solidHeat.begin(), solidHeat.end(), 0.0f);
+    clearDynamicOccupancy();
+    zeroFluidState();
+    volumeLostRigid = 0.0; volumeDisplacedRigid = 0.0;
+    std::fill(chunkActivity.begin(),chunkActivity.end(),0);std::fill(chunkHasFluid.begin(),chunkHasFluid.end(),0);std::fill(chunkQuietTicks.begin(),chunkQuietTicks.end(),0);
+    std::fill(thermalChunkWake.begin(), thermalChunkWake.end(), 0);
+    rebuildActivityAndMetrics();
+}
+
+void FluidEngine::resetWorld() {
+    clearWorld();
+    for (int x = 0; x < GW; ++x) solid[ci(x, GH - 1)] = solid[ci(x, GH - 2)] = 1;
+    for (int y = 38; y < GH; ++y) solid[ci(0, y)] = solid[ci(GW - 1, y)] = 1;
+    for (int x = 32; x < 75; ++x) solid[ci(x, 87)] = 1;
+    for (int x = 125; x < 168; ++x) solid[ci(x, 98)] = 1;
+    for (int y = 78; y < 99; ++y) solid[ci(124, y)] = 1;
+    enforceSolidBoundaries(); seedAmbientHeat(); rebuildActivityAndMetrics();
+}
+
+void FluidEngine::loadTestScene(int scene) {
+    clearWorld();
+    auto wall = [this](int x, int y) { if (inside(x, y)) solid[ci(x, y)] = 1; };
+    auto waterRect = [this](int x0, int y0, int x1, int y1) {
+        for (int y = y0; y <= y1; ++y) for (int x = x0; x <= x1; ++x) if (inside(x, y) && !solid[ci(x, y)]) {
+            fill[ci(x, y)] = 1.0f; waterShade[ci(x, y)] = makeShade(x, y);
+        }
+    };
+    for (int x = 20; x <= 180; ++x) wall(x, 112);
+    for (int y = 20; y <= 112; ++y) { wall(20, y); wall(180, y); }
+    if (scene == 1) {
+        waterRect(21, 72, 179, 111); // still pool
+    } else if (scene == 2) {
+        for (int y = 24; y <= 103; ++y) wall(100, y);
+        waterRect(21, 55, 99, 111); // communicating vessels, bottom connection open
+    } else if (scene == 3) {
+        for (int y = 36; y <= 111; ++y) wall(92, y);
+        waterRect(21, 47, 91, 111); // dam break: erase the center wall
+    } else if (scene == 4) {
+        for (int x = 30; x <= 90; ++x) wall(x, 55);
+        for (int y = 24; y <= 55; ++y) wall(30, y);
+        for (int x = 31; x <= 86; ++x) waterRect(x, 34, x, 54); // reservoir with right spill lip
+        for (int x = 105; x <= 125; ++x) for (int y = 88; y <= 98; ++y) wall(x, y);
+    } else if (scene == 5) {
+        for (int x = 82; x <= 118; ++x) for (int y = 82; y <= 98; ++y) wall(x, y);
+        waterRect(91, 24, 109, 48); // stream above an obstacle
+    } else if (scene == 6) {
+        waterRect(99, 30, 100, 31); // four-cell cohesive droplet
+    } else if (scene == 7) {
+        waterRect(91, 103, 108, 104); // 36-cell puddle on a flat floor
+    } else if (scene == 8) {
+        for (int step=0;step<12;++step) for(int x=38+step*9;x<47+step*9;++x)
+            for(int y=48+step*5;y<=111;++y) wall(x,y);
+        waterRect(43, 36, 51, 44); // stair-stepped incline
+    } else if (scene == 9) {
+        for(int x=55;x<=145;++x){wall(x,38);wall(x,76);}
+        for(int y=38;y<=76;++y){wall(55,y);wall(145,y);}
+        wall(99,76); wall(102,76); // two-cell nozzle at x=100..101
+        waterRect(56,39,144,75);
+    } else if (scene == 10) {
+        for(int x=32;x<=168;++x){wall(x,73);wall(x,78);}
+        for(int y=34;y<=77;++y) wall(32,y);
+        waterRect(34,67,62,72); // source feeding a four-cell-high channel
+    }
+    expectedVolume = 0.0; for (float amount : fill) expectedVolume += amount;
+    wakeAllFluidChunks(); enforceSolidBoundaries(); seedAmbientHeat(); rebuildActivityAndMetrics();
+}
+
+void FluidEngine::addSloshImpulse() {
+    for (int y = 0; y < GH; ++y) for (int x = 1; x < GW; ++x)
+        if (openUFace(x, y) && (isFluid(x - 1, y) || isFluid(x, y))) u[ui(x, y)] += 10.0f;
+    wakeAllFluidChunks();
+}
+
+void FluidEngine::paintDisc(int cx, int cy, Tool tool, int brushRadius, LiquidPaint paint) {
+    for (int y = cy - brushRadius; y <= cy + brushRadius; ++y) for (int x = cx - brushRadius; x <= cx + brushRadius; ++x) {
+        if (!inside(x, y) || (x - cx) * (x - cx) + (y - cy) * (y - cy) > brushRadius * brushRadius) continue;
+        int index = ci(x, y);
+        if (tool == Tool::Water) {
+            float s = std::clamp(paint.dyeStrength, 0.0f, 1.0f);
+            bool clearDye = (paint.dyeR + paint.dyeG + paint.dyeB) <= 1.0e-6f;
+            if (paint.dyeOnly) {
+                if (solid[index] || fill[index] < MIN_ACTIVE_FILL) continue;
+                float f = fill[index];
+                if (clearDye) {
+                    dyeR[index] *= (1.0f - s);
+                    dyeG[index] *= (1.0f - s);
+                    dyeB[index] *= (1.0f - s);
+                } else {
+                    dyeR[index] = dyeR[index] * (1.0f - s) + paint.dyeR * f * s;
+                    dyeG[index] = dyeG[index] * (1.0f - s) + paint.dyeG * f * s;
+                    dyeB[index] = dyeB[index] * (1.0f - s) + paint.dyeB * f * s;
+                }
+                continue;
+            }
+            if (solid[index]) { solid[index] = 0; solidHeat[index] = 0.0f; }
+            float added = 1.0f - fill[index];
+            if (added > 0.0f) {
+                LiquidProperties const &liq = paint.asHoney ? config.honey : config.water;
+                float cap = thermalCapacity(massKg(liq.density, added, config.cellsPerMeter),
+                    liq.thermal.specificHeat);
+                liquidHeat[index] += energyFromTemp(cap, AMBIENT_TEMPERATURE_K);
+                fill[index] = 1.0f;
+                if (paint.asHoney) honey[index] += added;
+                if (!clearDye) {
+                    dyeR[index] += added * paint.dyeR * s;
+                    dyeG[index] += added * paint.dyeG * s;
+                    dyeB[index] += added * paint.dyeB * s;
+                }
+                expectedVolume += added;
+                waterShade[index] = makeShade(x, y);
+                honey[index] = std::min(honey[index], fill[index]);
+            }
+        } else if (tool == Tool::Solid) {
+            if (solid[index]) continue;
+            float displaced = fill[index];
+            LiquidCarry carry{};
+            if (displaced > 0.0f) carry = extractVolume(index, displaced);
+            solid[index] = 1;
+            float cap = thermalCapacity(massKg(2.20f, 1.0f, config.cellsPerMeter), kWallThermal().specificHeat);
+            solidHeat[index] = energyFromTemp(cap, AMBIENT_TEMPERATURE_K);
+            if (displaced > 0.0f) {
+                float remainder = depositVolume(x + 0.5f, y - 0.5f, displaced, 0.0f, -2.0f, &carry);
+                if (remainder > 1e-5f) {
+                    SplashParticle p;
+                    p.x = x + 0.5f; p.y = y - 0.1f; p.vx = 0.0f; p.vy = -3.0f;
+                    p.volume = remainder; p.originX = x; p.originY = y;
+                    p.heat = carry.heat; p.dyeR = carry.dyeR; p.dyeG = carry.dyeG; p.dyeB = carry.dyeB; p.honey = carry.honey;
+                    splashes.push_back(p);
+                }
+            }
+        } else {
+            solid[index] = 0;
+            solidHeat[index] = 0.0f;
+            if (fill[index] > 0.0f) {
+                expectedVolume -= fill[index];
+                fill[index] = 0.0f;
+                liquidHeat[index] = 0.0f;
+                dyeR[index] = dyeG[index] = dyeB[index] = 0.0f;
+                honey[index] = 0.0f;
+            }
+        }
+    }
+    if (tool == Tool::Eraser) {
+        for (size_t i = 0; i < splashes.size();) {
+            float dx = splashes[i].x - (cx + 0.5f), dy = splashes[i].y - (cy + 0.5f);
+            if (dx * dx + dy * dy <= static_cast<float>(brushRadius * brushRadius)) {
+                expectedVolume -= splashes[i].volume; splashes[i] = splashes.back(); splashes.pop_back();
+            } else ++i;
+        }
+    }
+    wakeChunkAtCell(cx,cy);
+}
+
+void FluidEngine::finalizePaint() { paintDirty = true; }
+
+void FluidEngine::paintLine(int x0, int y0, int x1, int y1, Tool tool, int brushRadius, LiquidPaint paint) {
+    int dx = std::abs(x1 - x0), sx = x0 < x1 ? 1 : -1, dy = -std::abs(y1 - y0), sy = y0 < y1 ? 1 : -1, error = dx + dy;
+    for (;;) { paintDisc(x0, y0, tool, brushRadius, paint); if (x0 == x1 && y0 == y1) break; int twice = 2 * error; if (twice >= dy) { error += dy; x0 += sx; } if (twice <= dx) { error += dx; y0 += sy; } }
+}
+
+void FluidEngine::runHeadlessBenchmark() {
+    config.workerCount = 1;
+    syncWorkerPool();
+    std::string filename=miscFile("benchmark_"+std::to_string(GW)+"x"+std::to_string(GH)+".tsv");
+    std::ofstream out(filename,std::ios::trunc);
+    out<<"grid\tscene\tticks\tmerge\tvolume\texpected\terror\tthin_cells\tthin_volume\tactive_cells\tactive_chunks\tvmax\tpressure_iterations\tphysics_ms\tpressure_ms\tadvection_ms\ttransport_ms\tsurface_ms\tresidual_ms\tlists_ms\tpressure_cells\tsurface_cells\tflux_u\tflux_v\tlimiter_passes\tsplashes\tsubvisible\n";
+    auto run=[&](int scene,char const*name,int ticks,bool merge){
+        residualConsolidationEnabled=merge;timingAccum=TimingAverages{};timingAverage=TimingAverages{};timingTicks=0;
+        loadTestScene(scene);auto start=Clock::now();
+        for(int tick=0;tick<ticks;++tick)simulationTick();
+        rebuildActivityAndMetrics();double perTick=elapsedMs(start)/std::max(1,ticks);
+        out<<GW<<"x"<<GH<<'\t'<<name<<'\t'<<ticks<<'\t'<<(merge?"on":"off")<<'\t'
+           <<currentVolume<<'\t'<<expectedVolume<<'\t'<<volumeError<<'\t'<<thinCellCount<<'\t'<<thinVolume<<'\t'
+           <<activeFluidCells<<'\t'<<activeChunks<<'\t'<<measuredMaxVelocity<<'\t'<<lastPressureIterations<<'\t'
+           <<perTick<<'\t'<<timingAverage.pressure<<'\t'<<timingAverage.advection<<'\t'<<timingAverage.transport<<'\t'
+           <<timingAverage.surface<<'\t'<<timingAverage.residual<<'\t'<<timingAverage.listsBuild<<'\t'
+           <<workCounts.pressureCells<<'\t'<<workCounts.surfaceCells<<'\t'<<workCounts.nonzeroFluxU<<'\t'<<workCounts.nonzeroFluxV<<'\t'
+           <<workCounts.limiterPasses<<'\t'<<workCounts.splashCount<<'\t'<<workCounts.subvisibleCells<<'\n';
+    };
+    run(1,"still_pool",180,true);
+    run(7,"small_puddle_baseline",240,false);
+    run(7,"small_puddle_refined",240,true);
+    run(3,"dam_break",180,true);
+    run(5,"large_moving_body",180,true);
+    run(6,"single_droplet",150,true);
+    run(9,"narrow_nozzle",180,true);
+}
+
+void FluidEngine::runAdvectionBenchmark() {
+    config.workerCount = 1;
+    syncWorkerPool();
+    residualConsolidationEnabled = true;
+    VelocityAdvection saved = config.velocityAdvection;
+    std::string filename = miscFile("advection_benchmark_" + std::to_string(GW) + "x" + std::to_string(GH) + ".tsv");
+    std::ofstream out(filename, std::ios::trunc);
+    out << "mode\tscene\tticks\tadvection_ms\tphysics_ms\tper_tick_ms\tvolume\texpected\terror\tvmax\tactive_cells\tactive_chunks\tmomentum_x\tmomentum_y\tke\n";
+    VelocityAdvection modes[] = {
+        VelocityAdvection::None,
+        VelocityAdvection::FirstOrderUpwind,
+        VelocityAdvection::NearestSemiLagrangian,
+        VelocityAdvection::SemiLagrangian,
+        VelocityAdvection::MacCormack,
+        VelocityAdvection::BFECC
+    };
+    struct Scene { int id; char const *name; int ticks; };
+    Scene scenes[] = {
+        {1, "still_pool", 120},
+        {3, "dam_break", 120},
+        {4, "waterfall", 120},
+        {9, "narrow_nozzle", 90}
+    };
+    for (VelocityAdvection mode : modes) {
+        config.velocityAdvection = mode;
+        for (Scene const &s : scenes) {
+            timingAccum = TimingAverages{};
+            timingAverage = TimingAverages{};
+            timingTicks = 0;
+            loadTestScene(s.id);
+            auto start = Clock::now();
+            for (int tick = 0; tick < s.ticks; ++tick) simulationTick();
+            rebuildActivityAndMetrics();
+            double perTick = elapsedMs(start) / std::max(1, s.ticks);
+            out << velocityAdvectionName(mode) << '\t' << s.name << '\t' << s.ticks << '\t'
+                << timingAverage.advection << '\t' << timingAverage.physics << '\t' << perTick << '\t'
+                << currentVolume << '\t' << expectedVolume << '\t' << volumeError << '\t'
+                << measuredMaxVelocity << '\t' << activeFluidCells << '\t' << activeChunks << '\t'
+                << momentumX << '\t' << momentumY << '\t' << kineticEnergy << '\n';
+        }
+    }
+    config.velocityAdvection = saved;
+}
+
+void FluidEngine::runScaleBenchmark() {
+    config.workerCount = 1;
+    syncWorkerPool();
+    std::string filename=miscFile("scale_benchmark_"+std::to_string(GW)+"x"+std::to_string(GH)+".tsv");
+    std::ofstream out(filename,std::ios::trunc);
+    out<<"grid\tscene\tticks\tphysics_ms\tactive_cells\tactive_chunks\tvolume_error\n";
+    auto run=[&](int scene,char const*name,int ticks){
+        residualConsolidationEnabled=true;loadTestScene(scene);auto start=Clock::now();
+        for(int tick=0;tick<ticks;++tick)simulationTick();
+        rebuildActivityAndMetrics();
+        out<<GW<<"x"<<GH<<'\t'<<name<<'\t'<<ticks<<'\t'<<elapsedMs(start)/ticks<<'\t'
+           <<activeFluidCells<<'\t'<<activeChunks<<'\t'<<volumeError<<'\n';
+    };
+    run(1,"resting_pool",60);run(7,"small_puddle",90);run(3,"dam_break",60);run(5,"large_moving_body",60);
+}
+
+void FluidEngine::runLiquidBugDiagnostics() {
+    config.workerCount = 1;
+    syncWorkerPool();
+    residualConsolidationEnabled = true;
+    std::ofstream out(miscFile("liquid_bug_diag.tsv"), std::ios::trunc);
+    out << "case\ttick\tvolume\texpected\terror\tn_any\tn_visible\tn_subvis\ty_span\ty_min\tmax_fill\tsplashes\tfrozen_vis\tholes\tactive_chunks\n";
+
+    auto countHoles = [&]() {
+        int holes = 0;
+        constexpr int dx[4] = {-1, 1, 0, 0};
+        constexpr int dy[4] = {0, 0, -1, 1};
+        for (int y = 1; y < GH - 1; ++y) for (int x = 1; x < GW - 1; ++x) {
+            int i = ci(x, y);
+            if (solid[i] || dynamicSolid[i] || fill[i] >= MIN_RENDER_FILL) continue;
+            int vis = 0;
+            for (int n = 0; n < 4; ++n) {
+                int ni = ci(x + dx[n], y + dy[n]);
+                if (!solid[ni] && !dynamicSolid[ni] && fill[ni] >= MIN_RENDER_FILL) ++vis;
+            }
+            if (vis >= 4) ++holes;
+        }
+        return holes;
+    };
+
+    auto emit = [&](char const *name, int tick) {
+        rebuildActivityAndMetrics();
+        int nAny = 0, nVis = 0, nSub = 0, yMin = GH, yMax = -1, frozen = 0;
+        float maxFill = 0.0f;
+        for (int y = 0; y < GH; ++y) for (int x = 0; x < GW; ++x) {
+            float amount = fill[ci(x, y)];
+            if (amount <= 1e-7f) continue;
+            ++nAny;
+            maxFill = std::max(maxFill, amount);
+            yMin = std::min(yMin, y);
+            yMax = std::max(yMax, y);
+            if (amount >= MIN_RENDER_FILL) {
+                ++nVis;
+                bool supported = (y + 1 >= GH) || isSolid(x, y + 1) || fill[ci(x, y + 1)] >= MIN_ACTIVE_FILL;
+                float speed = std::abs(cellU(x, y)) + std::abs(cellV(x, y));
+                if (!supported && speed < 0.12f) ++frozen;
+            } else ++nSub;
+        }
+        int ySpan = (yMax >= yMin) ? (yMax - yMin + 1) : 0;
+        int yMinOut = (yMax >= yMin) ? yMin : -1;
+        out << name << '\t' << tick << '\t' << currentVolume << '\t' << expectedVolume << '\t' << volumeError
+            << '\t' << nAny << '\t' << nVis << '\t' << nSub << '\t' << ySpan << '\t' << yMinOut << '\t' << maxFill
+            << '\t' << splashes.size() << '\t' << frozen << '\t' << countHoles() << '\t' << activeChunks << '\n';
+    };
+
+    // Single 1-cell droplet falling onto the scene-6 floor.
+    loadTestScene(6);
+    for (int y = 0; y < GH; ++y) for (int x = 0; x < GW; ++x) fill[ci(x, y)] = 0.0f;
+    splashes.clear();
+    fill[ci(100, 36)] = 1.0f;
+    expectedVolume = 1.0;
+    wakeAllFluidChunks();
+    enforceSolidBoundaries();
+    rebuildActivityAndMetrics();
+    emit("single_drop", 0);
+    for (int tick = 1; tick <= 90; ++tick) {
+        simulationTick();
+        if (tick == 1 || tick == 5 || tick == 15 || tick == 30 || tick == 60 || tick == 90) emit("single_drop", tick);
+    }
+
+    // Four-cell droplet (F6) for smear comparison.
+    loadTestScene(6);
+    emit("four_cell", 0);
+    for (int tick = 1; tick <= 90; ++tick) {
+        simulationTick();
+        if (tick == 15 || tick == 45 || tick == 90) emit("four_cell", tick);
+    }
+
+    // Resting pool interior holes.
+    loadTestScene(1);
+    emit("still_pool", 0);
+    for (int tick = 1; tick <= 120; ++tick) simulationTick();
+    emit("still_pool", 120);
+
+    // Dam-break: energetic transport + hole risk.
+    loadTestScene(3);
+    emit("dam_break", 0);
+    int maxHoles = 0;
+    for (int tick = 1; tick <= 90; ++tick) {
+        simulationTick();
+        maxHoles = std::max(maxHoles, countHoles());
+    }
+    emit("dam_break", 90);
+    out << "dam_break\tmax_holes\t" << maxHoles << "\n";
+
+    auto wallAt = [&](int x, int y) { if (inside(x, y)) solid[ci(x, y)] = 1; };
+    auto sumFill = [&](int x0, int y0, int x1, int y1) {
+        double s = 0.0;
+        for (int y = y0; y <= y1; ++y) for (int x = x0; x <= x1; ++x)
+            if (inside(x, y)) s += fill[ci(x, y)];
+        return s;
+    };
+    auto topologyLine = [&](char const *name, bool ok, double a = 0.0, double b = 0.0) {
+        out << name << '\t' << (ok ? "ok" : "FAIL") << '\t' << a << '\t' << b << '\n';
+    };
+
+    // 1px sealed cup: exterior deposit/splash must not enter the interior.
+    {
+        clearWorld();
+        int const x0 = 60, y0 = 40, x1 = 68, y1 = 48;
+        for (int x = x0; x <= x1; ++x) { wallAt(x, y0); wallAt(x, y1); }
+        for (int y = y0; y <= y1; ++y) { wallAt(x0, y); wallAt(x1, y); }
+        double interior0 = 0.0;
+        for (int y = y0 + 2; y <= y1 - 2; ++y) for (int x = x0 + 2; x <= x1 - 2; ++x) {
+            fill[ci(x, y)] = 1.0f;
+            interior0 += 1.0;
+        }
+        expectedVolume = interior0;
+        enforceSolidBoundaries();
+        seedAmbientHeat();
+        wakeAllFluidChunks();
+        float leftover = depositVolume(70.5f, 44.5f, 0.85f, -14.0f, 0.0f);
+        leftover += depositVolume(68.5f, 44.5f, 0.5f, -14.0f, 0.0f);
+        splashes.push_back({74.5f, 44.5f, -45.0f, 0.0f, 0.4f, 0.0f, 74, 44, 0.0f});
+        expectedVolume += 0.85 + 0.5 + 0.4 - leftover;
+        for (int k = 0; k < 12; ++k) updateSplashParticles(PHYSICS_DT);
+        double interior1 = sumFill(x0 + 1, y0 + 1, x1 - 1, y1 - 1);
+        bool ok = std::abs(interior1 - interior0) < 1e-4;
+        topologyLine("sealed_cup", ok, interior0, interior1);
+        emit("sealed_cup", 1);
+        (void)leftover;
+    }
+
+    // 1px wall: deposit on the empty side must not appear on the wet side.
+    {
+        clearWorld();
+        for (int y = 0; y < GH; ++y) wallAt(100, y);
+        for (int y = 50; y <= 70; ++y) for (int x = 70; x <= 99; ++x) fill[ci(x, y)] = 1.0f;
+        double left0 = sumFill(70, 50, 99, 70);
+        expectedVolume = left0;
+        enforceSolidBoundaries();
+        seedAmbientHeat();
+        wakeAllFluidChunks();
+        depositVolume(101.5f, 60.5f, 1.0f, -10.0f, 0.0f);
+        depositVolume(100.5f, 60.5f, 0.6f, -10.0f, 0.0f);
+        expectedVolume = left0 + 1.6;
+        rebuildActivityAndMetrics();
+        double left1 = sumFill(70, 50, 99, 70);
+        double right = sumFill(101, 50, 110, 70);
+        bool ok = std::abs(left1 - left0) < 1e-4 && right < 1.0f + 0.6f + 1e-3f;
+        topologyLine("thin_wall", ok, left0, left1);
+        emit("thin_wall", 1);
+    }
+
+    // Diagonal solids: 4-connect must not cut the corner into the opposite empty cell.
+    {
+        clearWorld();
+        wallAt(51, 40);
+        wallAt(50, 41);
+        enforceSolidBoundaries();
+        seedAmbientHeat();
+        expectedVolume = 0.0;
+        wakeAllFluidChunks();
+        depositVolume(50.5f, 40.5f, 1.0f, 12.0f, 12.0f);
+        depositVolume(51.5f, 40.5f, 0.4f, 8.0f, 0.0f);
+        splashes.push_back({50.6f, 40.4f, 30.0f, 30.0f, 0.35f, 0.0f, 50, 40, 0.0f});
+        for (int k = 0; k < 16; ++k) updateSplashParticles(PHYSICS_DT);
+        float b = fill[ci(51, 41)];
+        bool ok = b < 1e-5f;
+        topologyLine("diag_corner", ok, 0.0, static_cast<double>(b));
+        emit("diag_corner", 1);
+    }
+
+    // Open void: splash leaving the map is a counted sink, not a rim bounce.
+    {
+        bool savedWalls = config.walledBorders;
+        config.walledBorders = false;
+        clearWorld();
+        splashes.clear();
+        splashes.push_back({3.5f, 40.5f, -90.0f, 0.0f, 0.5f, 0.0f, 3, 40, 0.0f});
+        expectedVolume = 0.5;
+        enforceSolidBoundaries();
+        wakeAllFluidChunks();
+        for (int k = 0; k < 40; ++k) updateSplashParticles(PHYSICS_DT);
+        rebuildActivityAndMetrics();
+        double edgeFill = 0.0;
+        for (int y = 0; y < GH; ++y) edgeFill += fill[ci(0, y)] + fill[ci(1, y)];
+        bool ok = splashes.empty() && std::abs(expectedVolume) < 1e-5 && std::abs(currentVolume) < 1e-5 && edgeFill < 1e-5;
+        topologyLine("void_escape", ok, expectedVolume, currentVolume);
+        emit("void_escape", 1);
+        config.walledBorders = savedWalls;
+    }
+
+    // Walled rim: the same particle stays in-world; expected volume does not drop.
+    {
+        bool savedWalls = config.walledBorders;
+        config.walledBorders = true;
+        clearWorld();
+        splashes.clear();
+        splashes.push_back({3.5f, 40.5f, -90.0f, 0.0f, 0.5f, 0.0f, 3, 40, 0.0f});
+        expectedVolume = 0.5;
+        enforceSolidBoundaries();
+        wakeAllFluidChunks();
+        for (int k = 0; k < 40; ++k) updateSplashParticles(PHYSICS_DT);
+        rebuildActivityAndMetrics();
+        double splashVol = 0.0;
+        for (SplashParticle const &p : splashes) splashVol += p.volume;
+        bool inGrid = true;
+        for (SplashParticle const &p : splashes)
+            if (!inside(static_cast<int>(std::floor(p.x)), static_cast<int>(std::floor(p.y)))) inGrid = false;
+        bool ok = inGrid && std::abs(currentVolume - 0.5) < 1e-4 && std::abs(expectedVolume - 0.5) < 1e-4
+            && std::abs(currentVolume - (sumFill(0, 0, GW - 1, GH - 1) + splashVol)) < 1e-4;
+        topologyLine("walled_bounce", ok, expectedVolume, currentVolume);
+        emit("walled_bounce", 1);
+        config.walledBorders = savedWalls;
+    }
+}
+
+void FluidEngine::runThreadBenchmark() {
+    residualConsolidationEnabled = true;
+    std::string filename = miscFile("thread_benchmark_" + std::to_string(GW) + "x" + std::to_string(GH) + ".tsv");
+    std::ofstream out(filename, std::ios::trunc);
+    int autoN = autoWorkerCount();
+    out << "# auto_workers=" << autoN << " hardware=" << maxSelectableWorkers()
+        << " pressure_min_cells=" << config.pressureParallelMinCells << "\n";
+    out << "workers\tmode\tscene\tticks\tphysics_ms\tpressure_ms\tadvection_ms\ttransport_ms\tsurface_ms\tresidual_ms\trigid_ms\tactive_cells\tpressure_cells\tvolume\texpected\terror\tparallel_p\n";
+
+    struct Case { int scene; char const *name; int warmup; int ticks; };
+    Case cases[] = {
+        {6, "A_light_droplet", 20, 90},
+        {7, "B_moderate_puddle", 30, 120},
+        {1, "C_large_pool", 30, 120},
+        {3, "D_dam_break", 20, 120},
+        {5, "D2_falling_stream", 20, 120},
+    };
+
+    int counts[] = {1, 2, 4, 0};
+    char const *modes[] = {"1", "2", "4", "auto"};
+
+    for (int m = 0; m < 4; ++m) {
+        config.workerCount = counts[m];
+        syncWorkerPool();
+        int resolved = lastResolvedWorkers;
+        for (Case const &c : cases) {
+            timingAccum = TimingAverages{}; timingAverage = TimingAverages{}; timingTicks = 0;
+            loadTestScene(c.scene);
+            for (int i = 0; i < c.warmup; ++i) simulationTick();
+            timingAccum = TimingAverages{}; timingAverage = TimingAverages{}; timingTicks = 0;
+            auto start = Clock::now();
+            for (int i = 0; i < c.ticks; ++i) simulationTick();
+            rebuildActivityAndMetrics();
+            double perTick = elapsedMs(start) / std::max(1, c.ticks);
+            out << resolved << '\t' << modes[m] << '\t' << c.name << '\t' << c.ticks << '\t'
+                << perTick << '\t' << timingAverage.pressure << '\t' << timingAverage.advection << '\t'
+                << timingAverage.transport << '\t' << timingAverage.surface << '\t' << timingAverage.residual << '\t'
+                << 0.0 << '\t' << activeFluidCells << '\t' << workCounts.pressureCells << '\t'
+                << currentVolume << '\t' << expectedVolume << '\t' << volumeError << '\t'
+                << (lastPressureParallel ? 1 : 0) << '\n';
+            out.flush();
+        }
+    }
+    config.workerCount = 1;
+    syncWorkerPool();
+}
+

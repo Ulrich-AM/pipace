@@ -1,0 +1,39 @@
+PIPACE thermal numerical dump
+ambient_K 293.15
+viz_deadband_K 0.35
+
+[seeded_ambient_with_gas]
+energy_J 6.04414e+09
+t_min 293.15 t_max 293.15 t_mean 293.15
+max_|dT_amb| 0 n_away_deadband 0
+n_gas 23333 n_liquid 0 n_wall 667 n_rigid 0 n_empty 0
+gas_T 293.15 .. 293.15
+wall_T 293.15 .. 293.15
+nan 0 inf 0 negK 0 near0K 0
+leftover_liquid_cells 0 leftover_liquid_J 0
+leftover_solid_cells 0 leftover_solid_J 0
+
+[idle_60_ticks]
+energy_J 6.04414e+09
+t_min 293.15 t_max 293.15 t_mean 293.15
+max_|dT_amb| 0 n_away_deadband 0
+n_gas 23333 n_liquid 0 n_wall 667 n_rigid 0 n_empty 0
+gas_T 293.15 .. 293.15
+wall_T 293.15 .. 293.15
+nan 0 inf 0 negK 0 near0K 0
+leftover_liquid_cells 0 leftover_liquid_J 0
+leftover_solid_cells 0 leftover_solid_J 0
+
+[closed_conservation_after_120]
+energy_J 2.58126e+10
+t_min 280.001 t_max 330 t_mean 293.927
+max_|dT_amb| 36.8495 n_away_deadband 1403
+n_gas 0 n_liquid 1290 n_wall 200 n_rigid 0 n_empty 22510
+liquid_T 280.001 .. 330 fill_at_min 1 fill_at_max 1
+wall_T 289.108 .. 308.48
+nan 0 inf 0 negK 0 near0K 0
+leftover_liquid_cells 0 leftover_liquid_J 0
+leftover_solid_cells 0 leftover_solid_J 0
+
+closed_rel_energy_error 3.1401e-07
+closed_energy_0 2.58126e+10 closed_energy_1 2.58126e+10

@@ -1,0 +1,20 @@
+test	result	detail	bodies	pixels	mass	max_damage	absorbed	volume
+A_grab	PASS	followed spring constraint	1	12	26.4	0	0	0
+B_safe_drop	PASS	low metal drop did not fracture or idle-damage	1	12	93.6	0.0282364	0	0
+C_hard_drop	PASS	glass took impact damage/cracks	24	24	60	0	0	0
+D_material_diff	PASS	glass failed more than metal	16	30	154.5	0.199607	0	0
+E_fatigue	PASS	subcritical hits accumulated	1	12	26.4	0.228605	0	0
+F_asymmetric	PASS	damage stayed near struck end	1	40	100	0.704367	0	0
+G_absorb	PASS	wood absorbed free water	1	40	21.7563	0	3.75627	2070.24
+H_spread	PASS	moisture diffused along wood	1	20	11.2773	0	2.2773	0
+I_wet_fracture	PASS	wet wood weaker than dry	1	16	17.12	0.116952	9.92	0
+J_fragment_mass	PASS	pixels and mass conserved	24	24	60	0	0	0
+K_spin_split	PASS	fragments inherited spin velocities	10	36	90	0	0	0
+L_anchored	PASS	anchored mass remained after impact	13	108	241.2	0.616699	0	0
+M_crack_persist	PASS	crack survived sleep/wake	1	32	70.4	0	0	0
+N_crack_no_split	PASS	crack kept a single rigid body	1	32	70.4	0	0	0
+O_full_split	PASS	through-crack split into two bodies	2	32	70.4	0	0	0
+P_fragment_crack	PASS	fragment kept internal crack	2	40	92.2	0	4.2	0
+Q_generic_api	PASS	external structural API damaged bonds	1	18	8.1	0.298005	0	0
+R_resting	PASS	resting body did not self-damage	1	12	26.4	0.0551504	0	0
+summary	PASS	18 passed, 0 failed

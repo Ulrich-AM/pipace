@@ -1,0 +1,300 @@
+PIPACE CUSTOMIZATION + PERFORMANCE CONTROL CONCEPT
+==================================================
+
+CORE IDEA
+---------
+PIPACE should not rely only on generic Low / Medium / High presets.
+
+A defining feature should be that the user can decide which physical effects are worth spending CPU time on for their particular experiment. The simulator should offer deep customization so users can adapt it to weak computers, powerful desktops, large worlds, small high-accuracy experiments, fluid-focused scenes, rigid-body tests, thermal experiments, and future chemistry-heavy simulations.
+
+Core philosophy:
+
+    Let the user choose how accurate the universe needs to be.
+
+This fits the identity of "Purely Inaccurate Physics And Chemical Engine" very well.
+
+PRESETS + CUSTOM MODE
+---------------------
+Keep simple presets for ordinary users:
+
+    Potato
+    Low
+    Medium
+    High
+    Custom
+
+Presets should simply set the detailed controls to sensible combinations. If the user changes an advanced setting, the preset can automatically become Custom.
+
+GENERAL SIMULATION CONTROLS
+---------------------------
+Possible controls:
+- Physics update rate
+- Maximum catch-up ticks
+- Time scale
+- Simulation thread count
+- Sleep aggressiveness
+- Active-region/chunk behavior
+- World update budget
+- CPU budget target
+- Automatic quality adjustment
+- Optional future CPU/GPU compute backend
+
+LIQUID CONTROLS
+---------------
+Possible controls:
+- Liquid simulation enabled
+- Pressure solver enabled
+- Pressure iteration count
+- Hydrostatic pressure
+- Surface tension
+- Vorticity
+- Spray / splash particles
+- Residual liquid merging
+- Advection method
+- Maximum fluid substeps
+- Flux limiter strength
+- Free-surface detail
+- Liquid-solid coupling
+- Liquid-gas coupling
+- Liquid update frequency
+- Liquid sleeping / inactive chunk thresholds
+
+RIGID-BODY / SOLID CONTROLS
+---------------------------
+Possible controls:
+- Rigid-body simulation enabled
+- Collision detection mode
+- Collision iteration count
+- Friction
+- Restitution
+- Sleeping
+- Fracture
+- Fracture detail
+- Damage simulation
+- Moisture / water absorption
+- Rigid-liquid coupling
+- Continuous collision detection
+- Adaptive collision detection
+
+Potential collision modes:
+
+    Discrete
+    Adaptive
+    Continuous
+
+Discrete:
+Cheapest. Best for slow or ordinary motion.
+
+Adaptive:
+Uses expensive collision checks only when velocity, size, or tunneling risk makes them necessary.
+
+Continuous:
+Most expensive. Uses swept/continuous collision checks much more aggressively.
+
+GAS CONTROLS
+------------
+Possible controls:
+- Gas simulation enabled
+- Gas update frequency
+- Pressure solve
+- Velocity solve
+- Buoyancy
+- Diffusion
+- Gas-solid forces
+- Gas-liquid exchange
+- Temperature coupling
+- Gas sleeping / inactivity thresholds
+
+Possible update modes:
+
+    Off
+    Every 4 ticks
+    Every 2 ticks
+    Every tick
+
+THERMAL CONTROLS
+----------------
+Possible controls:
+- Thermal simulation enabled
+- Thermal update rate
+- Solid conduction
+- Liquid conduction
+- Gas conduction
+- Interface heat exchange
+- Temperature-dependent material properties
+- Thermal sleeping
+- Heat-transfer accuracy
+- Future radiation heat transfer
+- Future phase-change calculations
+
+Turning thermal simulation off should stop thermal solver work without deleting stored temperatures.
+
+CHEMISTRY / SACE CONTROLS
+-------------------------
+Future controls could include:
+- Chemistry enabled
+- Reaction update frequency
+- Reaction search depth
+- Generated substances enabled
+- SACE enabled
+- SACE calculation quality
+- Reaction cache enabled
+- Mixture handling
+- Reaction kinetics detail
+- Complex structure estimation
+- Confidence/uncertainty calculations
+
+SACE should generally remain event-driven rather than running an expensive full-world search every tick.
+
+RENDERING CONTROLS
+------------------
+Rendering should be configurable independently from physics.
+
+Possible controls:
+- Glow
+- Flat rendering
+- Liquid shading
+- Surface outlines
+- Thermal overlay quality
+- Gas overlays
+- Rigid debug overlays
+- Particle effects
+- Interpolation
+- UI scale
+- Debug visualization detail
+
+PER-SYSTEM UPDATE FREQUENCY
+---------------------------
+One of the most important performance controls should be allowing different systems to run at different rates.
+
+Example:
+
+    Rigid physics:    Every tick
+    Liquid physics:   Every tick
+    Gas:              Every 2 ticks
+    Thermal:          Every 3 ticks
+    Chemistry:        Every 5 ticks
+    SACE:             Event-driven
+
+Not every subsystem needs to operate at 30 or 60 updates per second.
+
+APPROXIMATION / ACCURACY LEVELS
+-------------------------------
+Some systems could expose simplified accuracy levels in addition to detailed settings.
+
+Examples:
+
+COLLISIONS
+    Cheap
+    Adaptive
+    Accurate
+
+THERMAL
+    Coarse
+    Normal
+    Accurate
+
+GAS
+    Off
+    Coarse
+    Full
+
+CHEMISTRY
+    Basic
+    Normal
+    Detailed
+
+These should map to real underlying settings, not placebo options.
+
+BASIC / ADVANCED / EXPERT UI
+----------------------------
+A major risk is overwhelming the user.
+
+BASIC:
+- Quality
+- Physics Rate
+- Gas
+- Thermal
+
+ADVANCED:
+- Per-system controls
+
+EXPERT:
+- Solver parameters
+- Iteration counts
+- Update rates
+- Thresholds
+- Approximation modes
+- Debugging controls
+
+Collapsible sections could also be used.
+
+REAL COST INFORMATION
+---------------------
+Expensive settings should ideally indicate their approximate performance impact.
+
+Example:
+
+    Surface tension         ON      CPU: Medium
+    Continuous collisions  OFF     CPU: High
+    Gas full-rate           ON      CPU: High
+    Thermal conduction      ON      CPU: Medium
+
+Later, show actual measured timings:
+
+    Fluid pressure      4.8 ms
+    Gas                 2.1 ms
+    Rigid collision     3.4 ms
+    Thermal             1.2 ms
+    Rendering           1.7 ms
+
+BUILT-IN BENCHMARK / AUTO CONFIGURATION
+---------------------------------------
+A future benchmark could run standardized scenes and measure subsystem cost.
+
+Example:
+
+    PIPACE BENCHMARK
+
+    Average physics tick: 14.2 ms
+    Worst tick: 21.7 ms
+
+    Fluid:    6.1 ms
+    Rigid:    2.8 ms
+    Gas:      2.3 ms
+    Thermal:  1.4 ms
+    Other:    1.6 ms
+
+    Recommended preset:
+    MEDIUM
+
+AUTO quality could use this information to choose initial settings.
+
+DESIGN RULES
+------------
+1. Every expensive subsystem should be independently optional where physically reasonable.
+2. Turning off one subsystem should not break unrelated systems.
+3. Settings should change real fidelity/workload, not create fake quality differences.
+4. Low-quality settings should simplify or reduce update frequency rather than intentionally break conservation.
+5. Systems should sleep or become inactive when nothing meaningful is happening.
+6. Different systems should be allowed to run at different update rates.
+7. Presets should configure detailed settings, not replace them.
+8. Advanced users should be able to override almost everything.
+9. The simulator should clearly communicate which settings are expensive.
+10. PIPACE should remain usable on low-end machines by spending CPU time only on physics the user actually needs.
+
+PIPACE IDENTITY
+---------------
+Instead of only saying:
+
+    "Choose Low, Medium, or High."
+
+PIPACE can effectively say:
+
+    "Choose what matters."
+
+or:
+
+    "You decide how accurate the universe needs to be."
+
+This can become a real identity feature of PIPACE, not just a settings menu.

@@ -1,0 +1,317 @@
+PIPACE — FIX RIGID-BODY BOUNCE / UNSTABLE CONTACTS
+====================================================
+Read AGENTS.md, rigid/RigidBodyEngine.cpp, rigid/RigidBodyTypes.h,
+fluid/FluidEngine.cpp (dynamic occupancy / displace / moving boundaries),
+and main.cpp worldTick() before changing anything.
+
+This is a CORRECTNESS / STABILITY pass on the existing pixel-native rigid
+bodies. It is not a feature pass. Do not add cut/merge/fracture, gases, SACE,
+or a new fluid solver. Do not replace pixel masks with Box2D rectangles.
+Do not retune water constants. Do not “fix” bounce by silently deleting
+volume or by teleporting bodies to rest.
+
+Observed problem:
+Drawn / spawned rigid bodies will not settle. They chatter, hop, tumble, and
+look generally broken on dry ground and in water.
+
+
+======================================================================
+1. WHAT ALREADY EXISTS (keep this architecture)
+======================================================================
+
+- Authoritative local-space MaterialId pixel mask per RigidBody
+- Continuous pose (x, y, theta) + vx, vy, omega
+- Mass / COM / inertia from occupied mask cells and material density
+- Inverse rasterization onto the world grid (occupiesWorldCell)
+- Dynamic solid occupancy in FluidEngine (dynamicSolid + surface velocity)
+- Topology-safe fluid displacement from occupied cells
+- Pressure gathered as force/torque onto wetted rigid surface cells
+- Draw tool 4, materials wood/stone, Shift+F1–F10 scenes, --rigid-benchmark
+- worldTick order today:
+      rigid.step(fluid, PHYSICS_DT)
+      fluid.simulationTick()
+      rigid.gatherFluidForces(fluid)
+
+Keep the mask authoritative. Keep fluid conservation. Keep existing test
+scenes. Compile and run after each meaningful change.
+
+
+======================================================================
+2. ROOT CAUSES — FIX THESE, DO NOT JUST LOWER CONSTANTS
+======================================================================
+
+A. FAKE PENETRATION DEPTH (primary bounce cause)
+------------------------------------------------
+collectStaticContacts() only fires when a rigid body OVERLAPS a static solid
+cell, then writes a constant:
+
+    c.penetration = 0.65f;   // static
+    c.penetration = 0.35f;   // body-body
+
+Actual overlap is never measured. Positional solve then does:
+
+    corr = max(penetration - 0.05, 0) * 0.55   // ≈ 0.33 cells EVERY contact
+
+There is no slop based on real depth, and the value never shrinks as the
+body separates.
+
+B. POSITIONAL CORRECTIONS STACK PER OVERLAPPING PIXEL
+-----------------------------------------------------
+A 4-wide block resting on a floor can overlap 4 floor cells. Each contact
+independently translates the whole body by ~0.33 cells. 4 contacts × 3
+positional iterations ≈ several cells of upward launch per substep.
+
+This alone explains perpetual hopping on flat ground.
+
+C. CONTACTS ARE GENERATED INSIDE THE OBSTACLE, NOT ON THE SURFACE
+-----------------------------------------------------------------
+Static contacts are: “world cell is static solid AND occupiesWorldCell”.
+Contact point is the solid cell center (x+0.5, y+0.5), i.e. inside the wall.
+Normal is the sum of directions toward non-solid neighbors, with a COM-delta
+fallback.
+
+Consequences:
+- No contact until the body has already tunneled into the wall
+- After the shove-out, overlap disappears → no contact → gravity pulls back
+  in → overlap → shove. Classic discrete chatter loop
+- Corner / edge solids produce sideways or diagonal normals
+- Lever arm rA is too long (point is inside the floor) → spurious torque,
+  tumbling on landing
+
+D. CONSERVATIVE 5-TAP RASTERIZATION CREATES EXTRA OVERLAPS
+----------------------------------------------------------
+occupiesWorldCell() samples center + 4 inset corners. A body that is only
+grazing a floor cell still occupies it, which creates a full fake-0.65
+contact. Occupancy also flickers on/off for grazing cells as pose jitters.
+
+E. VELOCITY SOLVE AND POSITION SOLVE FIGHT
+------------------------------------------
+Per substep: 8 sequential velocity impulses (restitution 0.04) then 3
+positional translations. Sleeping bodies skip velocity impulses but still
+receive positional correction, so “asleep” bodies get pushed out of their
+support and then fall back in.
+
+solveContacts() also forces a.sleeping = false on any applied impulse.
+
+F. NO REAL MANIFOLD / NO CCD
+----------------------------
+- Body-body: last-writer-wins occupant grid; same-cell overlap is ignored
+- Total contacts capped at 96; static contacts capped at 48 per body
+- Fast falls (gravity 39.24 cells/s², clamp 70 cells/s) can skip thin floors
+- No swept test between previous pose and new pose
+
+G. SPLIT RIGID/FLUID TICK + UNBOUNDED PRESSURE KICK (water bounce)
+------------------------------------------------------------------
+Rigid completes ALL of its substeps and then syncOccupancy() teleports the
+solid mask into the fluid and dump-displaces volume. Fluid then solves.
+gatherFluidForces() applies raw neighbor pressure * fill as fx/fy/torque
+with no clamp, no dt-aware scaling, and a one-frame delay.
+
+A body slamming a pool produces a huge divergence/pressure spike, which
+launches it next tick. Wood (density 0.45) is especially violent.
+
+H. SMALLER BUGS THAT MAKE IT FEEL “SUPER BUGGY”
+-----------------------------------------------
+- Positional correction has no angular component, while velocity impulses do
+- bodySupported() uses a different test than the contact manifold
+- Painted strokes do not merge with existing bodies
+- Thin rotated features can hole or over-occupy (5-tap vs 1-pixel bars)
+- Damping 0.9985/tick is too weak to hide the energy the solver injects
+- applyMovingBoundaryVelocity() is correct in spirit, but coupling is not
+  substep-shared with the rigid integrator
+
+
+======================================================================
+3. REQUIRED FIX DIRECTION
+======================================================================
+
+Change the collision model. Do not keep constant penetration and hope a
+smaller kRestitution hides it.
+
+3.1 Contact generation (static world)
+- Generate contacts from rigid SURFACE occupancy, not from overlapped
+  interior wall cells.
+- For each world cell occupied by the body, if an orthogonal neighbor is
+  static solid (or world-solid), emit at most one contact on that FACE.
+- Contact point = face center (the interface), not the solid cell center.
+- Contact normal = out of the solid, into the body (for y-down floor:
+  normal (0, -1) pushing the body toward smaller y).
+- Penetration = how far that body cell (or sampled local mask) sits past
+  the solid face, in cells. Measure it. Clamp to a small max (e.g. 1 cell)
+  for stability, but NEVER use a constant 0.65.
+- Deduplicate / merge contacts that share the same body + the same solid
+  face-normal cluster so a long flat floor does not create N independent
+  full-body translations.
+- Prefer: weight positional correction by 1/N, or accumulate a single
+  normal/tangent manifold per body-vs-supporting-plane, or use an
+  accumulated-impulse solver with one effective constraint per contact
+  that does not re-apply the full COM translation N times.
+
+3.2 Positional correction
+- slop ≈ 0.02–0.08 cells
+- Baumgarte / correction fraction small (≈ 0.2–0.4) and based on REAL depth
+- Apply at the contact point (linear + angular) OR apply linear only after
+  merging contacts so net translation ≈ the max (not the sum) of depths
+- Skip positional correction for sleeping, fully supported bodies whose
+  max real penetration is inside slop
+- Do not inject velocity during positional correction
+
+3.3 Velocity solve
+- Sequential impulses are OK if they use the updated velocity and a real
+  normal
+- Restitution 0 while vn is below a threshold that includes ordinary
+  landing speeds after gravity at 30 Hz; v1 may use 0 restitution until
+  bodies actually rest, then optionally add a tiny bounce later
+- Friction at the face, Coulomb clamped against the normal impulse
+- Warm-start or persist contacts across substeps if easy; not required
+- Do not wake a sleeping body for impulses with |vn| below sleep band
+- After the solve, if supported and |v| / |omega| below sleep thresholds
+  for kSleepTicks, zero velocities and sleep
+
+3.4 Rasterization vs collision
+- Keep inverse rasterization from the source mask (do not bake rotated
+  pixels back into the mask)
+- Use a stable occupancy rule for fluid exclusion (conservative is OK so
+  water cannot leak through)
+- Collision may use a slightly stricter test (center sample, or coverage
+  ≥ 0.5) so grazing floor cells do not become contacts
+- If those two grids differ, document it; do not let collision run on
+  conservative-only overlaps with fake depth
+
+3.5 Body-body
+- Detect overlap via occupant neighbors AND same-cell conflicts
+- Same-cell: produce a contact with normal from COM delta or from the
+  previous separating axis; penetration from overlap
+- Remove the hard 96 cap or replace it with a per-pair cap that cannot
+  drop floor contacts
+
+3.6 Sleep / support
+- Support = has a contact with normal opposing gravity (ny < 0 in y-down)
+  whose real penetration is finite, OR a static solid immediately below a
+  surface cell
+- Do not treat “occupant below” from a stale grid as the only support test
+- Sleeping bodies must not be positionally shoved every substep
+
+3.7 Fluid coupling (stability first, not a new coupling architecture)
+Do NOT implement the full shared scheduler from the roadmap in this pass
+unless a tiny per-substep exchange is clearly necessary.
+
+Minimum water-stability changes:
+- gatherFluidForces only on surface occupant cells (already roughly true)
+- Clamp total pressure acceleration per body this tick (e.g. a few g)
+  and/or use a low-pass / hydrostatic-dominant force:
+      F += -p_neighbor * n, then clamp |F|/mass and |torque|
+- Zero or strongly attenuate pressure force when the neighbor fill is a
+  one-tick displacement spike
+- After rigid.step, displacement must remain conservative and
+  connectivity-aware (already true — keep it)
+- Optional small linear drag vs surrounding fluid velocity so float/sink
+  scenes decay instead of oscillating
+- Do not apply last frame’s unrebuilt pressure to a body that just
+  teleported into a new cell cluster without clamping
+
+Leave a comment that a future pass should share substeps:
+  rigid integrate → rasterize/displace/moving BC → fluid project → forces
+  inside the same substep. Do not do that full rewrite unless dry contacts
+  are already stable and water still launches bodies.
+
+3.8 Integration
+- Keep gravity 39.24 cells/s² and PHYSICS_DT = 1/30
+- Keep CFL-ish rigid substeps, but substeps must collide against the
+  *updated* pose with real contacts; increasing substeps without fixing
+  fake penetration will not stop the bounce
+- Light damping is fine; it is not the fix
+
+
+======================================================================
+4. WHAT NOT TO DO
+======================================================================
+
+- Do not replace the pixel mask with one collider rectangle per body or
+  per pixel
+- Do not bake world-rasterized pixels back into the source mask
+- Do not fill liquid holes or delete volume to hide displacement bugs
+- Do not drop restitution to 0 and call it done while penetration is still
+  the constant 0.65
+- Do not redesign the water pressure solver, flux limiter, or chunks
+- Do not add multithreading to the rigid step in this pass
+- Do not change wood/stone densities unless a unit mismatch is proven
+- Do not expand scope to cut/merge/fracture/containers-as-a-special-case
+
+
+======================================================================
+5. ACCEPTANCE TESTS
+======================================================================
+
+Use existing Shift+F1–F10 scenes plus a drawn stroke. Pause with Space and
+single-step with S while debugging.
+
+Must pass:
+
+1. Shift+F1 falling stone block on the painted floor
+   - Lands, maybe one short compression, then STAYS PUT
+   - Sleeps (debug overlay COM turns sleep color; G view darkens)
+   - No perpetual hop, spin, or sideways walk
+
+2. Shift+F2 irregular stone
+   - Settles on a stable orientation or a clearly damped rock, then sleeps
+   - Must not keep kicking itself off the floor
+
+3. Shift+F4 rotation / wall
+   - Can rotate and collide the wall without exploding
+   - Comes to rest if it would physically rest
+
+4. Two drawn bodies dropped onto each other
+   - Stack or tumble, then rest
+   - Must not jitter-launch
+
+5. Shift+F6 wood in pool (float) and Shift+F7 stone in pool (sink)
+   - May splash and bob a few times
+   - Must decay toward floating/sinking, not fly out of the pool
+   - Volume error / lostR must not explode; displacement remains
+     connectivity-aware
+
+6. Shift+F8 cup
+   - Body itself must not bounce-lock on the floor
+   - Water containment can stay imperfect; do not special-case cups
+
+7. Thin geometry (Shift+F9)
+   - Must not disintegrate from rasterization holes
+   - One-pixel bars may look stairstepped while rotating; that is OK
+   - Must not vibrate to pieces on the floor
+
+8. --rigid-benchmark still runs and writes the TSV
+   - Timing can be a bit higher if contacts are more correct
+   - Conservation numbers must not get worse in an obvious way
+
+Debug while fixing:
+- L overlay: contacts should sit on surfaces, normals pointing out of
+  walls, not from deep inside floor pixels
+- G view: occupancy should match the drawn mask at identity pose
+- After rest, lastContacts should be a small stable floor set, not a
+  flickering cloud
+
+
+======================================================================
+6. IMPLEMENTATION ORDER
+======================================================================
+
+1. Replace static contact generation + real penetration + surface points
+2. Stop stacking full COM translations (merge / weight / accumulated)
+3. Make sleep actually stick (skip positional when supported+quiet)
+4. Fix body-body same-cell overlap
+5. Clamp / damp pressure forces so pools do not rocket bodies
+6. Rebuild, run Shift+F1 until it sleeps, then the rest of the scenes
+7. Run --rigid-benchmark
+8. Short note in REFINEMENT_CHANGELOG.md (rigid stability only)
+
+Touch mainly:
+  rigid/RigidBodyEngine.cpp
+  rigid/RigidBodyEngine.h
+  rigid/RigidBodyTypes.h   (only if contact fields need real depth / accumulated impulse)
+  fluid/FluidEngine.cpp    (only if pressure-force clamp needs a helper; prefer keeping
+                            force policy in the rigid engine)
+  main.cpp                 (only if debug overlay should draw normals/points more clearly)
+
+After the dry body rests without bouncing, STOP unless water still launches
+bodies. Then do the pressure-force clamp, not a fluid rewrite.

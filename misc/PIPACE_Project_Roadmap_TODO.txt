@@ -1,0 +1,1091 @@
+PIPACE PROJECT ROADMAP / TODO
+=============================
+Working roadmap - intended to be edited freely as the project changes.
+
+Guiding idea
+------------
+PIPACE should be a pixel-native physics and chemistry sandbox where convincing
+emergent behavior comes from a small set of reusable systems. Accuracy matters
+when it noticeably improves behavior, but performance, stability, and
+interactivity matter just as much.
+
+The project should avoid making every material its own hard-coded simulation.
+Instead:
+- Physics engines determine how solids, liquids, and gases move.
+- Material properties determine how differently materials behave.
+- SACE determines what substances are, what they can become, and what properties
+  newly generated substances should have.
+- World state determines where matter is, how much exists, its temperature,
+  pressure, phase, composition, and other local conditions.
+- Rendering stays separate from physical behavior whenever possible.
+
+Core architecture:
+- PHYSICS answers: "Given these properties, how does this matter move?"
+- SACE answers: "What is this matter, what can it become, and what properties
+  should it have?"
+- WORLD STATE answers: "Where is it, how much is there, and what condition is
+  this particular amount currently in?"
+- RENDERING answers: "How should the current state be drawn?"
+
+Important terminology:
+- In the user-facing PIPACE UI, "Element" may refer broadly to any distinct
+  spawnable substance/material, including true chemical elements, compounds,
+  mixtures, alloys, solutions, generated substances, etc.
+- Internally, prefer names such as Substance, Material, ChemicalSpecies, or
+  MaterialDefinition so real chemical elements are not confused with PIPACE's
+  broad gameplay term "Element".
+- A SUBSTANCE is what the material intrinsically is.
+- A MATERIAL STATE is the local condition of that substance, including phase,
+  temperature, pressure, quantity, composition, etc.
+
+Legend
+------
+[ ] Not started
+[~] In progress / experimental
+[x] Implemented
+[!] Needs fixing or reconsideration
+[?] Idea / needs testing
+
+
+PHASE 0 - CURRENT FLUID FOUNDATION
+==================================
+
+[x] Fractional liquid fill per pixel.
+[x] MAC/staggered velocity grid.
+[x] Gravity.
+[x] Incompressible pressure projection.
+[x] Conservative face-flux liquid transport.
+[x] Donor/receiver flux limiting.
+[x] Surface reconstruction.
+[x] Surface tension.
+[x] Ballistic splash particles.
+[x] Adaptive fluid substeps.
+[x] Solid boundary enforcement.
+[x] Chunk activity/sleeping.
+[x] Debug visualization modes.
+[x] Cell inspector.
+[x] Physics diagnostics/profiling.
+[x] Headless benchmark mode.
+[x] Test scenes.
+[x] Semi-Lagrangian velocity advection.
+[x] BFECC velocity advection with limiter.
+[x] Optional vorticity confinement.
+[x] Residual/sub-visible liquid consolidation.
+[x] Variable simulation speed.
+[x] Uniform/shaded water rendering option.
+
+Current rule:
+Do not replace the basic fluid architecture unless a clearly measured problem
+requires it. Improve it incrementally and preserve benchmark scenes.
+
+
+PHASE 1 - FLUID CORRECTNESS PASS
+================================
+
+Priority: HIGH. Fix these before piling many new physical systems on top.
+
+[ ] Fix occasional liquid leakage through thin solids.
+    [ ] Make splash redeposition connectivity-aware.
+    [ ] depositVolume() must never teleport liquid through a wall.
+    [ ] Prevent residual consolidation from cutting diagonally through sealed
+        corners.
+    [ ] Test one-pixel walls.
+    [ ] Test one-pixel sealed containers.
+    [ ] Test diagonal/corner contacts.
+
+[ ] Fix splash particles interacting incorrectly with the world boundary/void.
+    [ ] Treat outside-world space as an open sink.
+    [ ] Remove escaped liquid cleanly.
+    [ ] Correct expected-volume bookkeeping when liquid intentionally leaves.
+    [ ] Prevent repeated bounce/redeposit loops at the boundary.
+
+[ ] Investigate temporary one-pixel holes inside water.
+    [ ] Determine whether the cell is truly zero-fill or merely below
+        MIN_RENDER_FILL.
+    [ ] Prefer render hysteresis if the problem is visual threshold flicker.
+    [ ] If physical cleanup is needed, keep it conservative.
+    [ ] Never fix holes by creating free liquid.
+
+[ ] Add regression scenes/tests for all of the above.
+
+Acceptance target:
+- Sealed containers stay sealed.
+- No helper system bypasses solid topology.
+- Leaving the map never creates liquid.
+- Total volume remains correct except for intentional sinks/sources.
+
+
+PHASE 2 - PERFORMANCE / LOW-END SCALING
+=======================================
+
+Priority: HIGH before large-scale rigid-body/fluid interaction.
+
+[ ] Batch painting and erasing updates.
+    [ ] Avoid expensive full activity/boundary rebuilds on every mouse movement.
+    [ ] Rebuild affected regions when a stroke finishes or in bounded batches.
+
+[ ] Improve sparse/local fluid work.
+    [ ] Build reusable active pressure-cell lists.
+    [ ] Separate red and black pressure lists.
+    [ ] Build active U-face and V-face lists.
+    [ ] Build nonzero-flux work lists for the transport limiter.
+    [ ] Build a dedicated surface-cell list.
+    [ ] Avoid repeatedly scanning empty areas inside a large rectangular solve
+        region.
+
+[ ] Cache pressure stencil information where geometry/fill topology is stable.
+
+[ ] Renderer optimization.
+    [ ] Keep persistent rendering resources instead of recreating them.
+    [ ] Cache expensive visual fields where possible.
+    [ ] Ensure simple shaders are genuinely cheap.
+
+[ ] Multithreading.
+    [ ] Start with solver stages that parallelize safely.
+    [ ] Consider red-black pressure iteration workers.
+    [ ] Keep deterministic/single-thread mode available for debugging.
+    [ ] Benchmark 1, 2, 4, etc. worker configurations.
+
+[ ] Compiler/release optimization.
+    [ ] Release build with strong optimization.
+    [ ] Benchmark before/after each major optimization.
+    [ ] Avoid optimizations that silently break conservation/stability.
+
+[ ] Dynamic simulation quality based on activity.
+    [?] High-energy regions get more substeps/accuracy.
+    [?] Calm regions update expensive stages less frequently.
+    [?] Nearly sleeping regions use minimal work.
+
+Performance hierarchy concept:
+LEVEL 0 - Sleeping: no simulation.
+LEVEL 1 - Potentially active: cheap checks only.
+LEVEL 2 - Active material simulation.
+LEVEL 3 - Interacting physics: fluid + rigid bodies, etc.
+LEVEL 4 - High-energy event: extra substeps/splashes/fracture/shock work.
+
+
+PHASE 3 - SETTINGS / QUALITY SYSTEM
+===================================
+
+This can be implemented gradually rather than waiting for every engine feature.
+
+[ ] Create a proper Settings tab/menu.
+
+Graphics / liquid rendering:
+[ ] Liquid shader selector.
+    [ ] Simple / flat.
+    [ ] Uniform color.
+    [ ] Shaded.
+    [ ] Depth-shaded or other future shader.
+    [ ] Debug visualization.
+[ ] Splash-particle quality/count.
+[ ] Surface visual detail.
+[ ] Optional highlights/reflections if added later.
+[ ] Dye rendering controls.
+
+Velocity-advection selector:
+[x] BSL - Bilinear Semi-Lagrangian (current normal SL implementation).
+[x] BFECC - Back and Forth Error Compensation and Correction, limited.
+[ ] NVA - No Velocity Advection. Emergency/experimental low-end mode.
+[ ] FOU - First-Order Upwind.
+[ ] NSL - Nearest-Neighbor Semi-Lagrangian.
+[ ] MC - MacCormack, with an appropriate limiter.
+
+Notes:
+- These are solver choices, not necessarily a strict low-to-high quality ladder.
+- Keep fill transport conservative and separate from velocity-advection choice.
+- Benchmark each method for cost, dissipation, stability, and visual behavior.
+- BFECC/MC should remain limited to suppress nonphysical extrema.
+
+Physics options:
+[x] Vorticity confinement toggle.
+[x] Residual water balancing/consolidation toggle.
+[ ] Vorticity strength control or Low/Medium/High presets.
+[ ] Fluid substep limit.
+[ ] Pressure quality / iteration budget.
+[ ] Rigid-body physics iteration count once rigid bodies exist.
+[ ] Sleeping aggressiveness.
+[ ] Surface/splash calculation quality.
+[ ] Automatic/adaptive quality option.
+
+System / CPU:
+[ ] Simulation priority.
+    [ ] Background.
+    [ ] Efficiency.
+    [ ] Balanced.
+    [ ] Performance.
+    [ ] Maximum.
+[ ] Worker-thread count once multithreading exists.
+    [ ] Auto.
+    [ ] Manual selection.
+[ ] Optional FPS/physics-rate cap.
+[ ] Performance statistics toggle.
+
+Important:
+Quality settings should primarily change numerical cost and visual fidelity, NOT
+secretly change the world's fundamental material properties, gravity, chemistry,
+etc.
+
+
+PHASE 4 - DYE / PASSIVE LIQUID TRACERS
+======================================
+
+Goal:
+Allow liquids to be colored without changing their physical behavior.
+
+[ ] Add conserved dye/tracer quantity to liquid cells.
+[ ] Dye must travel with the same liquid face fluxes.
+[ ] Dye must not create/delete liquid.
+[ ] Dye concentration should remain separate from material composition.
+[ ] Support RGB or another compact color representation.
+[ ] Add a Dye tool.
+    [ ] Color picker.
+    [ ] Strength/concentration.
+    [ ] Brush size.
+    [ ] Painting dye into air does nothing.
+    [ ] Painting dye into a solid does nothing.
+    [ ] Painting dye into liquid changes tracer amount only.
+[ ] Splash particles preserve dye.
+[ ] Deposited splashes return dye to the grid.
+[ ] Decide whether ordinary numerical mixing is sufficient or whether optional
+    molecular-style diffusion is useful.
+
+Possible uses:
+- Cosmetic colored water.
+- Visualizing vortices and currents.
+- Comparing BSL vs MC vs BFECC.
+- Debugging transport.
+- Laboratory-style tracer experiments.
+- Future chemical indicators.
+
+Important separation:
+MATERIAL COMPOSITION = affects physics/chemistry.
+DYE/TRACER = normally affects appearance only.
+
+
+PHASE 5 - FIRST TRUE MULTI-LIQUID TEST: HONEY
+=============================================
+
+Goal:
+Use honey to prove that the fluid engine can support material-dependent behavior
+without creating a separate solver for every liquid.
+
+Recommended architecture:
+- Keep one total liquid fill field.
+- Keep the shared MAC velocity/pressure system where practical.
+- Add conserved material composition quantities.
+- Advect composition using the same conservative liquid fluxes.
+- Derive local material properties from composition.
+
+[ ] Add material/composition representation.
+[ ] Add Water and Honey material quantities.
+[ ] Add Honey painting tool/material selector.
+[ ] Honey and water should be able to mix/dilute.
+[ ] Conserve each component during transport.
+[ ] Splash particles preserve composition.
+[ ] Redeployment preserves composition.
+
+Honey properties:
+[ ] Higher density than water.
+[ ] Much higher viscosity.
+[ ] Appropriate surface tension.
+[ ] Reduced tendency to form spray.
+[ ] Amber/honey rendering.
+[ ] Mixture appearance based on concentration.
+
+[ ] Replace globally hard-coded water viscosity with local/face-dependent
+    viscosity where required.
+[ ] Determine stable local viscosity formulation.
+[ ] Avoid making high-viscosity fluids unnecessarily expensive everywhere.
+[ ] Use nonlinear mixture behavior for viscosity rather than assuming all
+    properties interpolate linearly.
+
+Not yet:
+[ ] Temperature-dependent honey behavior.
+[ ] Crystallization.
+[ ] Complex non-Newtonian rheology.
+These can wait for SACE/thermal systems.
+
+Acceptance target:
+Pouring honey into water should visibly sink/mix/dilute and become less viscous
+as it becomes water-rich, while conserving liquid and composition.
+
+
+PHASE 6 - MODULARIZE THE CURRENT MONOLITH
+========================================
+
+Do this behavior-preservingly. Refactoring and changing physics at the same time
+makes regressions difficult to identify.
+
+Possible structure:
+
+PIPACE/
+  main.cpp
+
+  fluid/
+    FluidEngine.h/.cpp
+    FluidTypes.h
+    FluidConfig.h
+    Advection.cpp
+    PressureSolver.cpp
+    VolumeTransport.cpp
+    Surface.cpp
+    SplashParticles.cpp
+    FluidChunks.cpp
+
+  world/
+    World.h/.cpp
+    Materials.h
+
+  rigid/
+    RigidBodyEngine.h/.cpp
+
+  gas/
+    GasEngine.h/.cpp
+
+  chemistry/
+    SACE.h/.cpp
+
+  render/
+    Renderer.h/.cpp
+    LiquidRenderer.cpp
+
+  ui/
+    Input.cpp
+    Toolbar.cpp
+    Settings.cpp
+    DebugUI.cpp
+
+  tests/
+    FluidTestScenes.cpp
+    Benchmarks.cpp
+
+Suggested extraction order:
+[ ] Shared types/config.
+[ ] FluidEngine shell.
+[ ] Pressure solver.
+[ ] Volume transport.
+[ ] Velocity advection.
+[ ] Surface/splash systems.
+[ ] Chunk/activity system.
+[ ] Rendering.
+[ ] UI/input.
+[ ] Tests/benchmark scenes.
+
+Rule:
+Compile and test after every extraction. No intentional behavior changes during
+the modularization pass.
+
+
+PHASE 7 - RIGID-BODY SOLIDS
+===========================
+
+Goal:
+Introduce movable solid objects without abandoning the pixel-native world.
+
+[ ] Choose/implement rigid-body representation.
+[ ] Basic rigid-body shapes.
+[ ] Translation.
+[ ] Rotation.
+[ ] Collision detection.
+[ ] Collision response.
+[ ] Friction/restitution.
+[ ] Sleeping.
+[ ] Configurable rigid-body physics iterations.
+
+Fast-object correctness:
+[ ] Swept/continuous collision detection where required.
+[ ] Avoid fast bodies tunneling through thin solids.
+[ ] Avoid fast containers skipping across fluid regions.
+
+Fluid coupling:
+[ ] Rasterize/query moving solid boundaries for fluid.
+[ ] Moving boundaries impose rigid-body surface velocity instead of always zero.
+[ ] Wake only fluid chunks crossed/touched by moving bodies.
+[ ] Use swept rigid-body bounds to wake all crossed fluid regions.
+[ ] Fluid pressure applies reaction force to bodies.
+[ ] Accumulate torque from pressure/contact position.
+[ ] Approximate drag where pressure alone is insufficient.
+[ ] Buoyancy should emerge from pressure as much as practical.
+[ ] Containers should retain/spill liquid because of geometry, not because of a
+    special "cup" rule.
+
+Pixel-native rigid-body representation:
+[ ] Each rigid body owns an authoritative local-space pixel mask.
+[ ] The local/source pixel mask must not be destructively re-rasterized every
+    frame.
+[ ] Rigid-body position/rotation may remain continuous internally.
+[ ] Visible/world occupancy is reconstructed by transforming the authoritative
+    local pixel mask back onto the integer world grid.
+[ ] Returning to the original transform must reconstruct the original mask
+    exactly, without accumulated rotation damage.
+[ ] Prefer conservative/inverse rasterization or another method that avoids
+    holes and disappearing one-cell features during rotation.
+[ ] Do not represent a rigid body as one Box2D-style square per pixel.
+[ ] Build collision geometry from the body's pixel mask using rectangle merging,
+    contour extraction, polygon simplification, convex decomposition, or another
+    scalable representation.
+
+Drawing/merging behavior:
+[ ] While drawing, accumulate a temporary solid stroke.
+[ ] On mouse release, determine connectivity.
+[ ] If the stroke is disconnected from all existing bodies, create one new
+    rigid body from each connected component.
+[ ] If it touches one existing body, merge the new pixels into that body's
+    local pixel mask and rebuild only that body's collider.
+[ ] If a stroke bridges multiple existing rigid bodies, merge them into one
+    body and approximately preserve linear/angular momentum.
+
+Cutting/splitting behavior:
+[ ] Cutting must modify the rigid body's authoritative local pixel mask, not
+    merely erase the currently rasterized world image.
+[ ] Re-run connectivity only for affected bodies.
+[ ] Split disconnected fragments into independent rigid bodies.
+[ ] Rebuild collision geometry only for affected fragments.
+[ ] Preserve approximate fragment velocity:
+      fragment v = old linear v + rotational tangential contribution.
+[ ] Preserve angular velocity where reasonable.
+
+Basic fracture/destruction:
+[ ] Track impact/force or damage values where practical.
+[ ] Compare stress/damage against material strength/toughness.
+[ ] Broken connections may split one rigid body into multiple connected
+    components.
+[ ] Reuse the same connectivity/splitting pipeline as the Cut tool.
+[ ] Start with simple threshold-based fracture before considering expensive
+    continuum/FEM-style stress simulation.
+
+Fast-object correctness:
+[ ] Swept/continuous collision detection where required.
+[ ] Avoid fast bodies tunneling through thin solids.
+[ ] Avoid fast containers skipping across fluid regions.
+
+Fluid coupling:
+[ ] Rasterize/query moving solid boundaries for fluid.
+[ ] Moving boundaries impose rigid-body surface velocity instead of always zero.
+[ ] Wake only fluid chunks crossed/touched by moving bodies.
+[ ] Use swept rigid-body bounds to wake all crossed fluid regions.
+[ ] Fluid pressure applies reaction force to bodies.
+[ ] Accumulate torque from pressure/contact position.
+[ ] Approximate drag where pressure alone is insufficient.
+[ ] Buoyancy should emerge from pressure as much as practical.
+[ ] Containers should retain/spill liquid because of geometry, not because of a
+    special "cup" rule.
+
+Shared substep scheduler:
+[ ] Determine required substeps from fast fluids and fast bodies.
+[ ] Per substep:
+    1. Advance rigid bodies.
+    2. Update moving solid boundaries.
+    3. Advance fluid.
+    4. Exchange momentum/pressure forces.
+    5. Resolve coupling/collisions as required.
+
+
+PHASE 8 - BROADER MATERIAL / LIQUID SYSTEM
+==========================================
+
+After honey proves the architecture:
+
+[ ] General MaterialID system.
+[ ] General LiquidProperties retrieval.
+[ ] Remove hard-coded assumptions that all liquid is "water".
+
+Potential liquid properties:
+[ ] Density.
+[ ] Viscosity.
+[ ] Surface tension.
+[ ] Temperature.
+[ ] Heat capacity.
+[ ] Thermal conductivity.
+[ ] Freezing point.
+[ ] Boiling point.
+[ ] Vapor pressure where useful.
+[ ] Special rheology flags/models.
+
+Candidate test liquids:
+[ ] Water.
+[ ] Honey/syrup.
+[ ] Oil.
+[ ] Ethanol-like low-viscosity liquid.
+[ ] Pitch/tar.
+[ ] Molten material.
+[ ] Cryogenic liquid.
+[?] Liquid helium.
+    - Normal liquid can be approximated conventionally.
+    - Superfluid behavior requires special rules; viscosity=0 alone is not
+      sufficient.
+
+Possible categories:
+- Newtonian liquids.
+- Highly viscous liquids.
+- Non-Newtonian/special rheology.
+- Special-case exotic materials.
+
+Do not force every unusual substance through one equation if a small, explicit
+special behavior produces a better simulation.
+
+
+
+PHASE 8B - SOLID MATERIAL PROPERTIES / MECHANICAL MODEL
+======================================================
+
+Goal:
+Make rigid solids property-driven rather than treating all solid matter as one
+generic object type.
+
+Potential solid properties:
+[ ] Density.
+[ ] Friction.
+[ ] Restitution.
+[ ] Hardness.
+[ ] Yield strength.
+[ ] Tensile strength.
+[ ] Compressive strength.
+[ ] Shear strength.
+[ ] Fracture toughness.
+[ ] Brittleness.
+[ ] Elasticity.
+[ ] Thermal expansion.
+[ ] Thermal conductivity.
+[ ] Electrical conductivity.
+[ ] Porosity.
+
+Design rule:
+Generated or predefined solid materials should automatically behave according to
+their material properties wherever practical.
+
+Example:
+A dense, brittle SACE-generated solid should tend to fall heavily and fracture
+more readily than a light, tough material without requiring hard-coded behavior
+for that exact SubstanceID.
+
+
+
+PHASE 9 - TEMPERATURE / HEAT
+============================
+
+[ ] Cell/material temperature representation.
+[ ] Heat transfer between neighboring materials.
+[ ] Thermal conductivity.
+[ ] Heat capacity.
+[ ] Heat exchange between solids/liquids/gases.
+[ ] Heat sources and sinks.
+[ ] Heating/cooling tools for testing.
+[ ] Temperature debug visualization.
+[ ] Temperature-dependent material properties.
+    [ ] Viscosity.
+    [ ] Density where useful.
+    [ ] Reaction rates.
+    [ ] Phase stability.
+    [ ] Mechanical strength where useful.
+[ ] Keep substance identity separate from local temperature/phase state.
+
+Performance:
+[ ] Thermal simulation sleeps/updates slowly in equilibrium.
+[ ] Do not update every cell at full physics rate if unnecessary.
+
+
+PHASE 10 - GAS ENGINE
+=====================
+
+Goal:
+Convincing pixel gases without attempting full real-time compressible CFD.
+
+Gas cell concepts:
+[x] Approximate density (amount / available volume).
+[x] Approximate pressure (isothermal, 1.0 amount/volume = 1 atm = 101325 Pa).
+[x] Velocity (MAC, pressure-gradient + moving-solid BC; not a full NS solver).
+[ ] Gas composition (Air only; cell amount is mixture-ready).
+[ ] Temperature.
+
+Behavior:
+[x] Gas occupies open space (default Air at 1 atm).
+[x] Gas cannot pass through solids.
+[x] High pressure drives flow toward low pressure (limited face transfer).
+[x] Gas chunks sleep when equilibrated.
+[x] Vacuum = near-zero amount, not a special material.
+[ ] Gas advects (mass transfer is pressure-driven; MAC velocity is secondary).
+[ ] Gas mixes/diffuses.
+[ ] Hot/light gas rises.
+[ ] Cold/heavy gas sinks.
+[ ] Gas carries heat and chemical composition.
+
+Suggested update order:
+1. Chemistry/reactions.
+2. Heat transfer.
+3. Pressure equalization.
+4. Gas advection.
+5. Diffusion/mixing.
+6. Buoyancy.
+7. Phase transfer.
+
+Explicit non-goals for first gas version:
+- Real acoustic propagation at physical sound speed.
+- Full compressible Navier-Stokes.
+- Accurate Mach-number behavior.
+- CFD-grade turbulence.
+- True shock capturing.
+
+Performance rule:
+The ordinary gas engine should generally be cheaper than the liquid engine.
+
+
+PHASE 11 - SACE CHEMISTRY / GENERATED SUBSTANCES
+=================================================
+
+SACE = Somewhat Accurate Calculator for Elements.
+
+User-facing definition:
+PIPACE may call any distinct spawnable substance/material an "Element", including
+true chemical elements, compounds, mixtures, alloys, solutions, generated
+substances, etc.
+
+Core responsibility:
+SACE determines WHAT materials are, WHAT they can become, and HOW new/generated
+material properties should be estimated. Physics engines determine HOW the
+current phases move.
+
+Substance identity:
+[ ] Substance/material database.
+[ ] Stable internal SubstanceID system.
+[ ] Base-16 generated display IDs.
+    Examples:
+      Element #A
+      Element #F
+      Element #10
+      Element #3AF
+[ ] Keep display ID separate from canonical chemical/material identity.
+[ ] Generated Substance Record.
+[ ] Deterministic/canonical generated-substance signature.
+[ ] Persistent generated-substance cache.
+[ ] If an equivalent generated substance already exists, reuse the existing
+    SubstanceID instead of recalculating it.
+[ ] Decide whether generated-substance caches are per-save, global, or both.
+
+Composition / molecular representation:
+[ ] Elemental composition representation.
+[ ] Molecular formula where meaningful.
+[ ] Molecular graph/structure representation where available.
+[ ] Atom nodes.
+[ ] Bond edges / bond type.
+[ ] Formula alone must NOT be assumed to uniquely identify a substance.
+[ ] Preserve distinction between:
+    - pure molecular/atomic species
+    - reaction products
+    - physical mixtures/solutions/alloys
+[ ] Mixtures may use component SubstanceIDs + fractions instead of a molecular
+    graph.
+
+Reaction system:
+[ ] Reaction definitions/rules.
+[ ] Stoichiometric consumption/production.
+[ ] Reaction requirements.
+    [ ] Temperature.
+    [ ] Ignition.
+    [ ] Pressure if relevant.
+    [ ] Catalysts.
+    [ ] Concentration.
+    [ ] Exposed interface/surface area.
+[ ] Reaction kinetics / rate model.
+    [ ] Temperature-dependent rate.
+    [ ] Concentration dependence.
+    [ ] Catalyst effects.
+    [ ] Surface-area effects for solids.
+    [ ] Avoid instant total reaction merely because A touches B.
+[ ] Reaction energy.
+[ ] Heat generation/absorption.
+[ ] Products may enter solid/liquid/gas engines.
+[ ] Mixture property calculation.
+[ ] Phase-change rules.
+
+Conservation rules:
+[ ] Conserve atom counts across ordinary chemical reactions.
+[ ] Conserve electric charge where modeled.
+[ ] Conserve mass approximately, subject only to explicit modeled exceptions.
+[ ] Account for reaction energy approximately.
+[ ] Never hide a chemistry error by silently creating/deleting reactants.
+
+Generated-property calculation:
+[ ] Prefer curated/reference values for known substances.
+[ ] Fall back to empirical/group-contribution/QSPR-style estimates where useful.
+[ ] Use molecular structure when available.
+[ ] Use mixture/component rules for mixtures rather than pretending every
+    mixture is one molecule.
+[ ] Estimate at least:
+    [ ] Standard/likely phase.
+    [ ] Density.
+    [ ] Viscosity.
+    [ ] Melting point.
+    [ ] Boiling point.
+    [ ] Heat capacity.
+    [ ] Thermal conductivity.
+    [ ] Electrical conductivity.
+    [ ] Surface tension.
+    [ ] Flammability/reactivity traits.
+    [ ] Basic mechanical properties for solids where possible.
+[ ] Keep numerical fallbacks explicit and inspectable.
+
+Uncertainty / provenance:
+[ ] Store source/confidence metadata per generated property.
+[ ] Example PropertySource categories:
+    - Reference
+    - EmpiricalEstimate
+    - StructuralEstimate
+    - MixtureEstimate
+    - Fallback
+[ ] Support approximate ranges/uncertainty where practical.
+[ ] Store how/when a substance was first discovered or generated.
+[ ] Record synthesis conditions if useful:
+    - reactants/components
+    - temperature
+    - pressure
+    - catalyst
+    - reaction path
+[ ] Future notebook/inspection UI can expose this provenance.
+
+Example concept:
+2 H2 + O2 + ignition
+    -> H2O vapor + energy
+
+SACE:
+- consumes reactants
+- creates/retrieves the product SubstanceID
+- releases energy
+- determines/looks up relevant properties
+
+Gas engine:
+- transports resulting vapor
+- responds to pressure/heat
+
+Important:
+SACE should not be only a reaction lookup table. Its long-term purpose is to make
+previously undefined substances usable by PIPACE through property estimation,
+canonical identity, and caching.
+
+
+PHASE 12 - PHASE CHANGES
+========================
+
+[ ] Melting.
+[ ] Freezing.
+[ ] Boiling.
+[ ] Evaporation.
+[ ] Condensation.
+[ ] Sublimation/deposition if useful.
+
+Mass must transfer conservatively between phase engines.
+
+Example:
+liquid water + sufficient heat
+    -> water vapor
+
+water vapor + cooling
+    -> liquid water
+
+[ ] Internal-energy / enthalpy representation where practical.
+[ ] Latent heat approximation is recommended for major phase changes.
+[ ] Energy added during a phase transition should be able to go into latent heat
+    rather than immediately increasing temperature.
+[ ] Avoid simplistic `if temperature > boilingPoint -> gas` behavior where a
+    better energy-aware transition is affordable.
+[ ] Avoid rapid phase flickering around thresholds.
+[ ] Hysteresis/equilibrium treatment if required.
+
+
+PHASE 13 - EXPLOSIONS / SHOCK SYSTEM
+====================================
+
+Do not require the normal gas solver to resolve real shock waves.
+
+The shock system is NOT another material phase. It is a temporary local
+energy/momentum/pressure propagation layer that acts on existing solids, liquids,
+gases, and reactions.
+
+[ ] Separate transient pressure/shock event system.
+[ ] Radial/geometry-aware pressure propagation.
+[ ] Apply impulse to gases.
+[ ] Apply impulse to liquids.
+[ ] Apply force to rigid bodies.
+[ ] Interact with destructible materials if added.
+[ ] Feed heat/pressure into SACE reactions.
+[ ] Keep event temporary and local.
+
+Potential future:
+[ ] Fracture/destruction.
+[ ] Combustion fronts.
+[ ] Chain reactions.
+
+
+PHASE 14 - WORLD / GAMEPLAY TOOLS
+=================================
+
+[ ] Material palette/search.
+[ ] Solid tool.
+[x] Water tool.
+[ ] Honey tool.
+[ ] Gas tool/materials.
+[x] Eraser.
+[ ] Dye tool.
+[ ] Heat tool.
+[ ] Cool tool.
+[ ] Velocity/force tool.
+[ ] Pressure tool if useful.
+[ ] Object/rigid-body spawn tool.
+[ ] Copy/paste/select region.
+[ ] Undo/redo.
+[ ] Save/load worlds.
+[ ] Presets/test laboratories.
+[ ] Pause/frame-step controls.
+[ ] Time-scale controls.
+[ ] Reset scene.
+[ ] Screenshot/export options if desired.
+
+
+PHASE 15 - DEBUGGING / SCIENTIFIC VISUALIZATION
+===============================================
+
+Keep the sandbox understandable while it becomes more complex.
+
+Current:
+[x] Fill.
+[x] Pressure.
+[x] Velocity.
+[x] Divergence.
+[x] Chunks.
+[x] Cell inspector.
+
+Future:
+[ ] Material/composition.
+[ ] Dye concentration.
+[ ] Temperature.
+[ ] Gas pressure.
+[ ] Gas composition.
+[ ] Reaction activity.
+[ ] Rigid-body contacts.
+[ ] Fluid-body coupling forces.
+[ ] Sleep/activity level.
+[ ] Heat flow.
+[ ] Phase changes.
+
+[ ] Graph/plot selected cell values over time.
+[ ] Better benchmark comparison output.
+[ ] Deterministic test mode where possible.
+
+
+PHASE 16 - BENCHMARK / REGRESSION SUITE
+=======================================
+
+Every major engine change should be tested against repeatable scenes.
+
+Fluid:
+[ ] Resting pool.
+[ ] Dam break.
+[ ] Falling column.
+[ ] Thin-wall containment.
+[ ] Diagonal sealed corner.
+[ ] Splash/redeposit.
+[ ] Boundary/void escape.
+[ ] Slosh test.
+[ ] Dye vortex/mixing test.
+[ ] Water + honey test.
+
+Rigid body:
+[ ] Falling box.
+[ ] Stack stability.
+[ ] Fast projectile.
+[ ] Cup of water.
+[ ] Fast-moving cup.
+[ ] Floating object.
+[ ] Sinking object.
+[ ] 0->360 degree rigid-body rasterization round-trip.
+[ ] One-cell-thick rigid-body feature rotation.
+[ ] Draw stroke -> new body.
+[ ] Draw stroke -> merge into one body.
+[ ] Draw bridge -> merge multiple bodies.
+[ ] Cut body -> split connected components.
+[ ] Impact/fracture threshold test.
+
+Gas:
+[ ] Gas expansion.
+[ ] Sealed pressure chamber.
+[ ] Leak through opening.
+[ ] Hot plume.
+[ ] Heavy gas settling.
+[ ] Two-gas mixing.
+
+Chemistry:
+[ ] Simple reaction conservation.
+[ ] Exothermic reaction.
+[ ] Combustion.
+[ ] Phase-changing reaction/product.
+[ ] Equivalent generated substance maps to the same canonical SubstanceID.
+[ ] Different mixture ratios remain distinguishable where physically meaningful.
+[ ] Formula-identical but structure-different substances can remain distinct.
+[ ] Reaction rate responds to temperature/concentration/catalyst/surface area.
+
+Track:
+- frame/physics time
+- stage timings
+- active cells/chunks
+- memory
+- volume/mass error
+- momentum/energy diagnostics where meaningful
+- solver iterations
+- substep count
+
+
+LONG-TERM DESIGN RULES
+======================
+
+1. Conservation first.
+   Never hide a numerical problem by silently creating/deleting matter.
+
+2. Local work first.
+   Expensive systems should run only where something is happening.
+
+3. Shared engines, material-driven behavior.
+   Avoid one custom physics solver per material.
+
+4. Chemistry and physics are separate responsibilities.
+   SACE says what changes; phase engines say how it moves.
+
+5. Rendering should not determine physics.
+   A simple water shader and a fancy water shader should simulate the same water.
+
+6. Quality settings should degrade gracefully.
+   Weak computers should be able to sacrifice fidelity without requiring a
+   completely different game.
+
+7. Preserve pixel-native behavior.
+   Do not hide the simulation behind a smooth metaball/mesh surface unless it is
+   an optional rendering mode.
+
+8. Benchmark before optimizing.
+   Optimize measured bottlenecks, not guessed ones.
+
+9. Refactor separately from physics changes.
+   Behavior-preserving modularization makes regressions traceable.
+
+10. Stop tweaking when acceptance criteria are met.
+    "More physically accurate" is not automatically better if the player cannot
+    perceive the difference or the cost becomes unreasonable.
+
+11. Substance identity is separate from local state.
+    A substance does not permanently "equal liquid", "equal solid", etc.
+    Temperature/pressure/conditions determine the local phase when practical.
+
+12. Generated substances must be reproducible.
+    Equivalent generated substances should map back to the same canonical cached
+    identity whenever their relevant composition/structure is equivalent.
+
+13. Pixel-rigid source masks are authoritative.
+    Never repeatedly rotate/rasterize an already-rasterized rigid-body image.
+    Always reconstruct world occupancy from the body's local/source pixel mask.
+
+14. Interfaces matter.
+    Chemistry between phases/solids should primarily occur where materials
+    actually contact each other; exposed surface area may affect reaction rate.
+
+15. Conservation diagnostics should remain visible.
+    Matter, composition, mass, charge where modeled, and energy where practical
+    should never be silently "fixed" by inventing or deleting quantities.
+
+
+NEAR-TERM RECOMMENDED ORDER
+===========================
+
+The following is a suggested sequence, not a rigid requirement:
+
+[ ] 1. Fix current liquid correctness bugs.
+[ ] 2. Implement/experiment with MacCormack.
+[ ] 3. Add NSL/FOU/NVA only if useful for low-end quality scaling.
+[ ] 4. Begin Settings tab and expose existing solver/render options.
+[ ] 5. Add dye/passive tracers.
+[ ] 6. Perform fluid performance pass.
+[ ] 7. Modularize the monolithic source while preserving behavior.
+[ ] 8. Use honey as the first true multi-liquid/composition experiment.
+[ ] 9. Build pixel-native rigid bodies with authoritative local pixel masks.
+[ ] 10. Add cut/split/merge behavior and two-way rigid-body/fluid interaction.
+[ ] 11. Generalize material/substance identity and solid/liquid property systems.
+[ ] 12. Add temperature/internal-energy foundations.
+[ ] 13. Build the lightweight gas engine.
+[ ] 14. Integrate SACE chemistry and generated-substance caching.
+[ ] 15. Add phase changes.
+[ ] 16. Add dedicated explosion/shock behavior.
+[ ] 17. Expand materials, tools, test scenes, and quality settings.
+
+
+
+PRESENTATION / PERSONALITY
+==========================
+
+PIPACE should feel like sophisticated scientific software assembled in someone's
+garage rather than a sleek corporate or futuristic interface.
+
+Tone:
+- Homely.
+- Functional.
+- Slightly old-fashioned/utilitarian where appropriate.
+- Dry sarcasm.
+- Self-aware about approximation.
+- Not excessively polished.
+- Not neon sci-fi unless used for a specific debug visualization.
+
+Possible flavor text:
+- "SACE is thinking."
+- "Probably liquid."
+- "Physics remains mostly operational."
+- "Unexpected rapid disassembly."
+- "Temperature: 81,204 K. Quite warm."
+- "SACE confidence: Questionable."
+
+Important:
+Presentation personality must remain completely separate from physical behavior,
+solver accuracy, and saved simulation state.
+
+
+
+IDEA PARKING LOT
+================
+
+Put tempting ideas here instead of interrupting the current milestone.
+
+[?] Non-Newtonian fluids.
+[?] Pitch that softens dramatically with temperature.
+[?] Lava / molten metals.
+[?] Liquid nitrogen.
+[?] Superfluid-inspired helium special behavior.
+[?] Foam.
+[?] Emulsions / immiscible fluids such as oil + water.
+[?] Surfactants.
+[?] Dissolved gases.
+[?] Cavitation approximation.
+[?] Capillary/wicking materials.
+[?] Porous solids.
+[?] Soft bodies.
+[?] Fracture/destruction.
+[?] Electricity/conductivity.
+[?] Electrolysis.
+[?] Corrosion.
+[?] Crystal growth.
+[?] Biological materials.
+[?] User-created/custom materials.
+[?] Scenario/laboratory editor.
+[?] Shareable simulation presets.
+[?] Generated-substance notebook / discovery log.
+[?] Canonical substance signature visualization/debugger.
+[?] Substance property uncertainty/confidence display.
+[?] Mixture phase separation.
+[?] Isomer/structural chemistry support.
+
+
+CURRENT NEXT STEP
+=================
+
+Choose ONE small target from the near-term list, implement it, benchmark/test it,
+then update this roadmap.
+
+This file is intentionally editable. Delete sections, reorder phases, change
+acceptance criteria, and move ideas into/out of the parking lot as PIPACE
+develops.
