@@ -106,8 +106,18 @@ bool needsDepth(WorldRenderStyle style) {
     return style == WorldRenderStyle::Detailed || style == WorldRenderStyle::Realistic;
 }
 
+bool needsHysteresis(WorldRenderStyle style) {
+    return needsDepth(style) || style == WorldRenderStyle::Legacy;
+}
+
 bool needsNoise(WorldRenderStyle style) {
-    return style == WorldRenderStyle::NoisyFlat || style == WorldRenderStyle::Realistic;
+    return style == WorldRenderStyle::NoisyFlat
+        || style == WorldRenderStyle::Realistic
+        || style == WorldRenderStyle::Legacy;
+}
+
+float noiseScale(WorldLook const &look) {
+    return std::clamp(look.noiseAmount, 0.0f, 2.0f);
 }
 
 float depthShade(int depth, float strength) {
@@ -116,15 +126,45 @@ float depthShade(int depth, float strength) {
     return (0.70f + 0.30f * u) * (0.82f + 0.18f * (1.0f - strength)) + 0.08f * strength * u;
 }
 
+uint32_t shadeLegacy(MaterialVisual const &vis, WorldLook const &look, int x, int y, int depth,
+    float amount, float speed, uint32_t salt, bool liquid, bool topSurface, bool solidEdge) {
+    int r = vis.r, g = vis.g, b = vis.b;
+    float n = vis.noiseStrength * noiseScale(look) * stableNoise(x, y, salt);
+    if (!liquid) {
+        float s = 1.0f + 0.18f * n;
+        if (solidEdge) s *= 0.86f;
+        s = std::clamp(s, 0.55f, 1.25f);
+        return scaleRgb(r, g, b, s);
+    }
+    float amountLift = 0.48f + 0.52f * std::clamp(amount, 0.0f, 1.0f);
+    float depthMul = 1.0f - 0.046f * static_cast<float>(std::min(depth, 10));
+    depthMul = std::max(depthMul, 0.54f);
+    float flow = std::tanh(speed / 24.0f);
+    float motion = 1.0f + 0.13f * flow * vis.realisticDetail;
+    float s = amountLift * depthMul * motion * (1.0f + 0.16f * n);
+    if (topSurface) {
+        s *= 1.24f;
+        int lr = std::min(255, r + 72);
+        int lg = std::min(255, g + 84);
+        int lb = std::min(255, b + 48);
+        tintToward(r, g, b, lr, lg, lb, 0.42f);
+    }
+    s = std::clamp(s, 0.42f, 1.70f);
+    return scaleRgb(r, g, b, s);
+}
+
 uint32_t shadeMaterial(MaterialVisual const &vis, WorldLook const &look, int x, int y, int depth,
-    float amount, float speed, uint32_t bg, uint32_t salt) {
+    float amount, float speed, uint32_t bg, uint32_t salt, bool liquid = false, bool topSurface = false,
+    bool solidEdge = false) {
+    if (look.style == WorldRenderStyle::Legacy)
+        return shadeLegacy(vis, look, x, y, depth, amount, speed, salt, liquid, topSurface, solidEdge);
     int r = vis.r, g = vis.g, b = vis.b;
     float s = 1.0f;
     WorldRenderStyle const st = look.style;
     if (st == WorldRenderStyle::Detailed || st == WorldRenderStyle::Realistic)
         s *= depthShade(depth, vis.depthStrength);
     if (needsNoise(st))
-        s *= 1.0f + vis.noiseStrength * 0.12f * stableNoise(x, y, salt);
+        s *= 1.0f + vis.noiseStrength * 0.12f * noiseScale(look) * stableNoise(x, y, salt);
     if (st == WorldRenderStyle::Realistic) {
         float flow = std::tanh(speed / 28.0f);
         s *= 1.0f + vis.realisticDetail * 0.10f * flow;
@@ -166,7 +206,7 @@ void WorldRenderer::ensureSize() {
 void WorldRenderer::paintNormal(FluidEngine &fluid, RigidBodyEngine const &rigid, WorldLook const &look) {
     ensureSize();
     WorldRenderStyle const style = look.style;
-    bool const useHysteresis = needsDepth(style);
+    bool const useHysteresis = needsHysteresis(style);
     uint32_t const bg = packRgb(kVisualVoid.r, kVisualVoid.g, kVisualVoid.b);
 
     static std::vector<uint8_t> prevLiquid;
@@ -264,8 +304,8 @@ void WorldRenderer::paintNormal(FluidEngine &fluid, RigidBodyEngine const &rigid
         if (fluid.solid[index]) {
             MaterialVisual vis = kVisualWall;
             int depth = 0;
-            if (needsDepth(style)) {
-                bool edge = false;
+            bool edge = false;
+            if (needsDepth(style) || style == WorldRenderStyle::Legacy) {
                 for (int k = 0; k < 4; ++k) {
                     int nx = x + kN4x[k], ny = y + kN4y[k];
                     if (!FluidEngine::inside(nx, ny) || !fluid.solid[FluidEngine::ci(nx, ny)]) {
@@ -275,15 +315,26 @@ void WorldRenderer::paintNormal(FluidEngine &fluid, RigidBodyEngine const &rigid
                 }
                 depth = edge ? 0 : 3;
             }
-            color = shadeMaterial(vis, look, x, y, depth, 1.0f, 0.0f, bg, 17u);
+            color = shadeMaterial(vis, look, x, y, depth, 1.0f, 0.0f, bg, 17u, false, false, edge);
         } else if (visualLiquid[static_cast<size_t>(index)]) {
             MaterialVisual vis = sampleLiquidCell(fluid, index);
-            int depth = needsDepth(style) ? std::max(0, liquidDepth[static_cast<size_t>(index)]) : 0;
+            int depth = 0;
+            bool topSurface = false;
+            if (needsDepth(style)) {
+                depth = std::max(0, liquidDepth[static_cast<size_t>(index)]);
+                topSurface = depth == 0;
+            } else if (style == WorldRenderStyle::Legacy) {
+                topSurface = !visibleLiquid(x, y - 1);
+                for (int k = 1; k <= 10; ++k) {
+                    if (!visibleLiquid(x, y - k)) break;
+                    ++depth;
+                }
+            }
             float speed = 0.0f;
-            if (style == WorldRenderStyle::Realistic)
+            if (style == WorldRenderStyle::Realistic || style == WorldRenderStyle::Legacy)
                 speed = std::sqrt(fluid.cellU(x, y) * fluid.cellU(x, y) + fluid.cellV(x, y) * fluid.cellV(x, y));
             float amount = std::clamp(fluid.fill[static_cast<size_t>(index)], 0.0f, 1.0f);
-            color = shadeMaterial(vis, look, x, y, depth, amount, speed, bg, 41u);
+            color = shadeMaterial(vis, look, x, y, depth, amount, speed, bg, 41u, true, topSurface, false);
         }
         fluid.pixels[static_cast<size_t>(index)] = color;
     }
@@ -397,8 +448,18 @@ void WorldRenderer::paintNormal(FluidEngine &fluid, RigidBodyEngine const &rigid
             vis.g = std::max(0, static_cast<int>(vis.g * (1.0f - 0.22f * wetness)));
             vis.b = std::max(0, static_cast<int>(vis.b * (1.0f - 0.10f * wetness)));
             int depth = needsDepth(style) ? std::max(0, rigidDepth[static_cast<size_t>(index)]) : 0;
+            bool edge = false;
+            if (style == WorldRenderStyle::Legacy) {
+                int body = occupantAt(x, y);
+                edge = body < 0;
+                if (body >= 0) {
+                    for (int k = 0; k < 4; ++k) {
+                        if (!sameBody(x + kN4x[k], y + kN4y[k], body)) { edge = true; break; }
+                    }
+                }
+            }
             uint32_t c = shadeMaterial(vis, look, x, y, depth, 1.0f, 0.0f, bg,
-                73u + static_cast<uint32_t>(occMat));
+                73u + static_cast<uint32_t>(occMat), false, false, edge);
             int cr = static_cast<int>((c >> 16) & 255);
             int cg = static_cast<int>((c >> 8) & 255);
             int cb = static_cast<int>(c & 255);
@@ -476,7 +537,8 @@ void runWorldLookBenchmark(FluidEngine &fluid, RigidBodyEngine &rigid, WorldRend
         {"NoisyFlat", {WorldRenderStyle::NoisyFlat, false, false}},
         {"Detailed", {WorldRenderStyle::Detailed, false, false}},
         {"Realistic", {WorldRenderStyle::Realistic, false, false}},
-        {"Realistic+Glow+Outlines", {WorldRenderStyle::Realistic, true, true}},
+        {"Legacy", {WorldRenderStyle::Legacy, false, false, 1.0f}},
+        {"Realistic+Glow+Outlines", {WorldRenderStyle::Realistic, true, true, 1.0f}},
     };
 
     std::ofstream out(miscFile("look_bench.tsv"));

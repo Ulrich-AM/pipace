@@ -52,6 +52,17 @@ HBITMAP backBitmap = nullptr;
 HGDIOBJ backOld = nullptr;
 int backWidth = 0, backHeight = 0;
 
+constexpr int kUiClientW = 1440;
+constexpr int kUiClientH = 860;
+constexpr DWORD kUiWinStyle = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX;
+
+void outerWindowSize(int &width, int &height) {
+    RECT wr{0, 0, kUiClientW, kUiClientH};
+    AdjustWindowRectEx(&wr, kUiWinStyle, FALSE, 0);
+    width = wr.right - wr.left;
+    height = wr.bottom - wr.top;
+}
+
 void releaseBackbuffer() {
     if (backDc) {
         if (backOld) SelectObject(backDc, backOld);
@@ -207,6 +218,13 @@ void handleMenuCommand(ui::MenuCmd cmd) {
         case MenuCmd::StyleDetailed: worldLook.style = WorldRenderStyle::Detailed; break;
         case MenuCmd::StyleRealistic: worldLook.style = WorldRenderStyle::Realistic; break;
         case MenuCmd::StyleAlpha: worldLook.style = WorldRenderStyle::AlphaFlat; break;
+        case MenuCmd::StyleLegacy: worldLook.style = WorldRenderStyle::Legacy; break;
+        case MenuCmd::NoiseMinus:
+            worldLook.noiseAmount = std::clamp(std::round((worldLook.noiseAmount - 0.10f) * 10.0f) / 10.0f, 0.0f, 2.0f);
+            break;
+        case MenuCmd::NoisePlus:
+            worldLook.noiseAmount = std::clamp(std::round((worldLook.noiseAmount + 0.10f) * 10.0f) / 10.0f, 0.0f, 2.0f);
+            break;
         case MenuCmd::Overlay: rigid.debugOverlay = !rigid.debugOverlay; break;
         case MenuCmd::MatWood: shell.applyPalette(ui::PaletteId::Wood, activeTool, rigid.drawMaterial); break;
         case MenuCmd::MatStone: shell.applyPalette(ui::PaletteId::Stone, activeTool, rigid.drawMaterial); break;
@@ -1208,6 +1226,21 @@ LRESULT CALLBACK wndProc(HWND hwnd, UINT message, WPARAM wp, LPARAM lp) {
             BitBlt(dc, 0, 0, rc.right, rc.bottom, backDc, 0, 0, SRCCOPY);
             EndPaint(hwnd, &ps); return 0;
         }
+        case WM_SYSCOMMAND:
+            if ((wp & 0xFFF0) == SC_SIZE || (wp & 0xFFF0) == SC_MAXIMIZE) return 0;
+            return DefWindowProcW(hwnd, message, wp, lp);
+        case WM_GETMINMAXINFO: {
+            auto *info = reinterpret_cast<MINMAXINFO *>(lp);
+            int ww = 0, hh = 0;
+            outerWindowSize(ww, hh);
+            info->ptMinTrackSize.x = ww;
+            info->ptMinTrackSize.y = hh;
+            info->ptMaxTrackSize.x = ww;
+            info->ptMaxTrackSize.y = hh;
+            info->ptMaxSize.x = ww;
+            info->ptMaxSize.y = hh;
+            return 0;
+        }
         case WM_SIZE:
             releaseBackbuffer();
             return 0;
@@ -1278,7 +1311,10 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR commandLine, int show)
     SetProcessDPIAware();
     WNDCLASSW wc{}; wc.style = CS_HREDRAW | CS_VREDRAW; wc.lpfnWndProc = wndProc; wc.hInstance = instance; wc.hCursor = LoadCursor(nullptr, IDC_ARROW); wc.lpszClassName = L"PipaceFluidWindow";
     if (!RegisterClassW(&wc)) return 1;
-    mainWindow = CreateWindowExW(0, wc.lpszClassName, ui::tr("window_title"), WS_OVERLAPPEDWINDOW | WS_VISIBLE, CW_USEDEFAULT, CW_USEDEFAULT, 1440, 860, nullptr, nullptr, instance, nullptr);
+    int winW = 0, winH = 0;
+    outerWindowSize(winW, winH);
+    mainWindow = CreateWindowExW(0, wc.lpszClassName, ui::tr("window_title"), kUiWinStyle | WS_VISIBLE,
+        CW_USEDEFAULT, CW_USEDEFAULT, winW, winH, nullptr, nullptr, instance, nullptr);
     if (!mainWindow) return 2;
     engine.resetWorld();
     gas.resetAmbient(engine);

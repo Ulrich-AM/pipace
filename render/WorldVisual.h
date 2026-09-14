@@ -9,13 +9,15 @@ enum class WorldRenderStyle : uint8_t {
     NoisyFlat,
     Detailed,
     Realistic,
-    AlphaFlat
+    AlphaFlat,
+    Legacy
 };
 
 struct WorldLook {
     WorldRenderStyle style = WorldRenderStyle::Detailed;
     bool glowingLiquids = false;
     bool outlines = false;
+    float noiseAmount = 1.0f; // 0..2, 1 = 100%
 };
 
 // Cosmetic only. Physics lives on MaterialDefinition / LiquidProperties.

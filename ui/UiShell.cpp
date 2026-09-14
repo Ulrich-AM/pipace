@@ -1000,6 +1000,25 @@ void drawSettingsPanel(HDC dc, ShellState &shell, View const &view, RECT const &
     button(left0, left1, x, yL, 60, tr("style_detailed"), MenuCmd::StyleDetailed, view.worldLook.style == WorldRenderStyle::Detailed);
     button(left0, left1, x, yL, 48, tr("style_realistic"), MenuCmd::StyleRealistic, view.worldLook.style == WorldRenderStyle::Realistic);
     button(left0, left1, x, yL, 52, tr("style_alpha"), MenuCmd::StyleAlpha, view.worldLook.style == WorldRenderStyle::AlphaFlat);
+    button(left0, left1, x, yL, 60, tr("style_legacy"), MenuCmd::StyleLegacy, view.worldLook.style == WorldRenderStyle::Legacy);
+    yL += rowH + 4; x = left0;
+    {
+        int pct = static_cast<int>(std::lround(std::clamp(view.worldLook.noiseAmount, 0.0f, 2.0f) * 100.0f));
+        std::wstring noise = trf("noise_str", std::to_wstring(pct));
+        button(left0, left1, x, yL, 24, L"-", MenuCmd::NoiseMinus, false);
+        button(left0, left1, x, yL, 128, noise.c_str(), MenuCmd::None, false);
+        button(left0, left1, x, yL, 24, L"+", MenuCmd::NoisePlus, false);
+        int barX = x;
+        if (barX + 72 <= left1) {
+            RECT track{barX, yL + 8, barX + 72, yL + 16};
+            fillRect(dc, track, RGB(28, 28, 28));
+            frameRect(dc, track, RGB(90, 90, 90));
+            int fillW = static_cast<int>((track.right - track.left - 2) * std::clamp(view.worldLook.noiseAmount, 0.0f, 2.0f) / 2.0f);
+            RECT fill{track.left + 1, track.top + 1, track.left + 1 + fillW, track.bottom - 1};
+            if (fillW > 0) fillRect(dc, fill, RGB(150, 148, 138));
+            x = track.right + 6;
+        }
+    }
     yL += rowH + 4; x = left0;
     {
         RECT eLab{left0, yL, left1, yL + 16};
@@ -1008,7 +1027,6 @@ void drawSettingsPanel(HDC dc, ShellState &shell, View const &view, RECT const &
     }
     button(left0, left1, x, yL, 120, tr("btn_glow_liquids"), MenuCmd::Glow, view.worldLook.glowingLiquids);
     button(left0, left1, x, yL, 80, tr("btn_outlines"), MenuCmd::Outlines, view.worldLook.outlines);
-    button(left0, left1, x, yL, 96, tr("btn_rigid_overlay"), MenuCmd::Overlay, rigid.debugOverlay);
     yL += rowH + 8; x = left0;
 
     section(left0, left1, yL, tr("sec_solver"));
@@ -1244,6 +1262,8 @@ char const *tipKeyForCmd(MenuCmd cmd) {
         case MenuCmd::StyleDetailed: return "tip_style_detailed";
         case MenuCmd::StyleRealistic: return "tip_style_realistic";
         case MenuCmd::StyleAlpha: return "tip_style_alpha";
+        case MenuCmd::StyleLegacy: return "tip_style_legacy";
+        case MenuCmd::NoiseMinus: case MenuCmd::NoisePlus: return "tip_noise";
         case MenuCmd::Overlay: return "tip_overlay";
         case MenuCmd::MatWood: return "tip_mat_wood";
         case MenuCmd::MatStone: return "tip_mat_stone";

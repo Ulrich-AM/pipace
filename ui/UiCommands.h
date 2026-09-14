@@ -29,6 +29,7 @@ enum class MenuCmd : int {
     StyleDetailed,
     StyleRealistic,
     StyleAlpha,
+    StyleLegacy,
     Overlay,
     MatWood,
     MatStone,
@@ -64,7 +65,8 @@ enum class MenuCmd : int {
     VorticityMinus, VorticityPlus,
     CatchUpMinus, CatchUpPlus,
     ThermalIntervalMinus, ThermalIntervalPlus,
-    RigidGravity
+    RigidGravity,
+    NoiseMinus, NoisePlus
 };
 
 enum class SettingsMouseResult : uint8_t { Miss = 0, Consume, Command, Drag };

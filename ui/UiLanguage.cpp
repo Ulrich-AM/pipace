@@ -257,6 +257,8 @@ void seedEnglish() {
     set("style_detailed", L"Detail");
     set("style_realistic", L"Real");
     set("style_alpha", L"Alpha");
+    set("style_legacy", L"Legacy");
+    set("noise_str", L"Noise {0}%");
     set("sec_quality", L"Quality");
     set("sec_solver", L"Solver");
     set("sec_gas_sim", L"Air solver");
@@ -398,6 +400,8 @@ void seedEnglish() {
     set("tip_style_detailed", L"Adds depth and shape shading.");
     set("tip_style_realistic", L"Shows richer depth, flow, and material detail.");
     set("tip_style_alpha", L"Flat colors with opacity based on amount.");
+    set("tip_style_legacy", L"Classic PIPACE shading with depth, bright surfaces, motion, and noise.");
+    set("tip_noise", L"Adjusts texture variation in noise-based appearance styles.");
     set("tip_overlay", L"Draw extra rigid-body debug marks on top of the current view.");
     set("tip_mat_wood", L"Set the next drawn body to wood: light, absorbent, weakens when wet.");
     set("tip_mat_stone", L"Set the next drawn body to stone: heavier than wood.");
