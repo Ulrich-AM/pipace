@@ -171,6 +171,7 @@ struct FluidEngine {
     void wakeThermalAt(int x, int y);
     void seedAmbientHeat();
     void addLiquidFill(int index, float dFill, float dHeat);
+    float takeLiquidVolume(int index, float amount);
     float honeyFraction(int index) const;
     float mixDensity(int index) const;
     float mixSpecificHeat(int index) const;

@@ -251,6 +251,13 @@ void FluidEngine::addLiquidFill(int index, float dFill, float dHeat) {
     clearEmptyLiquidCell(index);
 }
 
+float FluidEngine::takeLiquidVolume(int index, float amount) {
+    if (index < 0 || index >= GW * GH || amount <= 0.0f) return 0.0f;
+    float before = fill[static_cast<size_t>(index)];
+    (void)extractVolume(index, amount);
+    return before - fill[static_cast<size_t>(index)];
+}
+
 void FluidEngine::seedAmbientHeat() {
     for (int i = 0; i < GW * GH; ++i) {
         float f = fill[static_cast<size_t>(i)];

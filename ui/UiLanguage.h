@@ -12,5 +12,7 @@ wchar_t const *tr(char const *key);
 std::wstring trf(char const *key);
 std::wstring trf(char const *key, std::wstring const &a0);
 std::wstring trf(char const *key, std::wstring const &a0, std::wstring const &a1);
+std::wstring trf(char const *key, std::wstring const &a0, std::wstring const &a1, std::wstring const &a2);
+std::wstring trf(char const *key, std::wstring const &a0, std::wstring const &a1, std::wstring const &a2, std::wstring const &a3);
 
 } // namespace ui

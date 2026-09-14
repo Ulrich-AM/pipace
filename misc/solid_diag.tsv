@@ -5,8 +5,8 @@ C_hard_drop	PASS	glass took impact damage/cracks	24	24	60	0	0	0
 D_material_diff	PASS	glass failed more than metal	16	30	154.5	0.199607	0	0
 E_fatigue	PASS	subcritical hits accumulated	1	12	26.4	0.228605	0	0
 F_asymmetric	PASS	damage stayed near struck end	1	40	100	0.704367	0	0
-G_absorb	PASS	wood absorbed free water	1	40	21.7563	0	3.75627	2070.24
-H_spread	PASS	moisture diffused along wood	1	20	11.2773	0	2.2773	0
+G_absorb	PASS	wood absorbed free water abs=11.929618 dTotal=-0.000138	1	40	29.9296	0	11.9296	2022.07
+H_spread	PASS	moisture diffused along wood	1	20	11.3553	0	2.35533	0
 I_wet_fracture	PASS	wet wood weaker than dry	1	16	17.12	0.116952	9.92	0
 J_fragment_mass	PASS	pixels and mass conserved	24	24	60	0	0	0
 K_spin_split	PASS	fragments inherited spin velocities	10	36	90	0	0	0

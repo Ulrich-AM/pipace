@@ -206,6 +206,7 @@ void handleMenuCommand(ui::MenuCmd cmd) {
         case MenuCmd::ViewDivergence: debugView = DebugView::Divergence; break;
         case MenuCmd::ViewChunks: debugView = DebugView::Chunks; break;
         case MenuCmd::ViewRigid: debugView = DebugView::Rigid; break;
+        case MenuCmd::ViewMoisture: debugView = DebugView::Moisture; break;
         case MenuCmd::ViewGasPressure: debugView = DebugView::GasPressure; break;
         case MenuCmd::ViewGasAmount: debugView = DebugView::GasAmount; break;
         case MenuCmd::ViewGasVelocity: debugView = DebugView::GasVelocity; break;
@@ -304,6 +305,7 @@ void handleMenuCommand(ui::MenuCmd cmd) {
         case MenuCmd::Rigid11: case MenuCmd::Rigid12: case MenuCmd::Rigid13: case MenuCmd::Rigid14: case MenuCmd::Rigid15:
         case MenuCmd::Rigid16: case MenuCmd::Rigid17: case MenuCmd::Rigid18: case MenuCmd::Rigid19: case MenuCmd::Rigid20:
         case MenuCmd::Rigid21: case MenuCmd::Rigid22: case MenuCmd::Rigid23: case MenuCmd::Rigid24:
+        case MenuCmd::Rigid25:
             rigid.gravityScale = (static_cast<int>(cmd) - static_cast<int>(MenuCmd::Rigid1) + 1 == 24) ? 0.0f : 1.0f;
             rigid.loadTestScene(engine, static_cast<int>(cmd) - static_cast<int>(MenuCmd::Rigid1) + 1);
             gas.resetAmbient(engine);
@@ -344,6 +346,7 @@ void handleHit(ui::HitId id) {
         case HitId::ViewLdiv: debugView = DebugView::Divergence; break;
         case HitId::ViewRgdn: debugView = DebugView::Rigid; break;
         case HitId::ViewRgdo: rigid.debugOverlay = !rigid.debugOverlay; break;
+        case HitId::ViewMois: debugView = DebugView::Moisture; break;
         case HitId::ViewGasp: debugView = DebugView::GasPressure; break;
         case HitId::ViewGasa: debugView = DebugView::GasAmount; break;
         case HitId::ViewGasv: debugView = DebugView::GasVelocity; break;
@@ -469,6 +472,21 @@ uint32_t lerpRgb(int r0, int g0, int b0, int r1, int g1, int b1, float t) {
     return rgb(static_cast<int>(std::lround(r0 + (r1 - r0) * t)),
         static_cast<int>(std::lround(g0 + (g1 - g0) * t)),
         static_cast<int>(std::lround(b0 + (b1 - b0) * t)));
+}
+
+uint32_t moistureDebugColor(MaterialId mat, float moisture) {
+    if (!materialIsAbsorbent(mat)) return rgb(78, 80, 84);
+    MaterialDefinition const &def = materialDef(mat);
+    float w = 0.0f;
+    if (def.moistureCapacity > 1.0e-8f)
+        w = std::clamp(moisture / def.moistureCapacity, 0.0f, 1.0f);
+    if (w <= 1.0e-5f) return rgb(28, 26, 24);
+    if (w < 0.45f) {
+        float t = w / 0.45f;
+        return lerpRgb(28, 26, 24, 22, 92, 86, t);
+    }
+    float t = (w - 0.45f) / 0.55f;
+    return lerpRgb(22, 92, 86, 72, 214, 255, t);
 }
 
 uint32_t mixToward(uint32_t dst, int r, int g, int b, float t);
@@ -705,7 +723,7 @@ void fillWorldPixels() {
         return body >= 0 && occupantAt(x, y) == body;
     };
     std::vector<int> rigidDepth(static_cast<size_t>(GW * GH), -1);
-    if (debugView != DebugView::Rigid) {
+    if (debugView != DebugView::Rigid && debugView != DebugView::Moisture) {
         std::vector<int> depthQueue;
         depthQueue.reserve(static_cast<size_t>(GW * GH) / 8);
         constexpr int ox[4] = {-1, 1, 0, 0};
@@ -746,6 +764,13 @@ void fillWorldPixels() {
             else if (pendingMat != MATERIAL_EMPTY) engine.pixels[index] = rgb(230, 180, 70);
             continue;
         }
+        if (debugView == DebugView::Moisture) {
+            if (occMat != MATERIAL_EMPTY)
+                engine.pixels[index] = moistureDebugColor(occMat, rigid.occupantMoisture[static_cast<size_t>(index)]);
+            else if (pendingMat != MATERIAL_EMPTY)
+                engine.pixels[index] = rgb(230, 180, 70);
+            continue;
+        }
         if (occMat != MATERIAL_EMPTY) {
             MaterialDefinition const &mat = materialDef(occMat);
             float wetness = 0.0f;
@@ -777,18 +802,14 @@ void fillWorldPixels() {
                     }
                 }
             }
-            // Wet, degraded, and structurally cracked pixels darken from real state.
-            float stain = (1.0f - 0.46f * wetness) * (1.0f - 0.38f * dmg) * (1.0f - 0.62f * crack);
+            float stain = (1.0f - 0.25f * wetness) * (1.0f - 0.38f * dmg) * (1.0f - 0.62f * crack);
             int depth = std::max(0, rigidDepth[static_cast<size_t>(index)]);
             float s = 1.22f;
             if (depth > 0) {
                 float u = 1.0f - std::min(1.0f, static_cast<float>(depth) / 7.0f);
                 s = 0.62f + 0.38f * u;
             }
-            int cr = std::max(0, static_cast<int>(mat.colorR * (1.0f - 0.16f * wetness)));
-            int cg = std::max(0, static_cast<int>(mat.colorG * (1.0f - 0.22f * wetness)));
-            int cb = std::max(0, static_cast<int>(mat.colorB * (1.0f - 0.10f * wetness)));
-            engine.pixels[index] = scaleRgb(cr, cg, cb, s * stain);
+            engine.pixels[index] = scaleRgb(mat.colorR, mat.colorG, mat.colorB, s * stain);
         } else if (pendingMat != MATERIAL_EMPTY) {
             MaterialDefinition const &mat = materialDef(pendingMat);
             engine.pixels[index] = rgb(std::min(255, mat.colorR + 40), std::min(255, mat.colorG + 40), std::min(255, mat.colorB + 20));
@@ -1297,6 +1318,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR commandLine, int show)
         return 0;
     }
     if (commandLine && wcsstr(commandLine, L"--solid-diag")) { rigid.runSolidDiagnostics(engine); return 0; }
+    if (commandLine && wcsstr(commandLine, L"--moisture-diag")) { rigid.runMoistureDiagnostics(engine); return 0; }
     if (commandLine && wcsstr(commandLine, L"--thermal-diag")) { thermal.runDiagnostics(engine, rigid, gas); return 0; }
     if (commandLine && wcsstr(commandLine, L"--gas-diag")) { gas.runDiagnostics(engine, rigid); return 0; }
     if (commandLine && wcsstr(commandLine, L"--look-bench")) {

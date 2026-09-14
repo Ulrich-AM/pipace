@@ -23,8 +23,8 @@ struct Layout {
     RECT speedMinus{};
     RECT speedLabel{};
     RECT speedPlus{};
-    RECT viewBtn[12]{};
-    int viewCount = 12;
+    RECT viewBtn[13]{};
+    int viewCount = 13;
     RECT settingsBtn{};
     RECT pauseBtn{};
     RECT clearBtn{};
@@ -90,7 +90,7 @@ inline Layout computeLayout(int clientW, int clientH) {
     L.pauseBtn    = RECT{right - 168, by, right - 86, by + bh};
     L.settingsBtn = RECT{right - 270, by, right - 174, by + bh};
 
-    L.viewCount = 12;
+    L.viewCount = 13;
     {
         int viewLeft = L.speedPlus.right + 8;
         int viewRight = L.settingsBtn.left - 8;
@@ -98,10 +98,10 @@ inline Layout computeLayout(int clientW, int clientH) {
         int groupGap = 5;
         int innerGap = 2;
         int extra = 3 * groupGap;
-        int innerGaps = 8;
+        int innerGaps = 9;
         int btnW = avail > 0 ? (avail - extra - innerGaps * innerGap) / L.viewCount : 26;
-        btnW = std::clamp(btnW, 22, 44);
-        int groupOf[12] = {0, 0, 1, 1, 1, 1, 1, 2, 2, 3, 3, 3};
+        btnW = std::clamp(btnW, 20, 44);
+        int groupOf[13] = {0, 0, 1, 1, 1, 1, 1, 2, 2, 2, 3, 3, 3};
         int x = viewLeft;
         for (int i = 0; i < L.viewCount; ++i) {
             if (i > 0) x += (groupOf[i] != groupOf[i - 1]) ? groupGap : innerGap;

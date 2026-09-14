@@ -188,6 +188,38 @@ uint32_t shadeMaterial(MaterialVisual const &vis, WorldLook const &look, int x, 
     return c;
 }
 
+float wetDarkenMul(WorldRenderStyle style, float wetness) {
+    wetness = std::clamp(wetness, 0.0f, 1.0f);
+    if (wetness <= 1.0e-5f) return 1.0f;
+    float sat = 0.20f;
+    switch (style) {
+        case WorldRenderStyle::FlatColor: sat = 0.13f; break;
+        case WorldRenderStyle::NoisyFlat: sat = 0.20f; break;
+        case WorldRenderStyle::Detailed: sat = 0.28f; break;
+        case WorldRenderStyle::Realistic: sat = 0.34f; break;
+        case WorldRenderStyle::AlphaFlat: sat = 0.10f; break;
+        case WorldRenderStyle::Legacy: sat = 0.32f; break;
+    }
+    return 1.0f - sat * wetness;
+}
+
+void applyWetLook(int &r, int &g, int &b, WorldRenderStyle style, float wetness) {
+    wetness = std::clamp(wetness, 0.0f, 1.0f);
+    if (wetness <= 1.0e-5f) return;
+    if (style == WorldRenderStyle::Realistic) {
+        float mean = (static_cast<float>(r) + static_cast<float>(g) + static_cast<float>(b)) / 3.0f;
+        float chroma = 1.0f + 0.18f * wetness;
+        float contrast = 1.0f + 0.12f * wetness;
+        auto push = [&](int ch) {
+            float v = static_cast<float>(ch);
+            v = mean + (v - mean) * chroma;
+            v = mean + (v - mean) * contrast;
+            return clampByte(static_cast<int>(std::lround(v)));
+        };
+        r = push(r); g = push(g); b = push(b);
+    }
+}
+
 } // namespace
 
 void WorldRenderer::ensureSize() {
@@ -443,10 +475,6 @@ void WorldRenderer::paintNormal(FluidEngine &fluid, RigidBodyEngine const &rigid
                     }
                 }
             }
-            float stain = (1.0f - 0.46f * wetness) * (1.0f - 0.38f * dmg) * (1.0f - 0.62f * crack);
-            vis.r = std::max(0, static_cast<int>(vis.r * (1.0f - 0.16f * wetness)));
-            vis.g = std::max(0, static_cast<int>(vis.g * (1.0f - 0.22f * wetness)));
-            vis.b = std::max(0, static_cast<int>(vis.b * (1.0f - 0.10f * wetness)));
             int depth = needsDepth(style) ? std::max(0, rigidDepth[static_cast<size_t>(index)]) : 0;
             bool edge = false;
             if (style == WorldRenderStyle::Legacy) {
@@ -463,6 +491,8 @@ void WorldRenderer::paintNormal(FluidEngine &fluid, RigidBodyEngine const &rigid
             int cr = static_cast<int>((c >> 16) & 255);
             int cg = static_cast<int>((c >> 8) & 255);
             int cb = static_cast<int>(c & 255);
+            applyWetLook(cr, cg, cb, style, wetness);
+            float stain = wetDarkenMul(style, wetness) * (1.0f - 0.38f * dmg) * (1.0f - 0.62f * crack);
             fluid.pixels[static_cast<size_t>(index)] = scaleRgb(cr, cg, cb, stain);
         } else if (pendingMat != MATERIAL_EMPTY) {
             MaterialVisual vis = visualForSolid(pendingMat);

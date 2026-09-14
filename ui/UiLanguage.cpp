@@ -108,6 +108,7 @@ void seedEnglish() {
     set("bar_temp", L"TEMP");
     set("bar_rgdn", L"RGDN");
     set("bar_rgdo", L"RGDO");
+    set("bar_mois", L"MOIS");
     set("bar_gasp", L"GASP");
     set("bar_gasa", L"GASA");
     set("bar_gasv", L"GASV");
@@ -130,6 +131,8 @@ void seedEnglish() {
     set("view_help_rgdn", L"Highlights rigid-body pixels and pending paint. Use this to see exactly which cells a body occupies.");
     set("view_title_rgdo", L"RGDO - Rigid overlay");
     set("view_help_rgdo", L"Toggle. Draws debug marks on rigid bodies on top of whatever view is already showing. Can stay on while you use other views.");
+    set("view_title_mois", L"MOIS - Rigid moisture");
+    set("view_help_mois", L"Diagnostic wetness field. Dry absorbent material is dark. Wetter pixels shift toward cyan. Non-absorbent solids stay gray. Does not change the simulation.");
     set("view_title_gasp", L"GASP - Gas pressure");
     set("view_help_gasp", L"Air pressure in atmospheres. Dark is vacuum. Mid gray-blue is about 1 atm. Bright is over-pressure.");
     set("view_title_gasa", L"GASA - Gas amount");
@@ -211,7 +214,10 @@ void seedEnglish() {
     set("ins_crack", L"Crack: {0}");
     set("ins_saturation", L"Saturation: {0}");
     set("ins_bond_broken", L"Bond broken at hover");
-    set("ins_moisture", L"Wet: {0} ({1})");
+    set("ins_moisture", L"Absorbed (body): {0} ({1})");
+    set("ins_local_moisture", L"Moisture: {0}");
+    set("ins_moisture_cap", L"Capacity: {0}");
+    set("ins_liquid_total", L"Liquid free/abs/splash/total {0} / {1} / {2} / {3}");
     set("ins_fill", L"Fill: {0}");
     set("ins_comp_water", L"{0}% water");
     set("ins_comp_honey", L"{0}% honey");
@@ -366,6 +372,7 @@ void seedEnglish() {
     set("rigid_scene_22", L"22 Wet wood");
     set("rigid_scene_23", L"23 Anchored");
     set("rigid_scene_24", L"24 Spin glass");
+    set("rigid_scene_25", L"25 Moisture soak");
 
     set("gas_scene_1", L"A Uniform air");
     set("gas_scene_2", L"B Sealed box");
@@ -575,6 +582,14 @@ std::wstring trf(char const *key, std::wstring const &a0) {
 
 std::wstring trf(char const *key, std::wstring const &a0, std::wstring const &a1) {
     return replaceAll(replaceAll(tr(key), L"{0}", a0), L"{1}", a1);
+}
+
+std::wstring trf(char const *key, std::wstring const &a0, std::wstring const &a1, std::wstring const &a2) {
+    return replaceAll(trf(key, a0, a1), L"{2}", a2);
+}
+
+std::wstring trf(char const *key, std::wstring const &a0, std::wstring const &a1, std::wstring const &a2, std::wstring const &a3) {
+    return replaceAll(trf(key, a0, a1, a2), L"{3}", a3);
 }
 
 } // namespace ui

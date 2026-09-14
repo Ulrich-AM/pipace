@@ -29,6 +29,7 @@ struct RigidBodyEngine {
     int lastFractureSplits = 0;
     double lastAbsorbed = 0.0;
     double lastDried = 0.0;
+    std::vector<float> moistureFlux;
 
     RigidBodyEngine();
 
@@ -78,6 +79,7 @@ struct RigidBodyEngine {
     void loadTestScene(FluidEngine &fluid, int scene);
     void runConservationBenchmark(FluidEngine &fluid);
     void runContactDiagnostics(FluidEngine &fluid);
+    void runMoistureDiagnostics(FluidEngine &fluid);
     void runSolidDiagnostics(FluidEngine &fluid);
 
     static void worldToLocal(RigidBody const &b, float wx, float wy, float &lx, float &ly);

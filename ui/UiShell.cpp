@@ -57,6 +57,7 @@ const wchar_t *debugName(DebugView v) {
         case DebugView::GasAmount: return tr("bar_gasa");
         case DebugView::GasVelocity: return tr("bar_gasv");
         case DebugView::Temperature: return tr("bar_temp");
+        case DebugView::Moisture: return tr("bar_mois");
         default: return tr("bar_norm");
     }
 }
@@ -80,6 +81,7 @@ ViewBarDef const kViewBar[] = {
         {HitId::ViewTemp, "bar_temp", "view_title_temp", "view_help_temp", kViewLiquid, kViewLiquidSel},
         {HitId::ViewRgdn, "bar_rgdn", "view_title_rgdn", "view_help_rgdn", kViewSolid, kViewSolidSel},
     {HitId::ViewRgdo, "bar_rgdo", "view_title_rgdo", "view_help_rgdo", kViewSolid, kViewSolidSel},
+    {HitId::ViewMois, "bar_mois", "view_title_mois", "view_help_mois", kViewSolid, kViewSolidSel},
     {HitId::ViewGasp, "bar_gasp", "view_title_gasp", "view_help_gasp", kViewGas, kViewGasSel},
     {HitId::ViewGasa, "bar_gasa", "view_title_gasa", "view_help_gasa", kViewGas, kViewGasSel},
     {HitId::ViewGasv, "bar_gasv", "view_title_gasv", "view_help_gasv", kViewGas, kViewGasSel},
@@ -104,6 +106,7 @@ bool viewBarSelected(ViewBarDef const &item, View const &view) {
         case HitId::ViewTemp: return view.debugView == DebugView::Temperature;
         case HitId::ViewRgdn: return view.debugView == DebugView::Rigid;
         case HitId::ViewRgdo: return view.rigid && view.rigid->debugOverlay;
+        case HitId::ViewMois: return view.debugView == DebugView::Moisture;
         case HitId::ViewGasp: return view.debugView == DebugView::GasPressure;
         case HitId::ViewGasa: return view.debugView == DebugView::GasAmount;
         case HitId::ViewGasv: return view.debugView == DebugView::GasVelocity;
@@ -684,6 +687,12 @@ void drawShell(HDC dc, ShellState &shell, View const &view) {
             ins(trf("ins_damage", shortFloat(b.maxDamage, 2)));
             ins(trf("ins_bond_body", shortFloat(b.maxBondDamage, 2), std::to_wstring(b.brokenBondCount)));
             ins(trf("ins_moisture", shortFloat(b.absorbedLiquid, 2), shortFloat(b.cachedWetness, 2)));
+            float localM = 0.0f;
+            if (hi < static_cast<int>(rg->occupantMoisture.size()))
+                localM = rg->occupantMoisture[static_cast<size_t>(hi)];
+            float cap = materialDef(mat).moistureCapacity;
+            ins(trf("ins_local_moisture", shortFloat(localM, 3)));
+            ins(trf("ins_moisture_cap", shortFloat(cap, 3)));
             float matD = 0.0f, bondD = 0.0f, strength = 0.0f, crack = 0.0f, wet = 0.0f;
             int brokenN = 0;
             if (rg->inspectLocalStructure(hx, hy, matD, bondD, brokenN, strength, crack, wet)) {
@@ -716,6 +725,15 @@ void drawShell(HDC dc, ShellState &shell, View const &view) {
             }
         }
         ins(trf("ins_volume", shortFloat(e->currentVolume, 1), shortFloat(e->expectedVolume, 1)));
+        if (rg) {
+            double splash = 0.0;
+            for (SplashParticle const &p : e->splashes) splash += p.volume;
+            double freeL = 0.0;
+            for (float amount : e->fill) freeL += amount;
+            double absorbed = rg->totalAbsorbedLiquid();
+            ins(trf("ins_liquid_total", shortFloat(freeL, 2), shortFloat(absorbed, 2),
+                shortFloat(splash, 2), shortFloat(freeL + absorbed + splash, 2)));
+        }
         GasEngine const *g = view.gas;
         if (g && !e->solid[static_cast<size_t>(hi)] && body < 0) {
             int gi = hi;
@@ -1162,7 +1180,7 @@ void drawSettingsPanel(HDC dc, ShellState &shell, View const &view, RECT const &
 
     RECT advBox = flyoutRectFor(advTrigger, 1, 6, 168, 22, client);
     RECT fluidBox = flyoutRectFor(fluidTrigger, 1, 10, 168, 22, client);
-    RECT rigidBox = flyoutRectFor(rigidTrigger, 2, 12, 148, 22, client);
+    RECT rigidBox = flyoutRectFor(rigidTrigger, 2, 13, 148, 22, client);
     RECT gasBox = flyoutRectFor(gasTrigger, 1, 8, 168, 22, client);
 
     SettingsFlyout want = SettingsFlyout::None;
@@ -1208,21 +1226,21 @@ void drawSettingsPanel(HDC dc, ShellState &shell, View const &view, RECT const &
         shell.settingsFlyoutRc = fluidBox;
         drawFlyoutList(dc, shell, fluidBox, items, 10, 1, 168, 22);
     } else if (want == SettingsFlyout::RigidScenes) {
-        FlyItem items[24];
-        MenuCmd cmds[24] = {
+        FlyItem items[25];
+        MenuCmd cmds[25] = {
             MenuCmd::Rigid1, MenuCmd::Rigid2, MenuCmd::Rigid3, MenuCmd::Rigid4, MenuCmd::Rigid5,
             MenuCmd::Rigid6, MenuCmd::Rigid7, MenuCmd::Rigid8, MenuCmd::Rigid9, MenuCmd::Rigid10,
             MenuCmd::Rigid11, MenuCmd::Rigid12, MenuCmd::Rigid13, MenuCmd::Rigid14, MenuCmd::Rigid15,
             MenuCmd::Rigid16, MenuCmd::Rigid17, MenuCmd::Rigid18, MenuCmd::Rigid19, MenuCmd::Rigid20,
-            MenuCmd::Rigid21, MenuCmd::Rigid22, MenuCmd::Rigid23, MenuCmd::Rigid24
+            MenuCmd::Rigid21, MenuCmd::Rigid22, MenuCmd::Rigid23, MenuCmd::Rigid24, MenuCmd::Rigid25
         };
         char key[24];
-        for (int i = 0; i < 24; ++i) {
+        for (int i = 0; i < 25; ++i) {
             std::snprintf(key, sizeof(key), "rigid_scene_%d", i + 1);
             items[i] = {tr(key), cmds[i], false};
         }
         shell.settingsFlyoutRc = rigidBox;
-        drawFlyoutList(dc, shell, rigidBox, items, 24, 2, 148, 22);
+        drawFlyoutList(dc, shell, rigidBox, items, 25, 2, 148, 22);
     } else if (want == SettingsFlyout::GasScenes) {
         FlyItem items[8];
         MenuCmd cmds[8] = {
@@ -1243,7 +1261,7 @@ void drawSettingsPanel(HDC dc, ShellState &shell, View const &view, RECT const &
 
 char const *tipKeyForCmd(MenuCmd cmd) {
     if (cmd >= MenuCmd::Scene1 && cmd <= MenuCmd::Scene10) return "tip_fluid_scene";
-    if (cmd >= MenuCmd::Rigid1 && cmd <= MenuCmd::Rigid24) return "tip_rigid_scene";
+    if (cmd >= MenuCmd::Rigid1 && cmd <= MenuCmd::Rigid25) return "tip_rigid_scene";
     if (cmd >= MenuCmd::Gas1 && cmd <= MenuCmd::Gas8) return "tip_gas_scene";
     if (cmd >= MenuCmd::Speed0 && cmd <= MenuCmd::Speed5) return "tip_speed";
     if (cmd >= MenuCmd::Threads1 && cmd <= MenuCmd::Threads8) return "tip_threads";

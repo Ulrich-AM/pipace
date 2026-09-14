@@ -56,7 +56,7 @@ inline bool isPressureEnergyTool(Tool t) {
 }
 enum class DebugView : uint8_t {
     Normal, Fill, Pressure, Velocity, Divergence, Chunks, Rigid,
-    GasPressure, GasAmount, GasVelocity, Temperature
+    GasPressure, GasAmount, GasVelocity, Temperature, Moisture
 };
 enum class VelocityAdvection : uint8_t {
     None = 0,
