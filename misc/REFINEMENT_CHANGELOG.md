@@ -47,7 +47,7 @@ Drawn bodies were hopping because static contacts used a fake 0.65-cell penetrat
 
 ## Deterministic before/after checks
 
-All checks use the release build and fixed 1/30-second steps. Run `build\water_test.exe --benchmark` to regenerate the TSV.
+All checks use the release build and fixed 1/30-second steps. Run `build\pipace.exe --benchmark` to regenerate the TSV.
 
 | Check | Before | After |
 |---|---:|---:|

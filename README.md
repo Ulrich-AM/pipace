@@ -4,7 +4,7 @@ A dependency-free C++/Win32 pixel-water playground based on the supplied hybrid 
 
 ## Run
 
-Double-click `run.bat`. It builds `build\water_test.exe` on the first run with the MSYS2 UCRT64 `g++` compiler, then launches it.
+Double-click `run.bat`. It builds `build\pipace.exe` on the first run with the MSYS2 UCRT64 `g++` compiler, then launches it.
 
 You can also build with CMake:
 
@@ -53,10 +53,10 @@ The menu covers:
 - A `LiquidProperties` structure provides density, viscosity, and surface tension for future chemistry materials without implementing them yet.
 - 16x16 chunks sleep from measured velocity/divergence/fill/pressure stability. Sleeping chunks stay asleep through leftover MAC speed until fill actually changes or liquid goes airborne. Disturbances wake a halo and the connected fluid region; advection, forces, projection, and transport operate on its bounding region.
 - Live diagnostics include thin-cell count/volume, momentum, kinetic energy, hovered-cell state, pressure iterations, CFL cap, and averaged stage timings.
-- Run `build\water_test.exe --benchmark` to generate a deterministic TSV report beside the executable.
-- Run `build\water_test.exe --thread-benchmark` to compare simulation-step timings at 1 / 2 / 4 / Auto workers.
-- Run `build\water_test.exe --rigid-benchmark` for a short rigid-body conservation/timing report.
-- Run `build\water_test.exe --gas-diag` for Air conservation / chamber regression rows in `gas_diag.tsv`.
-- Run `build\water_test.exe --solid-diag` for grab / fracture / moisture regression rows in `solid_diag.tsv`.
+- Run `build\pipace.exe --benchmark` to generate a deterministic TSV report beside the executable.
+- Run `build\pipace.exe --thread-benchmark` to compare simulation-step timings at 1 / 2 / 4 / Auto workers.
+- Run `build\pipace.exe --rigid-benchmark` for a short rigid-body conservation/timing report.
+- Run `build\pipace.exe --gas-diag` for Air conservation / chamber regression rows in `gas_diag.tsv`.
+- Run `build\pipace.exe --solid-diag` for grab / fracture / moisture regression rows in `solid_diag.tsv`.
 
 The old falling-sand water mover, per-cell water velocity, lateral target search, directional scan bias, and individual-cell sleeping system have been removed.
