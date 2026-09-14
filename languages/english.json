@@ -172,6 +172,7 @@
   "ins_local_moisture": "Moisture: {0}",
   "ins_moisture_cap": "Capacity: {0}",
   "ins_liquid_total": "Liquid free/abs/splash/total {0} / {1} / {2} / {3}",
+  "ins_pending_drip": "Pending drip: {0}",
   "ins_fill": "Fill: {0}",
   "ins_comp_water": "{0}% water",
   "ins_comp_honey": "{0}% honey",

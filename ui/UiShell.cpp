@@ -746,8 +746,11 @@ void drawShell(HDC dc, ShellState &shell, View const &view) {
             double freeL = 0.0;
             for (float amount : e->fill) freeL += amount;
             double absorbed = rg->totalAbsorbedLiquid();
+            double pending = rg->totalPendingDrip();
             ins(trf("ins_liquid_total", shortFloat(freeL, 2), shortFloat(absorbed, 2),
-                shortFloat(splash, 2), shortFloat(freeL + absorbed + splash, 2)));
+                shortFloat(splash, 2), shortFloat(freeL + absorbed + splash + pending, 2)));
+            if (pending > 1.0e-5)
+                ins(trf("ins_pending_drip", shortFloat(pending, 3)));
         }
         GasEngine const *g = view.gas;
         if (g && !e->solid[static_cast<size_t>(hi)] && body < 0) {

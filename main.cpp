@@ -703,7 +703,10 @@ void fillWorldPixels() {
     for (SplashParticle const &p : engine.splashes) {
         int x = static_cast<int>(p.x), y = static_cast<int>(p.y);
         if (!FluidEngine::inside(x, y) || engine.solid[FluidEngine::ci(x, y)] || engine.dynamicSolid[FluidEngine::ci(x, y)]) continue;
-        if (debugView == DebugView::Fill) continue;
+        if (debugView == DebugView::Fill) {
+            engine.pixels[FluidEngine::ci(x, y)] = rgb(255, 72, 150);
+            continue;
+        }
         int lr = kWaterRimR, lg = kWaterRimG, lb = kWaterRimB;
         float vol = std::max(p.volume, 1.0e-8f);
         float h = std::clamp(p.honey / vol, 0.0f, 1.0f);
@@ -1319,6 +1322,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR commandLine, int show)
     }
     if (commandLine && wcsstr(commandLine, L"--solid-diag")) { rigid.runSolidDiagnostics(engine); return 0; }
     if (commandLine && wcsstr(commandLine, L"--moisture-diag")) { rigid.runMoistureDiagnostics(engine); return 0; }
+    if (commandLine && wcsstr(commandLine, L"--moisture-drip-diag")) { rigid.runMoistureDripDiagnostics(engine); return 0; }
     if (commandLine && wcsstr(commandLine, L"--thermal-diag")) { thermal.runDiagnostics(engine, rigid, gas); return 0; }
     if (commandLine && wcsstr(commandLine, L"--gas-diag")) { gas.runDiagnostics(engine, rigid); return 0; }
     if (commandLine && wcsstr(commandLine, L"--look-bench")) {

@@ -180,6 +180,7 @@ struct RigidBody {
     float cachedRestitution = 0.12f;
     float cachedWetness = 0.0f;
     float absorbedLiquid = 0.0f;
+    float pendingDrip = 0.0f; // conserved exudation waiting for a visible quantum
     float debugJn = 0.0f;
     float debugJt = 0.0f;
     float debugPosCorrX = 0.0f;

@@ -218,6 +218,7 @@ void seedEnglish() {
     set("ins_local_moisture", L"Moisture: {0}");
     set("ins_moisture_cap", L"Capacity: {0}");
     set("ins_liquid_total", L"Liquid free/abs/splash/total {0} / {1} / {2} / {3}");
+    set("ins_pending_drip", L"Pending drip: {0}");
     set("ins_fill", L"Fill: {0}");
     set("ins_comp_water", L"{0}% water");
     set("ins_comp_honey", L"{0}% honey");

@@ -37,6 +37,15 @@ constexpr float kImpactSpeedMin = 4.2f;
 constexpr float kImpactEnergyScale = 720.0f;
 constexpr float kFailDamage = 0.999f;
 
+// Moisture exudation (not evaporation). Damp solids keep water until gas-phase drying exists.
+constexpr float kDripSaturation = 0.86f;
+constexpr float kPoolFill = 0.20f;          // absorb only from substantial free liquid
+constexpr float kExudeScale = 380.0f;       // maps wood dryingRate 0.001 → ~0.38 /s of excess
+constexpr float kGravityBias = 0.08f;       // mild downward saturation bias inside porous solids
+constexpr float kMoistureEps = 1.0e-7f;
+constexpr int kMaxDripSites = 2;
+constexpr float kMaxEmitPerTick = MIN_RENDER_FILL * 3.0f;
+
 constexpr int kN4x[4] = {-1, 1, 0, 0};
 constexpr int kN4y[4] = {0, 0, -1, 1};
 
@@ -82,6 +91,8 @@ void RigidBodyEngine::clear() {
     lastFractureSplits = 0;
     lastAbsorbed = 0.0;
     lastDried = 0.0;
+    lastSaturatedSurface = 0;
+    lastDripSites = 0;
 }
 
 void RigidBodyEngine::clearPending() {
@@ -631,12 +642,25 @@ void RigidBodyEngine::refreshBodyAfterMaskEdit(int index, std::vector<RigidBody>
     }
     uint32_t keepId = b.id;
     bool parentAnchored = b.anchored;
+    float parentPending = b.pendingDrip;
+    float parentMoist = std::max(b.absorbedLiquid, 0.0f);
     RigidBody kept = packFragment(b, comps[keep], parentAnchored);
     kept.id = keepId;
+    float assigned = 0.0f;
+    auto sharePending = [&](RigidBody &child) {
+        if (parentMoist > 1.0e-12f)
+            child.pendingDrip = parentPending * (child.absorbedLiquid / parentMoist);
+        else child.pendingDrip = 0.0f;
+        assigned += child.pendingDrip;
+    };
+    sharePending(kept);
     for (size_t c = 0; c < comps.size(); ++c) {
         if (c == keep) continue;
         spawned.push_back(packFragment(b, comps[c], false));
+        sharePending(spawned.back());
     }
+    kept.pendingDrip += parentPending - assigned;
+    if (kept.pendingDrip < 0.0f) kept.pendingDrip = 0.0f;
     b = std::move(kept);
 }
 
@@ -2015,12 +2039,25 @@ void RigidBodyEngine::splitBodyByConnectivity(int index, std::vector<RigidBody> 
         }
     }
     uint32_t keepId = b.id;
+    float parentPending = b.pendingDrip;
+    float parentMoist = std::max(b.absorbedLiquid, 0.0f);
     RigidBody kept = packFragment(b, comps[keep], parentAnchored);
     kept.id = keepId;
+    float assigned = 0.0f;
+    auto sharePending = [&](RigidBody &child) {
+        if (parentMoist > 1.0e-12f)
+            child.pendingDrip = parentPending * (child.absorbedLiquid / parentMoist);
+        else child.pendingDrip = 0.0f;
+        assigned += child.pendingDrip;
+    };
+    sharePending(kept);
     for (size_t c = 0; c < comps.size(); ++c) {
         if (c == keep) continue;
         spawned.push_back(packFragment(b, comps[c], false));
+        sharePending(spawned.back());
     }
+    kept.pendingDrip += parentPending - assigned;
+    if (kept.pendingDrip < 0.0f) kept.pendingDrip = 0.0f;
     b = std::move(kept);
 }
 
@@ -2056,37 +2093,59 @@ void RigidBodyEngine::splitDirtyBodies() {
 void RigidBodyEngine::processMoisture(FluidEngine &fluid, float dt) {
     lastAbsorbed = 0.0;
     lastDried = 0.0;
+    lastSaturatedSurface = 0;
+    lastDripSites = 0;
     if (dt <= 0.0f) return;
     constexpr int ndx[4] = {-1, 1, 0, 0};
     constexpr int ndy[4] = {0, 0, -1, 1};
+    auto cellFree = [&](int nx, int ny) {
+        if (!FluidEngine::inside(nx, ny) || fluid.isSolid(nx, ny)) return false;
+        int ni = FluidEngine::ci(nx, ny);
+        if (occupant[static_cast<size_t>(ni)] >= 0) return false;
+        return true;
+    };
+    auto depositHeat = [&](float amount) {
+        return energyFromTemp(
+            thermalCapacity(massKg(fluidForSubstance(SUBSTANCE_WATER).density, amount, fluid.config.cellsPerMeter),
+                thermalForSubstance(SUBSTANCE_WATER).specificHeat),
+            AMBIENT_TEMPERATURE_K);
+    };
     for (RigidBody &b : bodies) {
         ensurePixelState(b);
         refreshMaterialCache(b);
         if (!b.moistureActive) continue;
         bool massDirty = false;
         bool touchingLiquid = false;
+        if (moistureFlags.size() < b.moisture.size()) moistureFlags.assign(b.moisture.size(), 0);
+        else std::fill(moistureFlags.begin(), moistureFlags.begin() + static_cast<std::ptrdiff_t>(b.moisture.size()), 0);
         for (int i : b.occupiedLocal) {
             int lx = i % b.maskW, ly = i / b.maskW;
             MaterialId id = b.mask[static_cast<size_t>(i)];
             if (!materialIsAbsorbent(id)) continue;
-            MaterialDefinition const &mat = materialDef(id);
+            PorousProperties const &por = porousForSubstance(substanceForMaterialId(id));
+            if (!por.valid || por.moistureCapacity <= 1.0e-8f) continue;
             float wx, wy;
             localToWorld(b, lx + 0.5f, ly + 0.5f, wx, wy);
             int gx = static_cast<int>(std::floor(wx));
             int gy = static_cast<int>(std::floor(wy));
             float &stored = b.moisture[static_cast<size_t>(i)];
-            float room = mat.moistureCapacity - stored;
+            if (stored > 0.0f && stored < kMoistureEps) {
+                b.pendingDrip += stored;
+                stored = 0.0f;
+                massDirty = true;
+            }
+            float room = por.moistureCapacity - stored;
             if (room < 0.0f) room = 0.0f;
-            float faceBudget = mat.absorptionRate * mat.porosity * dt;
+            float faceBudget = por.absorptionRate * por.porosity * dt;
             for (int n = -1; n < 4; ++n) {
                 int nx = (n < 0) ? gx : gx + ndx[n];
                 int ny = (n < 0) ? gy : gy + ndy[n];
-                if (!FluidEngine::inside(nx, ny) || fluid.isSolid(nx, ny)) continue;
+                if (!cellFree(nx, ny)) continue;
                 int ni = FluidEngine::ci(nx, ny);
-                if (occupant[static_cast<size_t>(ni)] >= 0) continue;
                 float avail = fluid.fill[static_cast<size_t>(ni)];
-                if (avail <= 1.0e-8f) continue;
+                if (avail < MIN_ACTIVE_FILL) continue;
                 touchingLiquid = true;
+                if (avail < kPoolFill) continue;
                 if (room <= 1.0e-8f || faceBudget <= 1.0e-8f) continue;
                 float take = std::min(room, std::min(faceBudget, avail));
                 if (take <= 1.0e-8f) continue;
@@ -2097,6 +2156,7 @@ void RigidBodyEngine::processMoisture(FluidEngine &fluid, float dt) {
                 fluid.expectedVolume -= actual;
                 lastAbsorbed += actual;
                 massDirty = true;
+                moistureFlags[static_cast<size_t>(i)] = 1;
                 fluid.wakeRegion(nx - 1, ny - 1, nx + 1, ny + 1);
             }
         }
@@ -2109,9 +2169,11 @@ void RigidBodyEngine::processMoisture(FluidEngine &fluid, float dt) {
             for (int i : b.occupiedLocal) {
                 int lx = i % b.maskW, ly = i / b.maskW;
                 MaterialId id = b.mask[static_cast<size_t>(i)];
-                MaterialDefinition const &mat = materialDef(id);
-                if (mat.moistureCapacity <= 1.0e-8f || mat.permeability <= 1.0e-8f) continue;
-                float ci = b.moisture[static_cast<size_t>(i)] / mat.moistureCapacity;
+                PorousProperties const &por = porousForSubstance(substanceForMaterialId(id));
+                if (!por.valid || por.moistureCapacity <= 1.0e-8f || por.permeability <= 1.0e-8f) continue;
+                float ci = b.moisture[static_cast<size_t>(i)] / por.moistureCapacity;
+                float wxi, wyi;
+                localToWorld(b, lx + 0.5f, ly + 0.5f, wxi, wyi);
                 for (int n = 0; n < 4; ++n) {
                     int nx = lx + ndx[n], ny = ly + ndy[n];
                     if (!maskOccupied(b, nx, ny)) continue;
@@ -2119,13 +2181,18 @@ void RigidBodyEngine::processMoisture(FluidEngine &fluid, float dt) {
                     if (ni <= i) continue;
                     MaterialId oid = b.mask[static_cast<size_t>(ni)];
                     if (!materialIsAbsorbent(oid)) continue;
-                    MaterialDefinition const &om = materialDef(oid);
-                    if (om.moistureCapacity <= 1.0e-8f || om.permeability <= 1.0e-8f) continue;
+                    PorousProperties const &om = porousForSubstance(substanceForMaterialId(oid));
+                    if (!om.valid || om.moistureCapacity <= 1.0e-8f || om.permeability <= 1.0e-8f) continue;
                     float cj = b.moisture[static_cast<size_t>(ni)] / om.moistureCapacity;
-                    float diff = ci - cj;
+                    float wxj, wyj;
+                    localToWorld(b, nx + 0.5f, ny + 0.5f, wxj, wyj);
+                    float gBias = 0.0f;
+                    if (std::max(ci, cj) > 0.55f)
+                        gBias = clampf((wyj - wyi) * kGravityBias, -0.12f, 0.12f);
+                    float diff = ci - cj + gBias;
                     if (std::abs(diff) <= 1.0e-6f) continue;
-                    float cond = 0.5f * (mat.permeability + om.permeability) * dt;
-                    float move = diff * cond * std::min(mat.moistureCapacity, om.moistureCapacity);
+                    float cond = 0.5f * (por.permeability + om.permeability) * dt;
+                    float move = diff * cond * std::min(por.moistureCapacity, om.moistureCapacity);
                     if (diff > 0.0f) {
                         move = std::min(move, b.moisture[static_cast<size_t>(i)] * 0.22f);
                         float room = om.moistureCapacity - b.moisture[static_cast<size_t>(ni)];
@@ -2134,7 +2201,7 @@ void RigidBodyEngine::processMoisture(FluidEngine &fluid, float dt) {
                         moistureFlux[static_cast<size_t>(ni)] += move;
                     } else {
                         move = std::min(-move, b.moisture[static_cast<size_t>(ni)] * 0.22f);
-                        float room = mat.moistureCapacity - b.moisture[static_cast<size_t>(i)];
+                        float room = por.moistureCapacity - b.moisture[static_cast<size_t>(i)];
                         move = std::min(move, std::max(0.0f, room));
                         moistureFlux[static_cast<size_t>(ni)] -= move;
                         moistureFlux[static_cast<size_t>(i)] += move;
@@ -2142,10 +2209,10 @@ void RigidBodyEngine::processMoisture(FluidEngine &fluid, float dt) {
                 }
             }
             for (int i : b.occupiedLocal) {
-                MaterialDefinition const &mat = materialDef(b.mask[static_cast<size_t>(i)]);
+                PorousProperties const &por = porousForSubstance(substanceForMaterialId(b.mask[static_cast<size_t>(i)]));
                 float next = b.moisture[static_cast<size_t>(i)] + moistureFlux[static_cast<size_t>(i)];
                 if (next < 0.0f) next = 0.0f;
-                if (mat.moistureCapacity > 0.0f && next > mat.moistureCapacity) next = mat.moistureCapacity;
+                if (por.moistureCapacity > 0.0f && next > por.moistureCapacity) next = por.moistureCapacity;
                 if (std::abs(next - b.moisture[static_cast<size_t>(i)]) > 1.0e-8f) massDirty = true;
                 b.moisture[static_cast<size_t>(i)] = next;
             }
@@ -2156,8 +2223,8 @@ void RigidBodyEngine::processMoisture(FluidEngine &fluid, float dt) {
                 if (err > 0.0) {
                     for (int i : b.occupiedLocal) {
                         if (err <= 1.0e-10) break;
-                        MaterialDefinition const &mat = materialDef(b.mask[static_cast<size_t>(i)]);
-                        float room = mat.moistureCapacity - b.moisture[static_cast<size_t>(i)];
+                        PorousProperties const &por = porousForSubstance(substanceForMaterialId(b.mask[static_cast<size_t>(i)]));
+                        float room = por.moistureCapacity - b.moisture[static_cast<size_t>(i)];
                         if (room <= 1.0e-8f) continue;
                         float add = static_cast<float>(std::min(static_cast<double>(room), err));
                         b.moisture[static_cast<size_t>(i)] += add;
@@ -2176,40 +2243,88 @@ void RigidBodyEngine::processMoisture(FluidEngine &fluid, float dt) {
                 }
             }
         }
+
+        dripSites.clear();
+        float totalExcess = 0.0f;
+        float maxDryRate = 0.0f;
+        int satSurface = 0;
         for (int i : b.occupiedLocal) {
-            int lx = i % b.maskW, ly = i / b.maskW;
+            if (i < static_cast<int>(moistureFlags.size()) && moistureFlags[static_cast<size_t>(i)]) continue;
             MaterialId id = b.mask[static_cast<size_t>(i)];
-            MaterialDefinition const &mat = materialDef(id);
-            if (mat.dryingRate <= 1.0e-8f || b.moisture[static_cast<size_t>(i)] <= 1.0e-8f) continue;
+            PorousProperties const &por = porousForSubstance(substanceForMaterialId(id));
+            if (!por.valid || por.moistureCapacity <= 1.0e-8f || por.dryingRate <= 1.0e-8f) continue;
+            float stored = b.moisture[static_cast<size_t>(i)];
+            float sat = clampf(stored / por.moistureCapacity, 0.0f, 1.0f);
+            if (sat <= kDripSaturation) continue;
+            float excess = (sat - kDripSaturation) * por.moistureCapacity;
+            if (excess <= kMoistureEps) continue;
+            int lx = i % b.maskW, ly = i / b.maskW;
             float wx, wy;
             localToWorld(b, lx + 0.5f, ly + 0.5f, wx, wy);
             int gx = static_cast<int>(std::floor(wx));
             int gy = static_cast<int>(std::floor(wy));
-            int tx = -1, ty = -1;
-            float bestRoom = 0.0f;
-            for (int n = -1; n < 4; ++n) {
-                int nx = (n < 0) ? gx : gx + ndx[n];
-                int ny = (n < 0) ? gy : gy + ndy[n];
-                if (!FluidEngine::inside(nx, ny) || fluid.isSolid(nx, ny)) continue;
-                int ni = FluidEngine::ci(nx, ny);
-                if (occupant[static_cast<size_t>(ni)] >= 0) continue;
-                float room = std::max(0.0f, 1.0f - fluid.fill[static_cast<size_t>(ni)]);
-                if (room > bestRoom) { bestRoom = room; tx = nx; ty = ny; }
+            int bestX = -1, bestY = -1;
+            float score = 0.0f;
+            auto consider = [&](int nx, int ny, float s) {
+                if (!cellFree(nx, ny)) return;
+                float room = std::max(0.0f, 1.0f - fluid.fill[static_cast<size_t>(FluidEngine::ci(nx, ny))]);
+                if (room < MIN_RENDER_FILL) return;
+                if (s > score) { score = s; bestX = nx; bestY = ny; }
+            };
+            consider(gx, gy + 1, 20.0f + wy);
+            consider(gx - 1, gy + 1, 12.0f + wy);
+            consider(gx + 1, gy + 1, 12.0f + wy);
+            if (bestX < 0) continue;
+            ++satSurface;
+            totalExcess += excess;
+            maxDryRate = std::max(maxDryRate, por.dryingRate);
+            dripSites.push_back({i, bestX, bestY, excess, score});
+        }
+        lastSaturatedSurface += satSurface;
+        if (totalExcess > kMoistureEps && !dripSites.empty()) {
+            float budget = maxDryRate * kExudeScale * totalExcess * dt;
+            budget = std::min(budget, totalExcess);
+            budget = std::min(budget, kMaxEmitPerTick);
+            if (budget > kMoistureEps) {
+                for (MoistureDripSite &site : dripSites) {
+                    float take = budget * (site.excess / totalExcess);
+                    take = std::min(take, b.moisture[static_cast<size_t>(site.localIndex)]);
+                    if (take <= kMoistureEps) continue;
+                    b.moisture[static_cast<size_t>(site.localIndex)] -= take;
+                    b.pendingDrip += take;
+                    massDirty = true;
+                }
             }
-            if (tx < 0 || bestRoom <= 1.0e-8f) continue;
-            int ti = FluidEngine::ci(tx, ty);
-            float roomNow = std::max(0.0f, 1.0f - fluid.fill[static_cast<size_t>(ti)]);
-            float give = std::min(b.moisture[static_cast<size_t>(i)], mat.dryingRate * dt);
-            give = std::min(give, roomNow);
-            if (give <= 1.0e-8f) continue;
-            b.moisture[static_cast<size_t>(i)] -= give;
-            float cap = thermalCapacity(massKg(fluidForSubstance(SUBSTANCE_WATER).density, give, fluid.config.cellsPerMeter),
-                thermalForSubstance(SUBSTANCE_WATER).specificHeat);
-            fluid.addLiquidFill(ti, give, energyFromTemp(cap, AMBIENT_TEMPERATURE_K));
-            fluid.expectedVolume += give;
-            lastDried += give;
-            massDirty = true;
-            fluid.wakeRegion(tx - 1, ty - 1, tx + 1, ty + 1);
+        }
+        if (b.pendingDrip >= MIN_RENDER_FILL && !dripSites.empty()) {
+            std::sort(dripSites.begin(), dripSites.end(), [](MoistureDripSite const &a, MoistureDripSite const &bSite) {
+                return a.score > bSite.score;
+            });
+            int used[8][2]{};
+            int usedN = 0;
+            auto already = [&](int x, int y) {
+                for (int k = 0; k < usedN; ++k) if (used[k][0] == x && used[k][1] == y) return true;
+                return false;
+            };
+            int sites = 0;
+            for (MoistureDripSite const &site : dripSites) {
+                if (b.pendingDrip < MIN_RENDER_FILL) break;
+                if (sites >= kMaxDripSites) break;
+                if (already(site.destX, site.destY)) continue;
+                if (!cellFree(site.destX, site.destY)) continue;
+                int ti = FluidEngine::ci(site.destX, site.destY);
+                float room = std::max(0.0f, 1.0f - fluid.fill[static_cast<size_t>(ti)]);
+                float give = std::min(b.pendingDrip, std::min(room, MIN_RENDER_FILL * 1.5f));
+                if (give < MIN_RENDER_FILL) continue;
+                b.pendingDrip -= give;
+                fluid.addLiquidFill(ti, give, depositHeat(give));
+                fluid.expectedVolume += give;
+                lastDried += give;
+                ++sites;
+                if (usedN < 8) { used[usedN][0] = site.destX; used[usedN][1] = site.destY; ++usedN; }
+                fluid.wakeRegion(site.destX - 1, site.destY - 1, site.destX + 1, site.destY + 1);
+            }
+            lastDripSites += sites;
         }
         if (massDirty || touchingLiquid) {
             float oldCx = b.comLocalX, oldCy = b.comLocalY;
@@ -2238,6 +2353,12 @@ float RigidBodyEngine::totalSolidMass() const {
 float RigidBodyEngine::totalAbsorbedLiquid() const {
     float s = 0.0f;
     for (RigidBody const &b : bodies) s += b.absorbedLiquid;
+    return s;
+}
+
+float RigidBodyEngine::totalPendingDrip() const {
+    float s = 0.0f;
+    for (RigidBody const &b : bodies) s += b.pendingDrip;
     return s;
 }
 
@@ -2784,6 +2905,7 @@ void RigidBodyEngine::runSolidDiagnostics(FluidEngine &fluid) {
         for (float amount : fluid.fill) s += amount;
         for (SplashParticle const &p : fluid.splashes) s += p.volume;
         s += totalAbsorbedLiquid();
+        s += totalPendingDrip();
         return s;
     };
     auto freeLiquid = [&]() {
@@ -3185,7 +3307,8 @@ void RigidBodyEngine::runMoistureDiagnostics(FluidEngine &fluid) {
         double freeL = freeVol();
         double splashL = splashVol();
         double absL = totalAbsorbedLiquid();
-        double totalL = freeL + absL + splashL;
+        double pendL = totalPendingDrip();
+        double totalL = freeL + absL + splashL + pendL;
         int wetPixels = 0;
         float avgWet = 0.0f, maxWet = 0.0f, mass = 0.0f, cx = 0.0f, cy = 0.0f;
         sample(wetPixels, avgWet, maxWet, mass, cx, cy);
@@ -3202,7 +3325,8 @@ void RigidBodyEngine::runMoistureDiagnostics(FluidEngine &fluid) {
     double free1 = freeVol();
     float abs1 = totalAbsorbedLiquid();
     double splash1 = splashVol();
-    double total1 = free1 + abs1 + splash1;
+    double pend1 = totalPendingDrip();
+    double total1 = free1 + abs1 + splash1 + pend1;
     int wetPixels = 0;
     float avgWet = 0.0f, maxWet = 0.0f, mass1 = 0.0f, cx = 0.0f, cy = 0.0f;
     sample(wetPixels, avgWet, maxWet, mass1, cx, cy);
@@ -3228,11 +3352,11 @@ void RigidBodyEngine::runMoistureDiagnostics(FluidEngine &fluid) {
 
     auto soakMeasure = [&](MaterialId mat, bool rotate) {
         soak(mat, rotate);
-        double t0 = freeVol() + totalAbsorbedLiquid() + splashVol();
+        double t0 = freeVol() + totalAbsorbedLiquid() + splashVol() + totalPendingDrip();
         float a0 = totalAbsorbedLiquid();
         for (int i = 0; i < 180; ++i) tickOnce();
         float a1 = totalAbsorbedLiquid();
-        double t1 = freeVol() + a1 + splashVol();
+        double t1 = freeVol() + a1 + splashVol() + totalPendingDrip();
         return std::tuple<float, float, double, double>(a0, a1, t0, t1);
     };
 
@@ -3263,12 +3387,12 @@ void RigidBodyEngine::runMoistureDiagnostics(FluidEngine &fluid) {
         for (int i : b.occupiedLocal)
             b.moisture[static_cast<size_t>(i)] = materialDef(MATERIAL_WOOD).moistureCapacity * 0.80f;
         computeMassProperties(b);
-        float parentAbs = b.absorbedLiquid;
+        float parentAbs = b.absorbedLiquid + b.pendingDrip;
         int mid = b.maskW / 2;
         for (int ly = 0; ly < b.maskH; ++ly)
             breakBond(0, mid - 1, ly, mid, ly);
         splitDirtyBodies();
-        float childAbs = totalAbsorbedLiquid();
+        float childAbs = totalAbsorbedLiquid() + totalPendingDrip();
         bool split = static_cast<int>(bodies.size()) > 1;
         bool kept = std::abs(childAbs - parentAbs) < 0.08f;
         emit("F_fracture", split && kept,
@@ -3278,6 +3402,214 @@ void RigidBodyEngine::runMoistureDiagnostics(FluidEngine &fluid) {
     }
 
     out << "perf_ms_per_tick\t" << moistureMs << '\n';
+    out << "summary\t" << (failed == 0 ? "PASS" : "FAIL") << '\t' << passed << " passed, " << failed << " failed\n";
+    gravityScale = 1.0f;
+}
+
+void RigidBodyEngine::runMoistureDripDiagnostics(FluidEngine &fluid) {
+    std::ofstream out(miscFile("moisture_drip_diag.tsv"));
+    out << std::setprecision(8);
+    int passed = 0, failed = 0;
+    auto emit = [&](char const *name, bool ok, std::string const &detail) {
+        out << "test\t" << name << '\t' << (ok ? "PASS" : "FAIL") << '\t' << detail << '\n';
+        if (ok) ++passed; else ++failed;
+    };
+    auto splashVol = [&]() {
+        double s = 0.0;
+        for (SplashParticle const &p : fluid.splashes) s += p.volume;
+        return s;
+    };
+    auto freeVol = [&]() {
+        double s = 0.0;
+        for (float amount : fluid.fill) s += amount;
+        return s;
+    };
+    auto totalLiquid = [&]() {
+        return freeVol() + splashVol() + totalAbsorbedLiquid() + totalPendingDrip();
+    };
+    auto tickOnce = [&]() {
+        step(fluid, PHYSICS_DT);
+        fluid.simulationTick();
+        fluid.rebuildActivityAndMetrics();
+    };
+    auto spawnBlock = [&](MaterialId mat, int ox, int oy, int w, int h, float theta, float sat) {
+        clear();
+        fluid.clearWorld();
+        gravityScale = 1.0f;
+        auto wall = [&](int x, int y) { if (FluidEngine::inside(x, y)) fluid.solid[FluidEngine::ci(x, y)] = 1; };
+        for (int x = 20; x <= 180; ++x) wall(x, 112);
+        for (int y = 20; y <= 112; ++y) { wall(20, y); wall(180, y); }
+        std::vector<std::string> rows(static_cast<size_t>(h), std::string(static_cast<size_t>(w), '#'));
+        std::vector<char const *> ptrs;
+        ptrs.reserve(rows.size());
+        for (std::string const &r : rows) ptrs.push_back(r.c_str());
+        spawnPattern(fluid, ox, oy, ptrs.data(), h, mat);
+        if (bodies.empty()) return;
+        RigidBody &b = bodies[0];
+        b.anchored = true;
+        b.sleeping = true;
+        b.vx = b.vy = b.omega = 0.0f;
+        b.theta = theta;
+        ensurePixelState(b);
+        PorousProperties const &por = porousForSubstance(substanceForMaterialId(mat));
+        float cap = por.valid ? por.moistureCapacity : 0.0f;
+        for (int i : b.occupiedLocal) b.moisture[static_cast<size_t>(i)] = cap * sat;
+        b.pendingDrip = 0.0f;
+        computeMassProperties(b);
+        updateAabb(b);
+        syncOccupancy(fluid);
+        fluid.expectedVolume = 0.0;
+        for (float amount : fluid.fill) fluid.expectedVolume += amount;
+        fluid.wakeAllFluidChunks();
+        fluid.enforceSolidBoundaries();
+        fluid.rebuildActivityAndMetrics();
+        syncOccupancy(fluid);
+    };
+    auto sampleWet = [&](int &wetPixels, float &avgWet, float &maxWet) {
+        wetPixels = 0;
+        avgWet = 0.0f;
+        maxWet = 0.0f;
+        int n = 0;
+        double wetSum = 0.0;
+        for (RigidBody const &b : bodies) {
+            for (int i : b.occupiedLocal) {
+                float w = pixelWetness(b, i);
+                wetSum += w;
+                maxWet = std::max(maxWet, w);
+                if (b.moisture[static_cast<size_t>(i)] > 1.0e-4f) ++wetPixels;
+                ++n;
+            }
+        }
+        avgWet = (n > 0) ? static_cast<float>(wetSum / n) : 0.0f;
+    };
+
+    out << "section\tA_soaked_hanging_wood\n";
+    out << "tick\ttime_s\tbody_id\tfree_liquid\tabsorbed_liquid\tsplash_liquid\tpending_drip_liquid\ttotal_liquid\t"
+        "released_this_tick\tcumulative_released\tavg_wetness\tmax_wetness\twet_pixel_count\t"
+        "saturated_surface_pixels\tactive_drip_sites\tbody_mass\n";
+    spawnBlock(MATERIAL_WOOD, 96, 36, 10, 8, 0.0f, 1.0f);
+    double total0 = totalLiquid();
+    double cumRel = 0.0;
+    double relEarly = 0.0, relLate = 0.0;
+    constexpr int kHangTicks = 360;
+    int lastSites = 0;
+    for (int tick = 0; tick <= kHangTicks; ++tick) {
+        if (tick > 0) tickOnce();
+        double freeL = freeVol(), splashL = splashVol();
+        double absL = totalAbsorbedLiquid(), pendL = totalPendingDrip();
+        double totalL = freeL + absL + splashL + pendL;
+        double rel = lastDried;
+        if (tick > 0) cumRel += rel;
+        if (tick > 0 && tick <= 60) relEarly += rel;
+        if (tick > kHangTicks - 60) relLate += rel;
+        int wetPixels = 0;
+        float avgWet = 0.0f, maxWet = 0.0f;
+        sampleWet(wetPixels, avgWet, maxWet);
+        uint32_t bid = bodies.empty() ? 0 : bodies[0].id;
+        float mass = totalSolidMass();
+        out << tick << '\t' << (tick * PHYSICS_DT) << '\t' << bid << '\t' << freeL << '\t' << absL << '\t'
+            << splashL << '\t' << pendL << '\t' << totalL << '\t' << rel << '\t' << cumRel << '\t'
+            << avgWet << '\t' << maxWet << '\t' << wetPixels << '\t' << lastSaturatedSurface << '\t'
+            << lastDripSites << '\t' << mass << '\n';
+        lastSites = lastDripSites;
+    }
+    double total1 = totalLiquid();
+    bool conserved = std::abs(total1 - total0) < 0.12;
+    bool declined = relLate <= relEarly * 0.85f + MIN_RENDER_FILL;
+    bool finite = cumRel > MIN_RENDER_FILL && cumRel < total0 + 1.0;
+    bool notCurtain = lastSites <= kMaxDripSites;
+    emit("A_soaked_hanging_wood", conserved && declined && finite && notCurtain,
+        "cumRel=" + std::to_string(cumRel) + " early=" + std::to_string(relEarly)
+            + " late=" + std::to_string(relLate) + " dTotal=" + std::to_string(total1 - total0)
+            + " lastSites=" + std::to_string(lastSites));
+
+    spawnBlock(MATERIAL_WOOD, 96, 36, 10, 8, 0.0f, 0.70f);
+    double damp0 = totalLiquid();
+    double dampRel = 0.0;
+    for (int i = 0; i < 120; ++i) {
+        tickOnce();
+        dampRel += lastDried;
+    }
+    emit("B_damp_below_threshold", dampRel < 1.0e-5 && std::abs(totalLiquid() - damp0) < 0.08,
+        "released=" + std::to_string(dampRel) + " dTotal=" + std::to_string(totalLiquid() - damp0));
+
+    spawnBlock(MATERIAL_WOOD, 96, 40, 10, 8, 0.78539816f, 1.0f);
+    float aabbY1 = bodies.empty() ? 0.0f : bodies[0].aabbY1;
+    float aabbY0 = bodies.empty() ? 0.0f : bodies[0].aabbY0;
+    float midY = 0.5f * (aabbY0 + aabbY1);
+    double lowMass = 0.0, highMass = 0.0;
+    for (int i = 0; i < 90; ++i) tickOnce();
+    for (int y = 0; y < GH; ++y) for (int x = 0; x < GW; ++x) {
+        float f = fluid.fill[static_cast<size_t>(FluidEngine::ci(x, y))];
+        if (y > midY) lowMass += f; else highMass += f;
+    }
+    for (SplashParticle const &p : fluid.splashes) {
+        if (p.y > midY) lowMass += p.volume; else highMass += p.volume;
+    }
+    emit("C_rotated_45", lowMass > highMass * 1.2 || (lowMass + highMass) < MIN_RENDER_FILL,
+        "low=" + std::to_string(lowMass) + " high=" + std::to_string(highMass));
+
+    spawnBlock(MATERIAL_WOOD, 70, 36, 10, 6, 0.0f, 1.0f);
+    double narrowRel = 0.0;
+    for (int i = 0; i < 60; ++i) { tickOnce(); narrowRel += lastDried; }
+    spawnBlock(MATERIAL_WOOD, 50, 36, 30, 6, 0.0f, 1.0f);
+    double wideRel = 0.0;
+    for (int i = 0; i < 60; ++i) { tickOnce(); wideRel += lastDried; }
+    emit("D_wide_block_budget", wideRel < narrowRel * 2.4 + MIN_RENDER_FILL,
+        "narrow=" + std::to_string(narrowRel) + " wide=" + std::to_string(wideRel));
+
+    spawnBlock(MATERIAL_STONE, 96, 36, 10, 8, 0.0f, 1.0f);
+    double stoneRel = 0.0;
+    for (int i = 0; i < 120; ++i) { tickOnce(); stoneRel += lastDried; }
+    spawnBlock(MATERIAL_WOOD, 96, 36, 10, 8, 0.0f, 1.0f);
+    double woodRel = 0.0;
+    for (int i = 0; i < 120; ++i) { tickOnce(); woodRel += lastDried; }
+    emit("E_stone_weaker", stoneRel < woodRel * 0.55 + MIN_RENDER_FILL,
+        "stone=" + std::to_string(stoneRel) + " wood=" + std::to_string(woodRel));
+
+    spawnBlock(MATERIAL_GLASS, 96, 36, 8, 6, 0.0f, 1.0f);
+    double glassRel = 0.0;
+    for (int i = 0; i < 60; ++i) { tickOnce(); glassRel += lastDried; }
+    spawnBlock(MATERIAL_METAL, 96, 36, 8, 6, 0.0f, 1.0f);
+    double metalRel = 0.0;
+    for (int i = 0; i < 60; ++i) { tickOnce(); metalRel += lastDried; }
+    emit("F_glass_metal_zero", glassRel < 1.0e-7 && metalRel < 1.0e-7,
+        "glass=" + std::to_string(glassRel) + " metal=" + std::to_string(metalRel));
+
+    spawnBlock(MATERIAL_WOOD, 96, 36, 10, 8, 0.0f, 1.0f);
+    if (bodies.empty()) emit("G_fracture_wet", false, "no body");
+    else {
+        double t0 = totalLiquid();
+        float parent = totalAbsorbedLiquid() + totalPendingDrip();
+        RigidBody &b = bodies[0];
+        int mid = b.maskW / 2;
+        for (int ly = 0; ly < b.maskH; ++ly) breakBond(0, mid - 1, ly, mid, ly);
+        splitDirtyBodies();
+        syncOccupancy(fluid);
+        float child = totalAbsorbedLiquid() + totalPendingDrip();
+        double released = 0.0;
+        for (int i = 0; i < 8; ++i) { tickOnce(); released += lastDried; }
+        bool split = static_cast<int>(bodies.size()) > 1;
+        bool kept = std::abs(child - parent) < 0.08f;
+        bool noDump = released < parent * 0.35f + MIN_RENDER_FILL;
+        bool cons = std::abs(totalLiquid() - t0) < 0.12;
+        emit("G_fracture_wet", split && kept && noDump && cons,
+            "bodies=" + std::to_string(bodies.size()) + " dMoist=" + std::to_string(child - parent)
+                + " rel8=" + std::to_string(released) + " dTotal=" + std::to_string(totalLiquid() - t0));
+    }
+
+    spawnBlock(MATERIAL_WOOD, 96, 36, 10, 8, 0.0f, 1.0f);
+    double osc0 = totalLiquid();
+    double rel1 = 0.0, rel2 = 0.0, absTaken = 0.0;
+    for (int i = 0; i < 80; ++i) { tickOnce(); rel1 += lastDried; absTaken += lastAbsorbed; }
+    for (int i = 0; i < 80; ++i) { tickOnce(); rel2 += lastDried; absTaken += lastAbsorbed; }
+    bool notAccelerating = rel2 <= rel1 * 1.05 + MIN_RENDER_FILL;
+    bool noReabsorb = absTaken < MIN_RENDER_FILL;
+    bool consH = std::abs(totalLiquid() - osc0) < 0.12;
+    emit("H_no_oscillation", notAccelerating && noReabsorb && consH,
+        "rel1=" + std::to_string(rel1) + " rel2=" + std::to_string(rel2)
+            + " absorbed=" + std::to_string(absTaken) + " dTotal=" + std::to_string(totalLiquid() - osc0));
+
     out << "summary\t" << (failed == 0 ? "PASS" : "FAIL") << '\t' << passed << " passed, " << failed << " failed\n";
     gravityScale = 1.0f;
 }

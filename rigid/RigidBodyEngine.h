@@ -29,6 +29,8 @@ struct RigidBodyEngine {
     int lastFractureSplits = 0;
     double lastAbsorbed = 0.0;
     double lastDried = 0.0;
+    int lastSaturatedSurface = 0;
+    int lastDripSites = 0;
     std::vector<float> moistureFlux;
 
     RigidBodyEngine();
@@ -73,6 +75,8 @@ struct RigidBodyEngine {
     int totalSolidPixels() const;
     float totalSolidMass() const;
     float totalAbsorbedLiquid() const;
+    float totalPendingDrip() const;
+    void runMoistureDripDiagnostics(FluidEngine &fluid);
 
     bool worldCellOccupied(int x, int y) const;
     MaterialId worldCellMaterial(int x, int y) const;
@@ -91,6 +95,15 @@ struct RigidBodyEngine {
 
 private:
     std::vector<OccupancyConflict> occupancyConflicts;
+    std::vector<uint8_t> moistureFlags;
+    struct MoistureDripSite {
+        int localIndex = 0;
+        int destX = 0;
+        int destY = 0;
+        float excess = 0.0f;
+        float score = 0.0f;
+    };
+    std::vector<MoistureDripSite> dripSites;
 
     void rebuildDerived(RigidBody &b);
     void ensurePixelState(RigidBody &b);
