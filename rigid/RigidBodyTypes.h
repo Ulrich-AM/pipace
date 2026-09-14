@@ -1,5 +1,7 @@
 #pragma once
 
+#include "substance/SubstanceTypes.h"
+
 #include <cstdint>
 #include <vector>
 
@@ -40,6 +42,8 @@ struct StructuralBond {
     bool broken = false;
 };
 
+// Compatibility adapter. Authoritative mechanical/porous/visual RGB live on
+// SubstanceDefinition (substanceForMaterialId -> substanceDef).
 struct MaterialDefinition {
     char const *name;
     float density;   // relative to water density 1.0
@@ -64,21 +68,49 @@ struct MaterialDefinition {
     float wetDensityContribution;
 };
 
+inline MaterialDefinition materialDefinitionFromSubstance(SubstanceDefinition const &s) {
+    MaterialDefinition m{};
+    m.name = s.internalName;
+    m.density = s.mechanical.densityRel;
+    m.colorR = s.visual.colorR;
+    m.colorG = s.visual.colorG;
+    m.colorB = s.visual.colorB;
+    m.friction = s.mechanical.friction;
+    m.restitution = s.mechanical.restitution;
+    m.hardness = s.mechanical.hardness;
+    m.toughness = s.mechanical.toughness;
+    m.brittleness = s.mechanical.brittleness;
+    m.tensileStrength = s.mechanical.tensileStrength;
+    m.compressiveStrength = s.mechanical.compressiveStrength;
+    m.shearStrength = s.mechanical.shearStrength;
+    m.fractureToughness = s.mechanical.fractureToughness;
+    m.porosity = s.porous.porosity;
+    m.permeability = s.porous.permeability;
+    m.moistureCapacity = s.porous.moistureCapacity;
+    m.absorptionRate = s.porous.absorptionRate;
+    m.dryingRate = s.porous.dryingRate;
+    m.wetStrengthMultiplier = s.porous.wetStrengthMultiplier;
+    m.wetFrictionMultiplier = s.porous.wetFrictionMultiplier;
+    m.wetFractureToughnessMultiplier = s.porous.wetFractureToughnessMultiplier;
+    m.wetDensityContribution = s.porous.wetDensityContribution;
+    return m;
+}
+
 inline MaterialDefinition const &materialDef(MaterialId id) {
-    // Compatibility (Prompt 1): rigid mechanical/moisture table. Identity is SubstanceId.
     static MaterialDefinition const defs[MATERIAL_COUNT] = {
-        {"empty", 0.00f, 0, 0, 0,     0.00f, 0.00f, 0.00f, 0.00f, 0.00f, 0.00f, 0.00f, 0.00f, 0.00f, 0.00f, 0.00f, 0.00f, 0.00f, 0.00f, 1.00f, 1.00f, 1.00f, 0.00f},
-        {"wood",  0.45f, 158, 112, 62, 0.48f, 0.08f, 0.42f, 0.52f, 0.34f, 0.55f, 0.70f, 0.48f, 0.50f, 0.55f, 0.68f, 0.62f, 0.26f, 0.0010f, 0.62f, 1.30f, 0.70f, 0.00f},
-        {"stone", 2.20f, 118, 122, 128, 0.55f, 0.06f, 1.35f, 1.05f, 0.28f, 1.35f, 1.80f, 1.10f, 0.88f, 0.08f, 0.08f, 0.12f, 0.040f, 0.0006f, 0.92f, 1.05f, 0.95f, 0.00f},
-        {"glass", 2.50f, 168, 204, 214, 0.22f, 0.05f, 1.75f, 0.16f, 0.92f, 0.32f, 1.40f, 0.28f, 0.12f, 0.00f, 0.00f, 0.00f, 0.00f, 0.00f, 1.00f, 1.00f, 1.00f, 0.00f},
-        {"metal", 7.80f, 148, 152, 158, 0.38f, 0.12f, 2.10f, 1.85f, 0.12f, 2.40f, 2.80f, 1.90f, 1.65f, 0.00f, 0.00f, 0.00f, 0.00f, 0.00f, 1.00f, 1.00f, 1.00f, 0.00f},
+        materialDefinitionFromSubstance(substanceDef(substanceForMaterialId(0))),
+        materialDefinitionFromSubstance(substanceDef(substanceForMaterialId(1))),
+        materialDefinitionFromSubstance(substanceDef(substanceForMaterialId(2))),
+        materialDefinitionFromSubstance(substanceDef(substanceForMaterialId(3))),
+        materialDefinitionFromSubstance(substanceDef(substanceForMaterialId(4))),
     };
     if (id >= MATERIAL_COUNT) return defs[0];
     return defs[id];
 }
 
 inline bool materialIsAbsorbent(MaterialId id) {
-    return materialDef(id).moistureCapacity > 1.0e-5f && materialDef(id).porosity > 1.0e-5f;
+    PorousProperties const &p = porousForSubstance(substanceForMaterialId(id));
+    return p.valid && p.moistureCapacity > 1.0e-5f && p.porosity > 1.0e-5f;
 }
 
 struct PixelRun {

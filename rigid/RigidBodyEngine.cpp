@@ -2203,8 +2203,8 @@ void RigidBodyEngine::processMoisture(FluidEngine &fluid, float dt) {
             give = std::min(give, roomNow);
             if (give <= 1.0e-8f) continue;
             b.moisture[static_cast<size_t>(i)] -= give;
-            float cap = thermalCapacity(massKg(fluid.config.water.density, give, fluid.config.cellsPerMeter),
-                fluid.config.water.thermal.specificHeat);
+            float cap = thermalCapacity(massKg(fluidForSubstance(SUBSTANCE_WATER).density, give, fluid.config.cellsPerMeter),
+                thermalForSubstance(SUBSTANCE_WATER).specificHeat);
             fluid.addLiquidFill(ti, give, energyFromTemp(cap, AMBIENT_TEMPERATURE_K));
             fluid.expectedVolume += give;
             lastDried += give;

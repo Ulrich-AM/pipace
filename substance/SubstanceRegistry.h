@@ -3,17 +3,8 @@
 #include "substance/SubstanceTypes.h"
 #include "rigid/RigidBodyTypes.h"
 
-// Canonical built-in table. Indexed by SubstanceId. Prompt 1: compile-time IDs only.
-extern SubstanceDefinition const kBuiltinSubstances[SUBSTANCE_COUNT];
-
-inline bool validSubstance(SubstanceId id) {
-    return id < SUBSTANCE_COUNT;
-}
-
-inline SubstanceDefinition const &substanceDef(SubstanceId id) {
-    if (id >= SUBSTANCE_COUNT) return kBuiltinSubstances[SUBSTANCE_NONE];
-    return kBuiltinSubstances[id];
-}
+// Canonical built-in table lives in SubstanceRegistry.cpp (function-local static).
+// Access: substanceDef(id) and the grouped accessors in SubstanceTypes.h.
 
 inline SubstanceId substanceForMaterial(MaterialId material) {
     return substanceForMaterialId(material);

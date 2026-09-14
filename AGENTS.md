@@ -30,19 +30,25 @@ PIPACE/
   thermal/
     ThermalTypes.h / ThermalConfig.h / ThermalEngine.h/.cpp  # heat storage, conduction, sleep
   fluid/
-    FluidTypes.h           # Grid constants, enums, SplashParticle, LiquidProperties, TimingAverages
-    FluidConfig.h          # FluidConfig (density/viscosity/surface tension, advection, CFL, etc.)
+    FluidTypes.h           # Grid constants, enums, SplashParticle, LiquidProperties alias, TimingAverages
+    FluidConfig.h          # FluidConfig (compatibility copies of water/honey fluid tables)
     FluidEngine.h/.cpp     # Owns all fluid arrays + simulation stages (behavior-preserving extract)
   rigid/
-    RigidBodyTypes.h       # MaterialId, pixel-mask RigidBody, merged runs, contacts
+    RigidBodyTypes.h       # MaterialId, pixel-mask RigidBody, MaterialDefinition adapter
     RigidBodyEngine.h/.cpp # Drawable pixel-native rigid bodies + world/fluid coupling
   substance/
-    SubstanceTypes.h / SubstanceRegistry.h/.cpp  # SubstanceId identity + built-in registry
+    SubstanceProperties.h  # Grouped intrinsic properties (mechanical/fluid/thermal/phase/porous/…)
+    SubstanceTypes.h / SubstanceRegistry.h/.cpp  # SubstanceId + canonical built-in table
   CMakeLists.txt / build.bat / run.bat
   README.md
   AGENTS.md
   misc/                   # notes, changelogs, diagnostic TSV dumps
 ```
+
+Physical properties are canonical on `SubstanceDefinition` grouped structs
+(`mechanical` / `fluid` / `thermal` / `phase` / `porous`). `MaterialDefinition`,
+`FluidConfig.water` / `.honey`, and `k*Thermal()` are compatibility adapters that
+delegate into the substance table. Do not add new duplicate property tables.
 
 Build: `run.bat` or CMake → `build/pipace.exe`. Headless: `--benchmark`, `--scale-benchmark`, `--rigid-benchmark`, `--thread-benchmark`, `--liquid-diag`. Grid size via `PIPACE_GRID_WIDTH` / `PIPACE_GRID_HEIGHT` (default 200×120). SETTINGS → Simulation threads (Auto / 1 / 2 / 4 / 6 / 8). Auto is 1 worker on the default grid; see `misc/THREAD_PASS_NOTES.md`.
 

@@ -449,7 +449,7 @@ void ThermalEngine::conductActive(FluidEngine &fluid, RigidBodyEngine &rigid, Ga
         if (fluid.fill[static_cast<size_t>(i)] > 1.0e-6f) {
             energy = &fluid.liquidHeat[static_cast<size_t>(i)];
             cap = liquidCapacity(fluid, i);
-            k = fluid.config.water.thermal.conductivity;
+            k = thermalForSubstance(SUBSTANCE_WATER).conductivity;
             return cap > MIN_THERMAL_CAPACITY;
         }
         if (gas.amount[static_cast<size_t>(i)] > GAS_MIN_AMOUNT) {

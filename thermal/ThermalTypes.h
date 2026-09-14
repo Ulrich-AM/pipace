@@ -25,95 +25,20 @@
 // in ThermalEngine; it is not enabled in this update.
 //
 // Melting/boiling/latent fields are metadata only — no phase change yet.
+// Authoritative tables: substanceDef(id).thermal  (thermalForSubstance).
 
-constexpr float AMBIENT_TEMPERATURE_K = 293.15f;
-constexpr float WATER_DENSITY_KG_M3 = 1000.0f;
-constexpr float AIR_DENSITY_KG_M3 = 1.204f;
-constexpr float MIN_THERMAL_CAPACITY = 1.0e-6f; // J/K
-constexpr float MIN_THERMAL_MASS_KG = 1.0e-9f;
-constexpr float MIN_SAFE_TEMPERATURE_K = 0.05f;
-constexpr float MAX_SAFE_TEMPERATURE_K = 1.0e7f;
+// ThermalProperties and ambient/density constants live in substance/SubstanceProperties.h.
 
-struct ThermalProperties {
-    float specificHeat = 1000.0f;   // J/(kg·K)
-    float conductivity = 0.026f;    // W/(m·K) physical
-    // Future-use only (phase-change update). Solver must ignore these.
-    float meltingPointK = 0.0f;
-    float boilingPointK = 0.0f;
-    float latentFusion = 0.0f;      // J/kg
-    float latentVapor = 0.0f;       // J/kg
-    // Hooks only: thermal expansion does not resize bodies; softening/melting do not run.
-    float expansionCoeff = 0.0f;    // 1/K (linear solids, volumetric fluids)
-    float softeningTempK = 0.0f;
-};
-
-// Approximate 20 °C engineering-table values, not laboratory certificates.
-// Relative behavior is the point: metal ≫ stone/glass ≫ wood ≫ water ≫ air.
-inline ThermalProperties const &kWaterThermal() {
-    // Water at ~20 °C: cp ≈ 4184 J/(kg·K), k ≈ 0.598 W/(m·K).
-    // expansionCoeff is volumetric (~2.07e-4 /K near 20 °C). The 4 °C density
-    // maximum is NOT modeled — see LiquidProperties::densityAtTemperature.
-    static ThermalProperties const p{4184.0f, 0.598f, 273.15f, 373.15f, 3.34e5f, 2.26e6f, 2.07e-4f, 0.0f};
-    return p;
-}
-inline ThermalProperties const &kHoneyThermal() {
-    // Kitchen honey ballpark: denser, lower cp than water, similar k. Not a lab curve.
-    static ThermalProperties const p{2200.0f, 0.50f, 0.0f, 0.0f, 0.0f, 0.0f, 2.07e-4f, 0.0f};
-    return p;
-}
-inline ThermalProperties const &kAirThermal() {
-    // Dry air ~20 °C, 1 atm: cp ≈ 1005 J/(kg·K), k ≈ 0.026 W/(m·K).
-    // expansionCoeff ≈ 1/T_amb for an ideal gas; unused by the isothermal pressure solver.
-    static ThermalProperties const p{1005.0f, 0.026f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f / AMBIENT_TEMPERATURE_K, 0.0f};
-    return p;
-}
-inline ThermalProperties const &kWoodThermal() {
-    // Dry softwood ballpark: cp ~1700, k ~0.12, α ~5e-6 /K. Softening ~450 K is pyrolysis-ish metadata.
-    static ThermalProperties const p{1700.0f, 0.12f, 0.0f, 0.0f, 0.0f, 0.0f, 5.0e-6f, 450.0f};
-    return p;
-}
-inline ThermalProperties const &kStoneThermal() {
-    // Granite-like: cp ~880, k ~1.7, α ~8e-6 /K, melt ~1200 °C.
-    static ThermalProperties const p{880.0f, 1.70f, 1473.0f, 0.0f, 0.0f, 0.0f, 8.0e-6f, 0.0f};
-    return p;
-}
-inline ThermalProperties const &kGlassThermal() {
-    // Soda-lime glass: cp ~840, k ~1.0, α ~9e-6 /K, softening ~800 K, melt ~1700 K.
-    static ThermalProperties const p{840.0f, 1.00f, 1700.0f, 0.0f, 0.0f, 0.0f, 9.0e-6f, 800.0f};
-    return p;
-}
-inline ThermalProperties const &kMetalThermal() {
-    // Carbon-steel ballpark: cp ~490, k ~50 (between stainless and mild steel), α ~12e-6 /K.
-    static ThermalProperties const p{490.0f, 50.0f, 1811.0f, 0.0f, 0.0f, 0.0f, 1.2e-5f, 1000.0f};
-    return p;
-}
-inline ThermalProperties const &kWallThermal() {
-    // Compatibility: static world walls use the stone thermal table (SUBSTANCE_STONE).
-    return kStoneThermal();
-}
-inline ThermalProperties const &kEmptyThermal() {
-    static ThermalProperties const p{1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
-    return p;
-}
-
-inline ThermalProperties const &thermalForSubstance(SubstanceId id) {
-    switch (id) {
-        case SUBSTANCE_WATER: return kWaterThermal();
-        case SUBSTANCE_HONEY: return kHoneyThermal();
-        case SUBSTANCE_AIR: return kAirThermal();
-        case SUBSTANCE_WOOD: return kWoodThermal();
-        case SUBSTANCE_STONE: return kStoneThermal();
-        case SUBSTANCE_GLASS: return kGlassThermal();
-        case SUBSTANCE_METAL: return kMetalThermal();
-        default: return kEmptyThermal();
-    }
-}
-
-// Compatibility (Prompt 1): MaterialId -> SubstanceId -> thermal table.
-// Prefer thermalForSubstance at new call sites. Constants are unchanged.
-inline ThermalProperties const &thermalForMaterial(uint16_t materialId) {
-    return thermalForSubstance(substanceForMaterialId(materialId));
-}
+// Compatibility wrappers. Authoritative: thermalForSubstance / substanceDef(id).thermal.
+inline ThermalProperties const &kWaterThermal() { return thermalForSubstance(SUBSTANCE_WATER); }
+inline ThermalProperties const &kHoneyThermal() { return thermalForSubstance(SUBSTANCE_HONEY); }
+inline ThermalProperties const &kAirThermal() { return thermalForSubstance(SUBSTANCE_AIR); }
+inline ThermalProperties const &kWoodThermal() { return thermalForSubstance(SUBSTANCE_WOOD); }
+inline ThermalProperties const &kStoneThermal() { return thermalForSubstance(SUBSTANCE_STONE); }
+inline ThermalProperties const &kGlassThermal() { return thermalForSubstance(SUBSTANCE_GLASS); }
+inline ThermalProperties const &kMetalThermal() { return thermalForSubstance(SUBSTANCE_METAL); }
+inline ThermalProperties const &kWallThermal() { return thermalForSubstance(SUBSTANCE_STONE); }
+inline ThermalProperties const &kEmptyThermal() { return thermalForSubstance(SUBSTANCE_NONE); }
 
 inline float cellLengthM(float cellsPerMeter) {
     float cpm = cellsPerMeter > 0.1f ? cellsPerMeter : 4.0f;

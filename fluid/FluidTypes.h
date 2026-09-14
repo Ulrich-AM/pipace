@@ -107,39 +107,8 @@ inline char const *velocityAdvectionName(VelocityAdvection mode) {
     return "sl";
 }
 
-struct LiquidProperties {
-    float density;          // relative to water at densityRefTempK
-    float viscosity;        // kinematic-ish sandbox visc at viscRefTempK
-    float surfaceTension;
-    ThermalProperties thermal = kWaterThermal();
-    float viscRefTempK = AMBIENT_TEMPERATURE_K;
-    // mu(T) = viscosity * exp(A * (1/T - 1/Tref)). A ≈ 1800 K roughly doubles
-    // water viscosity from 20 °C to 0 °C. Not a lab curve; no negative viscosity.
-    float viscArrheniusK = 1800.0f;
-    float densityRefTempK = AMBIENT_TEMPERATURE_K;
-    // Linear expansivity around lab T. Water's density maximum near 4 °C is NOT modeled.
-    float densityExpansivity = 2.07e-4f;
-
-    float viscosityAtTemperature(float temperatureK) const {
-        float T = temperatureK;
-        if (!(T > 1.0f) || !std::isfinite(T)) T = viscRefTempK > 1.0f ? viscRefTempK : AMBIENT_TEMPERATURE_K;
-        float Tref = viscRefTempK > 1.0f ? viscRefTempK : AMBIENT_TEMPERATURE_K;
-        float mu = viscosity * std::exp(viscArrheniusK * (1.0f / T - 1.0f / Tref));
-        if (!std::isfinite(mu) || mu < 0.0f) return 0.0f;
-        return mu;
-    }
-
-    // Data-layer only until the pressure solver can take variable density safely.
-    // |ΔT| is clamped so a plasma-range T cannot collapse mass if this is called early.
-    float densityAtTemperature(float temperatureK) const {
-        float T = std::isfinite(temperatureK) ? temperatureK : densityRefTempK;
-        float Tref = densityRefTempK > 1.0f ? densityRefTempK : AMBIENT_TEMPERATURE_K;
-        float dT = std::clamp(T - Tref, -80.0f, 200.0f);
-        float rho = density * (1.0f - densityExpansivity * dT);
-        if (!std::isfinite(rho)) return density;
-        return std::max(0.05f * std::max(0.0f, density), rho);
-    }
-};
+// Compatibility name. Authoritative liquid tables: fluidForSubstance(id).
+using LiquidProperties = FluidProperties;
 
 struct SplashParticle {
     float x = 0.0f, y = 0.0f;

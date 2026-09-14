@@ -2,18 +2,15 @@
 
 #include "FluidTypes.h"
 
+// Compatibility snapshots of SUBSTANCE_WATER / SUBSTANCE_HONEY fluid tables.
+// Authoritative values live on SubstanceDefinition. Do not mutate these copies.
 inline LiquidProperties kHoneyLiquid() {
-    LiquidProperties p{1.42f, 0.35f, 0.080f};
-    p.thermal = kHoneyThermal();
-    p.viscArrheniusK = 2500.0f;
-    return p;
+    return fluidForSubstance(SUBSTANCE_HONEY);
 }
 
 struct FluidConfig {
-    // Compatibility (Prompt 1): these are the current liquid-phase tables for
-    // SUBSTANCE_WATER / SUBSTANCE_HONEY. Identity is SubstanceId.
-    LiquidProperties water{1.0f, 0.006f, 0.055f};
-    LiquidProperties honey = kHoneyLiquid();
+    LiquidProperties water = fluidForSubstance(SUBSTANCE_WATER);
+    LiquidProperties honey = fluidForSubstance(SUBSTANCE_HONEY);
     float cellsPerMeter = 4.0f;
     float gravityMetersPerSecondSquared = 9.81f;
     float maxVelocity = 75.0f;             // prevents pathological CFL spikes

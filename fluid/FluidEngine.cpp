@@ -167,22 +167,25 @@ SubstanceId FluidEngine::dominantLiquidSubstance(int index) const {
 
 float FluidEngine::mixDensity(int index) const {
     float h = honeyFraction(index);
-    return (1.0f - h) * config.water.density + h * config.honey.density;
+    return (1.0f - h) * fluidForSubstance(SUBSTANCE_WATER).density
+        + h * fluidForSubstance(SUBSTANCE_HONEY).density;
 }
 
 float FluidEngine::mixSpecificHeat(int index) const {
     float h = honeyFraction(index);
-    return (1.0f - h) * config.water.thermal.specificHeat + h * config.honey.thermal.specificHeat;
+    return (1.0f - h) * thermalForSubstance(SUBSTANCE_WATER).specificHeat
+        + h * thermalForSubstance(SUBSTANCE_HONEY).specificHeat;
 }
 
 float FluidEngine::mixViscosity(int index) const {
     float f = fill[static_cast<size_t>(index)];
-    if (f < MIN_ACTIVE_FILL) return config.water.viscosity;
+    FluidProperties const &water = fluidForSubstance(SUBSTANCE_WATER);
+    if (f < MIN_ACTIVE_FILL) return water.viscosity;
     float h = honeyFraction(index);
     float cap = thermalCapacity(massKg(mixDensity(index), f, config.cellsPerMeter), mixSpecificHeat(index));
     float T = tempFromEnergy(liquidHeat[static_cast<size_t>(index)], cap);
-    float muW = config.water.viscosityAtTemperature(T);
-    float muH = config.honey.viscosityAtTemperature(T);
+    float muW = water.viscosityAtTemperature(T);
+    float muH = fluidForSubstance(SUBSTANCE_HONEY).viscosityAtTemperature(T);
     float a = std::log(std::max(1.0e-8f, muW));
     float b = std::log(std::max(1.0e-8f, muH));
     return std::exp((1.0f - h) * a + h * b);
@@ -190,7 +193,8 @@ float FluidEngine::mixViscosity(int index) const {
 
 float FluidEngine::mixSurfaceTension(int index) const {
     float h = honeyFraction(index);
-    return (1.0f - h) * config.water.surfaceTension + h * config.honey.surfaceTension;
+    return (1.0f - h) * fluidForSubstance(SUBSTANCE_WATER).surfaceTension
+        + h * fluidForSubstance(SUBSTANCE_HONEY).surfaceTension;
 }
 
 void FluidEngine::applyCarry(int index, LiquidCarry const &c) {
@@ -217,8 +221,10 @@ LiquidCarry splitCarry(LiquidCarry &src, float placed, float remaining) {
 
 LiquidCarry ambientCarry(FluidEngine const &eng, float placed, bool asHoney) {
     LiquidCarry c{};
-    LiquidProperties const &liq = asHoney ? eng.config.honey : eng.config.water;
-    float cap = thermalCapacity(massKg(liq.density, placed, eng.config.cellsPerMeter), liq.thermal.specificHeat);
+    SubstanceId sid = substanceForLiquidPaint(asHoney);
+    FluidProperties const &liq = fluidForSubstance(sid);
+    ThermalProperties const &th = thermalForSubstance(sid);
+    float cap = thermalCapacity(massKg(liq.density, placed, eng.config.cellsPerMeter), th.specificHeat);
     c.heat = energyFromTemp(cap, AMBIENT_TEMPERATURE_K);
     if (asHoney) c.honey = placed;
     return c;
@@ -275,7 +281,8 @@ void FluidEngine::seedAmbientHeat() {
             honey[static_cast<size_t>(i)] = 0.0f;
         }
         if (solid[static_cast<size_t>(i)]) {
-            float cap = thermalCapacity(massKg(2.20f, 1.0f, config.cellsPerMeter), kWallThermal().specificHeat);
+            float cap = thermalCapacity(massKg(mechanicalForSubstance(SUBSTANCE_STONE).densityRel, 1.0f, config.cellsPerMeter),
+                thermalForSubstance(SUBSTANCE_STONE).specificHeat);
             solidHeat[static_cast<size_t>(i)] = energyFromTemp(cap, AMBIENT_TEMPERATURE_K);
         } else {
             solidHeat[static_cast<size_t>(i)] = 0.0f;
@@ -2145,9 +2152,10 @@ void FluidEngine::paintDisc(int cx, int cy, Tool tool, int brushRadius, LiquidPa
             if (solid[index]) { solid[index] = 0; solidHeat[index] = 0.0f; }
             float added = 1.0f - fill[index];
             if (added > 0.0f) {
-                LiquidProperties const &liq = paint.asHoney ? config.honey : config.water;
+                FluidProperties const &liq = fluidForSubstance(paint.substance());
+                ThermalProperties const &th = thermalForSubstance(paint.substance());
                 float cap = thermalCapacity(massKg(liq.density, added, config.cellsPerMeter),
-                    liq.thermal.specificHeat);
+                    th.specificHeat);
                 liquidHeat[index] += energyFromTemp(cap, AMBIENT_TEMPERATURE_K);
                 fill[index] = 1.0f;
                 if (paint.asHoney) honey[index] += added;
@@ -2166,7 +2174,8 @@ void FluidEngine::paintDisc(int cx, int cy, Tool tool, int brushRadius, LiquidPa
             LiquidCarry carry{};
             if (displaced > 0.0f) carry = extractVolume(index, displaced);
             solid[index] = 1;
-            float cap = thermalCapacity(massKg(2.20f, 1.0f, config.cellsPerMeter), kWallThermal().specificHeat);
+            float cap = thermalCapacity(massKg(mechanicalForSubstance(SUBSTANCE_STONE).densityRel, 1.0f, config.cellsPerMeter),
+                thermalForSubstance(SUBSTANCE_STONE).specificHeat);
             solidHeat[index] = energyFromTemp(cap, AMBIENT_TEMPERATURE_K);
             if (displaced > 0.0f) {
                 float remainder = depositVolume(x + 0.5f, y - 0.5f, displaced, 0.0f, -2.0f, &carry);

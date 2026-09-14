@@ -636,6 +636,18 @@ void drawShell(HDC dc, ShellState &shell, View const &view) {
             SubstanceDefinition const &def = substanceDef(id);
             ins(trf("ins_substance", tr(def.displayNameKey)));
             ins(trf("ins_substance_id", std::to_wstring(def.id)));
+            if (def.mechanical.valid)
+                ins(trf("ins_density", shortFloat(def.mechanical.densityRel, 2)));
+            if (def.fluid.valid) {
+                ins(trf("ins_density", shortFloat(def.fluid.density, 2)));
+                ins(trf("ins_viscosity", shortFloat(def.fluid.viscosity, 3)));
+            }
+            if (def.thermal.valid)
+                ins(trf("ins_specific_heat", shortFloat(def.thermal.specificHeat, 0)));
+            if (def.phase.meltingPointK > 1.0f)
+                ins(trf("ins_melting_point", shortFloat(def.phase.meltingPointK, 2)));
+            if (def.phase.boilingPointK > 1.0f)
+                ins(trf("ins_boiling_point", shortFloat(def.phase.boilingPointK, 2)));
         };
         if (rg && view.gas) {
             ThermalCellSample s = ThermalEngine::sampleCell(*e, *rg, *view.gas, hx, hy);
@@ -692,7 +704,7 @@ void drawShell(HDC dc, ShellState &shell, View const &view) {
             float localM = 0.0f;
             if (hi < static_cast<int>(rg->occupantMoisture.size()))
                 localM = rg->occupantMoisture[static_cast<size_t>(hi)];
-            float cap = materialDef(mat).moistureCapacity;
+            float cap = porousForSubstance(substanceForMaterial(mat)).moistureCapacity;
             ins(trf("ins_local_moisture", shortFloat(localM, 3)));
             ins(trf("ins_moisture_cap", shortFloat(cap, 3)));
             float matD = 0.0f, bondD = 0.0f, strength = 0.0f, crack = 0.0f, wet = 0.0f;

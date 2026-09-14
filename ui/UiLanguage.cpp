@@ -233,6 +233,11 @@ void seedEnglish() {
     set("ins_mat_none", L"(none)");
     set("ins_substance", L"Substance: {0}");
     set("ins_substance_id", L"Substance ID: {0}");
+    set("ins_density", L"Density: {0}");
+    set("ins_viscosity", L"Viscosity: {0}");
+    set("ins_specific_heat", L"Specific heat: {0}");
+    set("ins_melting_point", L"Melting point: {0} K");
+    set("ins_boiling_point", L"Boiling point: {0} K");
     set("ins_pressure", L"Pressure: {0}");
     set("ins_surface", L"Surface: {0}");
     set("ins_volume", L"Volume {0} / {1}");

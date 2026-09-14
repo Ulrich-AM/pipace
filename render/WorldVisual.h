@@ -21,8 +21,8 @@ struct WorldLook {
     float noiseAmount = 1.0f; // 0..2, 1 = 100%
 };
 
-// Cosmetic only. Physics lives on MaterialDefinition / LiquidProperties.
-// Physics must not include this header for substance identity.
+// Cosmetic only. Physics lives on SubstanceDefinition grouped properties.
+// Physics must not include this header (no MaterialVisual in engines).
 struct MaterialVisual {
     int r = 128;
     int g = 128;
@@ -44,11 +44,11 @@ inline MaterialVisual const kVisualHoney{176, 110, 22, 0.09f, 0.50f, 0.65f, true
 // Compatibility (Prompt 1): rigid MaterialId visual. Prefer visualForSubstance
 // when the caller already has a SubstanceId.
 inline MaterialVisual visualForSolid(MaterialId id) {
-    MaterialDefinition const &mat = materialDef(id);
+    SubstanceVisualMetadata const &vis = substanceDef(substanceForMaterialId(id)).visual;
     MaterialVisual v;
-    v.r = mat.colorR;
-    v.g = mat.colorG;
-    v.b = mat.colorB;
+    v.r = vis.colorR;
+    v.g = vis.colorG;
+    v.b = vis.colorB;
     v.glowEligible = false;
     v.glowStrength = 0.0f;
     v.alphaResponse = 0.0f;

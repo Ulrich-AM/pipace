@@ -24,5 +24,6 @@ struct GasConfig {
     float brushAtmPerSec = 2.0f;   // pressurize/depressurize at Power 1
     float brushMaxAtm = 8.0f;
     GasSimMode simMode = GasSimMode::Full;
-    ThermalProperties thermal = kAirThermal();
+    // Ambient gas identity is SUBSTANCE_AIR. Authoritative: thermalForSubstance.
+    ThermalProperties thermal = thermalForSubstance(SUBSTANCE_AIR);
 };
