@@ -97,6 +97,10 @@ void runSubstancePhaseDiagnostics(FluidEngine &fluid, RigidBodyEngine &rigid, Ga
     emit("no_steam_id", substanceFromInternalName("steam") == SUBSTANCE_NONE, "");
     emit("no_current_phase_on_def", true, "SubstanceDefinition stores capability flags only");
     emit("water_has_fluid", hasFluidProperties(SUBSTANCE_WATER) && hasPropertiesForPhase(SUBSTANCE_WATER, MatterPhase::Liquid), "");
+    emit("water_has_mechanical_ice",
+        hasMechanicalProperties(SUBSTANCE_WATER) && hasPropertiesForPhase(SUBSTANCE_WATER, MatterPhase::Solid)
+            && rigidIdentityForMaterial(MATERIAL_WATER_SOLID).substance == SUBSTANCE_WATER
+            && rigidIdentityForMaterial(MATERIAL_WATER_SOLID).phase == MatterPhase::Solid, "");
     emit("metal_has_mechanical", hasMechanicalProperties(SUBSTANCE_METAL) && hasPropertiesForPhase(SUBSTANCE_METAL, MatterPhase::Solid), "");
     emit("air_has_gas", hasGasProperties(SUBSTANCE_AIR), "");
     emit("plasma_unsupported", !supportsPhase(SUBSTANCE_WATER, MatterPhase::Plasma), "");

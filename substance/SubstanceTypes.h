@@ -195,16 +195,29 @@ inline FluidProperties const &sandboxReferenceLiquid() {
     return fluidForSubstance(SUBSTANCE_WATER);
 }
 
-// MaterialId lives in rigid/RigidBodyTypes.h (0 empty, 1 wood, 2 stone, 3 glass, 4 metal).
-// Numeric bridge so thermal/fluid can map without including rigid headers.
+// MaterialId lives in rigid/RigidBodyTypes.h (0 empty, 1 wood, 2 stone, 3 glass, 4 metal,
+// 5 water-solid). Numeric bridge so thermal/fluid can map without including rigid headers.
 inline SubstanceId substanceForMaterialId(uint16_t materialId) {
     switch (materialId) {
         case 1: return SUBSTANCE_WOOD;
         case 2: return SUBSTANCE_STONE;
         case 3: return SUBSTANCE_GLASS;
         case 4: return SUBSTANCE_METAL;
+        case 5: return SUBSTANCE_WATER; // MATERIAL_WATER_SOLID — still WATER
         default: return SUBSTANCE_NONE;
     }
+}
+
+inline float solidPhaseSpecificHeat(SubstanceId id) {
+    float v = thermalForSubstance(id).solidSpecificHeat;
+    if (v > 1.0f) return v;
+    return thermalForSubstance(id).specificHeat;
+}
+
+inline float solidPhaseConductivity(SubstanceId id) {
+    float v = thermalForSubstance(id).solidConductivity;
+    if (v > 0.0f) return v;
+    return thermalForSubstance(id).conductivity;
 }
 
 inline MatterIdentity rigidIdentityForMaterial(uint16_t materialId) {

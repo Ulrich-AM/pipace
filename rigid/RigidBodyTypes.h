@@ -11,9 +11,10 @@ constexpr MaterialId MATERIAL_WOOD = 1;
 constexpr MaterialId MATERIAL_STONE = 2;
 constexpr MaterialId MATERIAL_GLASS = 3;
 constexpr MaterialId MATERIAL_METAL = 4;
-constexpr MaterialId MATERIAL_COUNT = 5;
+constexpr MaterialId MATERIAL_WATER_SOLID = 5; // compatibility mask for SUBSTANCE_WATER + Solid
+constexpr MaterialId MATERIAL_COUNT = 6;
 // Rigid source masks still store MaterialId. Map to engine identity with
-// substanceForMaterial(). Not a second property database.
+// substanceForMaterial(). MATERIAL_WATER_SOLID is not a SubstanceId.
 
 enum class StructuralDamageType : uint8_t {
     Impact = 0,
@@ -104,6 +105,7 @@ inline MaterialDefinition const &materialDef(MaterialId id) {
         materialDefinitionFromSubstance(substanceDef(substanceForMaterialId(2))),
         materialDefinitionFromSubstance(substanceDef(substanceForMaterialId(3))),
         materialDefinitionFromSubstance(substanceDef(substanceForMaterialId(4))),
+        materialDefinitionFromSubstance(substanceDef(substanceForMaterialId(5))),
     };
     if (id >= MATERIAL_COUNT) return defs[0];
     return defs[id];
@@ -172,6 +174,7 @@ struct RigidBody {
     std::vector<float> materialDamage; // 0 intact, 1 degraded substance (pixels remain)
     std::vector<float> moisture;       // absorbed liquid mass per pixel
     std::vector<float> heat;           // Joules per local source pixel
+    std::vector<float> solidRemain;    // 0..1 remaining solid fraction (ice partial melt)
     std::vector<StructuralBond> bondsRight; // (x,y) -> (x+1,y)
     std::vector<StructuralBond> bondsDown;  // (x,y) -> (x,y+1)
     std::vector<PixelRun> runs;

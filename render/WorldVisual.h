@@ -40,6 +40,7 @@ inline MaterialVisual const kVisualVoid{10, 17, 28, 0.0f, 0.0f, 0.0f, false, 0.0
 inline MaterialVisual const kVisualWall{96, 100, 108, 0.18f, 0.28f, 0.40f, false, 0.0f, 0.28f, 0.0f};
 inline MaterialVisual const kVisualWater{22, 126, 214, 0.10f, 0.55f, 0.72f, true, 0.85f, 0.30f, 1.0f};
 inline MaterialVisual const kVisualHoney{176, 110, 22, 0.09f, 0.50f, 0.65f, true, 0.80f, 0.28f, 1.0f};
+inline MaterialVisual const kVisualIce{186, 226, 242, 0.07f, 0.36f, 0.58f, false, 0.0f, 0.20f, 0.35f};
 
 // Rigid MaterialId visual adapter. Prefer visualForSubstance when the caller
 // already has a SubstanceId.
@@ -76,6 +77,8 @@ inline MaterialVisual visualForSolid(MaterialId id) {
         v.depthStrength = 0.46f;
         v.realisticDetail = 0.70f;
         v.outlineDarken = 0.26f;
+    } else if (id == MATERIAL_WATER_SOLID) {
+        return kVisualIce;
     }
     return v;
 }

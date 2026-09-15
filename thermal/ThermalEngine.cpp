@@ -43,6 +43,8 @@ void ThermalEngine::clear() {
     std::fill(chunkActivity.begin(), chunkActivity.end(), 0);
     std::fill(chunkQuietTicks.begin(), chunkQuietTicks.end(), 0);
     work = ThermalWorkCounts{};
+    thermalEnergyEscaped = 0.0;
+    thermalEnergyEntered = 0.0;
     tickNo = 0;
 }
 
@@ -122,8 +124,11 @@ float ThermalEngine::rigidPixelCapacity(RigidBody const &b, int localIndex) {
     MaterialId id = b.mask[static_cast<size_t>(localIndex)];
     if (id == MATERIAL_EMPTY) return 0.0f;
     MaterialDefinition const &mat = materialDef(id);
-    float mass = massKg(mat.density, 1.0f, 4.0f);
-    return thermalCapacity(mass, thermalForMaterial(id).specificHeat);
+    float remain = 1.0f;
+    if (localIndex < static_cast<int>(b.solidRemain.size()))
+        remain = std::max(0.0f, b.solidRemain[static_cast<size_t>(localIndex)]);
+    float mass = massKg(mat.density, remain, 4.0f);
+    return thermalCapacity(mass, solidPhaseSpecificHeat(substanceForMaterialId(id)));
 }
 
 bool ThermalEngine::isChunkActive(int x, int y) const {
@@ -309,6 +314,11 @@ double ThermalEngine::totalThermalEnergy(FluidEngine const &fluid, RigidBodyEngi
     return e;
 }
 
+double ThermalEngine::netExternalHeat(FluidEngine const &fluid, GasEngine const &gas) const
+{
+    return thermalEnergyEscaped - thermalEnergyEntered + gas.escapedHeat + fluid.escapedHeat;
+}
+
 void ThermalEngine::applyBrush(FluidEngine &fluid, RigidBodyEngine &rigid, GasEngine &gas,
     int cx, int cy, int brushRadius, float signedStrength, float dt, BrushShape shape)
 {
@@ -403,8 +413,8 @@ void ThermalEngine::conductRigidBodies(RigidBodyEngine &rigid, float dt, float a
                 float Ca = rigidPixelCapacity(b, li);
                 float Cb = rigidPixelCapacity(b, ni);
                 float dQ = exchangeThermalEnergy(
-                    b.heat[static_cast<size_t>(li)], Ca, thermalForMaterial(a).conductivity,
-                    b.heat[static_cast<size_t>(ni)], Cb, thermalForMaterial(c).conductivity,
+                    b.heat[static_cast<size_t>(li)], Ca, solidPhaseConductivity(substanceForMaterialId(a)),
+                    b.heat[static_cast<size_t>(ni)], Cb, solidPhaseConductivity(substanceForMaterialId(c)),
                     dt, areaOverDx, config.conductivityScale);
                 if (std::abs(dQ) > 1.0e-8f) {
                     ++work.conductionPairs;
@@ -430,55 +440,12 @@ void ThermalEngine::conductActive(FluidEngine &fluid, RigidBodyEngine &rigid, Ga
     work.conductionPairs = 0;
     work.activeCells = 0;
 
-    auto nodeAt = [&](int x, int y, float *&energy, float &cap, float &k, int &bodyId, bool &isGas) -> bool {
-        energy = nullptr; cap = 0.0f; k = 0.0f; bodyId = -1; isGas = false;
-        if (!FluidEngine::inside(x, y)) return false;
-        int i = FluidEngine::ci(x, y);
-        int body = rigid.occupant[static_cast<size_t>(i)];
-        if (body >= 0 && body < static_cast<int>(rigid.bodies.size())) {
-            RigidBody &b = rigid.bodies[static_cast<size_t>(body)];
-            float lx, ly;
-            RigidBodyEngine::worldToLocal(b, x + 0.5f, y + 0.5f, lx, ly);
-            int ix = static_cast<int>(std::floor(lx)), iy = static_cast<int>(std::floor(ly));
-            if (RigidBodyEngine::maskOccupied(b, ix, iy)) {
-                int li = iy * b.maskW + ix;
-                if (li >= 0 && li < static_cast<int>(b.heat.size())) {
-                    energy = &b.heat[static_cast<size_t>(li)];
-                    cap = rigidPixelCapacity(b, li);
-                    k = thermalForMaterial(b.mask[static_cast<size_t>(li)]).conductivity;
-                    bodyId = body;
-                    return cap > MIN_THERMAL_CAPACITY;
-                }
-            }
-        }
-        if (fluid.solid[static_cast<size_t>(i)]) {
-            energy = &fluid.solidHeat[static_cast<size_t>(i)];
-            cap = wallCapacity(fluid, i);
-            k = thermalForSubstance(kStaticWallSubstance).conductivity;
-            return cap > MIN_THERMAL_CAPACITY;
-        }
-        if (fluid.fill[static_cast<size_t>(i)] > 1.0e-6f) {
-            energy = &fluid.liquidHeat[static_cast<size_t>(i)];
-            cap = liquidCapacity(fluid, i);
-            k = fluid.mixConductivity(i);
-            return cap > MIN_THERMAL_CAPACITY;
-        }
-        if (gas.amount[static_cast<size_t>(i)] > GAS_MIN_AMOUNT) {
-            energy = &gas.heat[static_cast<size_t>(i)];
-            cap = gasCapacity(gas, i);
-            k = thermalForSubstance(substanceForGasSpecies()).conductivity;
-            isGas = true;
-            return cap > MIN_THERMAL_CAPACITY;
-        }
-        return false;
-    };
-
     auto exchangePair = [&](int x0, int y0, int x1, int y1) {
         float *eA = nullptr, *eB = nullptr, cA = 0, cB = 0, kA = 0, kB = 0;
         int bA = -1, bB = -1;
         bool gasA = false, gasB = false;
-        if (!nodeAt(x0, y0, eA, cA, kA, bA, gasA)) return;
-        if (!nodeAt(x1, y1, eB, cB, kB, bB, gasB)) return;
+        if (!resolveNode(fluid, rigid, gas, x0, y0, eA, cA, kA, bA, gasA)) return;
+        if (!resolveNode(fluid, rigid, gas, x1, y1, eB, cB, kB, bB, gasB)) return;
         if (bA >= 0 && bA == bB) return;
         if (eA == eB) return;
         float scale = (gasA || gasB) ? config.gasConductivityScale : config.conductivityScale;
@@ -509,6 +476,86 @@ void ThermalEngine::conductActive(FluidEngine &fluid, RigidBodyEngine &rigid, Ga
         }
     }
     conductRigidBodies(rigid, dt, areaOverDx);
+}
+
+bool ThermalEngine::resolveNode(FluidEngine &fluid, RigidBodyEngine &rigid, GasEngine &gas,
+    int x, int y, float *&energy, float &cap, float &k, int &bodyId, bool &isGas)
+{
+    energy = nullptr; cap = 0.0f; k = 0.0f; bodyId = -1; isGas = false;
+    if (!FluidEngine::inside(x, y)) return false;
+    int i = FluidEngine::ci(x, y);
+    int body = rigid.occupant[static_cast<size_t>(i)];
+    if (body >= 0 && body < static_cast<int>(rigid.bodies.size())) {
+        RigidBody &b = rigid.bodies[static_cast<size_t>(body)];
+        float lx, ly;
+        RigidBodyEngine::worldToLocal(b, x + 0.5f, y + 0.5f, lx, ly);
+        int ix = static_cast<int>(std::floor(lx)), iy = static_cast<int>(std::floor(ly));
+        if (RigidBodyEngine::maskOccupied(b, ix, iy)) {
+            int li = iy * b.maskW + ix;
+            if (li >= 0 && li < static_cast<int>(b.heat.size())) {
+                energy = &b.heat[static_cast<size_t>(li)];
+                cap = rigidPixelCapacity(b, li);
+                k = solidPhaseConductivity(substanceForMaterialId(b.mask[static_cast<size_t>(li)]));
+                bodyId = body;
+                return cap > MIN_THERMAL_CAPACITY;
+            }
+        }
+    }
+    if (fluid.solid[static_cast<size_t>(i)]) {
+        energy = &fluid.solidHeat[static_cast<size_t>(i)];
+        cap = wallCapacity(fluid, i);
+        k = thermalForSubstance(kStaticWallSubstance).conductivity;
+        return cap > MIN_THERMAL_CAPACITY;
+    }
+    if (fluid.fill[static_cast<size_t>(i)] > 1.0e-6f) {
+        energy = &fluid.liquidHeat[static_cast<size_t>(i)];
+        cap = liquidCapacity(fluid, i);
+        k = fluid.mixConductivity(i);
+        return cap > MIN_THERMAL_CAPACITY;
+    }
+    if (gas.amount[static_cast<size_t>(i)] > GAS_MIN_AMOUNT) {
+        energy = &gas.heat[static_cast<size_t>(i)];
+        cap = gasCapacity(gas, i);
+        k = thermalForSubstance(substanceForGasSpecies()).conductivity;
+        isGas = true;
+        return cap > MIN_THERMAL_CAPACITY;
+    }
+    return false;
+}
+
+void ThermalEngine::conductOpenBoundary(FluidEngine &fluid, RigidBodyEngine &rigid, GasEngine &gas, float dt)
+{
+    if (fluid.config.walledBorders) return;
+    float dx = cellLengthM(fluid.config.cellsPerMeter);
+    float areaOverDx = dx;
+    float kAir = thermalForSubstance(SUBSTANCE_AIR).conductivity;
+    auto expose = [&](int x, int y, int faces) {
+        if (faces <= 0) return;
+        float *e = nullptr, cap = 0.0f, k = 0.0f;
+        int bodyId = -1;
+        bool isGas = false;
+        if (!resolveNode(fluid, rigid, gas, x, y, e, cap, k, bodyId, isGas)) return;
+        float dQ = exchangeThermalEnergyWithAmbient(*e, cap, k, kAir, dt,
+            areaOverDx * static_cast<float>(faces), config.gasConductivityScale);
+        if (!std::isfinite(dQ) || dQ == 0.0f) return;
+        if (dQ > 0.0f) thermalEnergyEscaped += dQ;
+        else thermalEnergyEntered += static_cast<double>(-dQ);
+        ++work.conductionPairs;
+        if (std::abs(dQ) > 1.0e-3f) {
+            wakeCell(x, y);
+            if (isGas) gas.wakeAt(x, y);
+        }
+    };
+    for (int y = 0; y < GH; ++y) {
+        int facesL = 1 + (y == 0 || y == GH - 1 ? 1 : 0);
+        int facesR = 1 + (y == 0 || y == GH - 1 ? 1 : 0);
+        expose(0, y, facesL);
+        expose(GW - 1, y, facesR);
+    }
+    for (int x = 1; x < GW - 1; ++x) {
+        expose(x, 0, 1);
+        expose(x, GH - 1, 1);
+    }
 }
 
 void ThermalEngine::sleepChunks(FluidEngine &fluid, RigidBodyEngine &rigid, GasEngine &gas) {
@@ -611,14 +658,17 @@ void ThermalEngine::simulationTick(FluidEngine &fluid, RigidBodyEngine &rigid, G
     if (runConduction) {
         bool any = false;
         for (uint8_t a : chunkActivity) if (a) { any = true; break; }
+        float dtCond = dt * static_cast<float>(interval);
         if (any) {
-            conductActive(fluid, rigid, gas, dt * static_cast<float>(interval));
+            conductActive(fluid, rigid, gas, dtCond);
             scrubMasslessHeat(fluid);
         } else {
             work.activeCells = 0;
             work.conductionPairs = 0;
             work.activeBodies = 0;
         }
+        if (!fluid.config.walledBorders)
+            conductOpenBoundary(fluid, rigid, gas, dtCond);
         sleepChunks(fluid, rigid, gas);
     }
 
@@ -657,6 +707,8 @@ void ThermalEngine::runDiagnostics(FluidEngine &fluid, RigidBodyEngine &rigid, G
     auto resetBare = [&]() {
         rigid.clear();
         fluid.clearWorld();
+        fluid.config.walledBorders = true;
+        gas.config.boundary = GasBoundary::Sealed;
         gas.config.simMode = GasSimMode::Off;
         gas.resetAmbient(fluid);
         std::fill(gas.amount.begin(), gas.amount.end(), 0.0f);
@@ -999,6 +1051,7 @@ void ThermalEngine::runSpreadDiagnostics(FluidEngine &fluid, RigidBodyEngine &ri
     auto resetSealed = [&]() {
         rigid.clear();
         fluid.clearWorld();
+        fluid.config.walledBorders = true;
         gas.config.boundary = GasBoundary::Sealed;
         gas.config.simMode = GasSimMode::Full;
         config.enabled = true;
@@ -1193,9 +1246,10 @@ void ThermalEngine::runSpreadDiagnostics(FluidEngine &fluid, RigidBodyEngine &ri
         "below0=" + f8(below0) + " below90=" + f8(below90));
     emit("cold_gas_sealed_energy", cRel < 0.02, "rel=" + f8(cRel));
 
-    // 5. Open boundary accounting: hot gas near an open edge
+    // 5. Open-boundary gas mass heat + conduction accounting
     rigid.clear();
     fluid.clearWorld();
+    fluid.config.walledBorders = false;
     gas.config.boundary = GasBoundary::OpenAmbient;
     gas.config.simMode = GasSimMode::Full;
     config.enabled = true;
@@ -1205,20 +1259,152 @@ void ThermalEngine::runSpreadDiagnostics(FluidEngine &fluid, RigidBodyEngine &ri
     int ox = GW / 2, oy = 2;
     for (int y = oy; y <= oy + 5; ++y) for (int x = ox - 4; x <= ox + 4; ++x) setGasT(x, y, 420.0f);
     double eOpen0 = totalThermalEnergy(fluid, rigid, gas);
-    double escaped0 = gas.escapedHeat;
     for (int n = 0; n < 60; ++n) worldTick();
     double eOpen1 = totalThermalEnergy(fluid, rigid, gas);
-    double escapedNet = gas.escapedHeat - escaped0;
-    double openAccounted = eOpen1 + escapedNet;
+    double netOpen = netExternalHeat(fluid, gas);
+    double openAccounted = eOpen1 + netOpen;
     double openRel = std::abs(openAccounted - eOpen0) / std::max(1.0, std::abs(eOpen0));
     emit("open_boundary_heat_accounted",
         openRel < 0.03,
-        "E0=" + f8(eOpen0) + " E1=" + f8(eOpen1) + " escapedHeat=" + f8(escapedNet)
+        "E0=" + f8(eOpen0) + " E1=" + f8(eOpen1)
+            + " condEsc=" + f8(thermalEnergyEscaped) + " condEnt=" + f8(thermalEnergyEntered)
+            + " gasEsc=" + f8(gas.escapedHeat) + " fluidEsc=" + f8(fluid.escapedHeat)
             + " rel=" + f8(openRel));
 
-    emit("no_nan_inf_negK", collectStats(fluid, rigid, gas).nNan == 0
-        && collectStats(fluid, rigid, gas).nInf == 0
-        && collectStats(fluid, rigid, gas).nNegK == 0, "");
+    auto meanEdgeWall = [&](int x, int y0, int y1) -> float {
+        double s = 0.0;
+        int n = 0;
+        for (int y = y0; y <= y1; ++y) {
+            int i = FluidEngine::ci(x, y);
+            if (!fluid.solid[static_cast<size_t>(i)]) continue;
+            s += wallTempK(fluid, i);
+            ++n;
+        }
+        return n ? static_cast<float>(s / n) : AMBIENT_TEMPERATURE_K;
+    };
+    auto meanEdgeGas = [&](int x, int y0, int y1) -> float {
+        double s = 0.0;
+        int n = 0;
+        for (int y = y0; y <= y1; ++y) {
+            int i = FluidEngine::ci(x, y);
+            if (fluid.solid[static_cast<size_t>(i)] || fluid.fill[static_cast<size_t>(i)] > 1.0e-6f) continue;
+            if (gas.amount[static_cast<size_t>(i)] <= GAS_MIN_AMOUNT) continue;
+            s += gasTempK(gas, i);
+            ++n;
+        }
+        return n ? static_cast<float>(s / n) : AMBIENT_TEMPERATURE_K;
+    };
+    auto placeEdgeWall = [&](int x, int y0, int y1, float tK) {
+        for (int y = y0; y <= y1; ++y) {
+            fluid.solid[static_cast<size_t>(FluidEngine::ci(x, y))] = 1;
+        }
+        seedAmbient(fluid, rigid, gas);
+        for (int y = y0; y <= y1; ++y) setWallT(x, y, tK);
+    };
+    auto resetOpenBare = [&]() {
+        rigid.clear();
+        fluid.clearWorld();
+        fluid.config.walledBorders = false;
+        gas.config.boundary = GasBoundary::OpenAmbient;
+        gas.config.simMode = GasSimMode::Full;
+        config.enabled = true;
+        config.intervalTicks = 1;
+        gas.resetAmbient(fluid);
+        seedAmbient(fluid, rigid, gas);
+    };
+    auto resetWalledBare = [&]() {
+        rigid.clear();
+        fluid.clearWorld();
+        fluid.config.walledBorders = true;
+        gas.config.boundary = GasBoundary::Sealed;
+        gas.config.simMode = GasSimMode::Full;
+        config.enabled = true;
+        config.intervalTicks = 1;
+        gas.resetAmbient(fluid);
+        seedAmbient(fluid, rigid, gas);
+    };
+    auto accountOk = [&](double e0, double e1) {
+        double rel = std::abs((e1 + netExternalHeat(fluid, gas)) - e0) / std::max(1.0, std::abs(e0));
+        return rel;
+    };
+
+    // 6. OPEN BORDER HOT PATCH — wall on the map rim
+    resetOpenBare();
+    int ehx = 0, ehy0 = 50, ehy1 = 70;
+    placeEdgeWall(ehx, ehy0, ehy1, 480.0f);
+    float edgeHot0 = meanEdgeWall(ehx, ehy0, ehy1);
+    double eEh0 = totalThermalEnergy(fluid, rigid, gas);
+    for (int n = 0; n < 90; ++n) worldTick();
+    float edgeHot1 = meanEdgeWall(ehx, ehy0, ehy1);
+    double eEh1 = totalThermalEnergy(fluid, rigid, gas);
+    double ehRel = accountOk(eEh0, eEh1);
+    double ehCondEsc = thermalEnergyEscaped;
+    emit("open_border_hot_cools", edgeHot1 < edgeHot0 - 0.002f && edgeHot1 > MIN_SAFE_TEMPERATURE_K,
+        "T0=" + f8(edgeHot0) + " T90=" + f8(edgeHot1));
+    emit("open_border_hot_energy_leaves",
+        thermalEnergyEscaped > 1.0 && eEh1 < eEh0 - 1.0,
+        "condEsc=" + f8(thermalEnergyEscaped) + " dE=" + f8(eEh1 - eEh0));
+    emit("open_border_hot_accounted", ehRel < 0.03,
+        "E0=" + f8(eEh0) + " E1=" + f8(eEh1) + " netExt=" + f8(netExternalHeat(fluid, gas))
+            + " rel=" + f8(ehRel));
+
+    // 7. OPEN BORDER COLD PATCH — cold gas on the rim
+    resetOpenBare();
+    int ecx = 0, ecy0 = 50, ecy1 = 70;
+    for (int y = ecy0; y <= ecy1; ++y) setGasT(ecx, y, 250.0f);
+    float edgeCold0 = meanEdgeGas(ecx, ecy0, ecy1);
+    double eEc0 = totalThermalEnergy(fluid, rigid, gas);
+    for (int n = 0; n < 90; ++n) worldTick();
+    float edgeCold1 = meanEdgeGas(ecx, ecy0, ecy1);
+    double eEc1 = totalThermalEnergy(fluid, rigid, gas);
+    double ecRel = accountOk(eEc0, eEc1);
+    emit("open_border_cold_warms", edgeCold1 > edgeCold0 + 2.0f,
+        "T0=" + f8(edgeCold0) + " T90=" + f8(edgeCold1));
+    emit("open_border_cold_energy_enters",
+        thermalEnergyEntered > 0.1 && eEc1 > eEc0,
+        "condEnt=" + f8(thermalEnergyEntered) + " dE=" + f8(eEc1 - eEc0)
+            + " gasEsc=" + f8(gas.escapedHeat));
+    emit("open_border_cold_accounted", ecRel < 0.03,
+        "E0=" + f8(eEc0) + " E1=" + f8(eEc1) + " netExt=" + f8(netExternalHeat(fluid, gas))
+            + " rel=" + f8(ecRel));
+
+    // 8. WALLED BORDER HOT PATCH — same wall, no direct external loss
+    resetWalledBare();
+    placeEdgeWall(ehx, ehy0, ehy1, 480.0f);
+    float walledHot0 = meanEdgeWall(ehx, ehy0, ehy1);
+    double eWh0 = totalThermalEnergy(fluid, rigid, gas);
+    for (int n = 0; n < 90; ++n) worldTick();
+    float walledHot1 = meanEdgeWall(ehx, ehy0, ehy1);
+    double eWh1 = totalThermalEnergy(fluid, rigid, gas);
+    double walledRel = std::abs(eWh1 - eWh0) / std::max(1.0, std::abs(eWh0));
+    emit("walled_border_hot_no_external",
+        thermalEnergyEscaped < 1.0e-6 && thermalEnergyEntered < 1.0e-6
+            && std::abs(gas.escapedHeat) < 1.0e-6 && std::abs(fluid.escapedHeat) < 1.0e-6,
+        "condEsc=" + f8(thermalEnergyEscaped) + " condEnt=" + f8(thermalEnergyEntered)
+            + " gasEsc=" + f8(gas.escapedHeat));
+    emit("walled_border_hot_conserved", walledRel < 0.02,
+        "rel=" + f8(walledRel) + " T0=" + f8(walledHot0) + " T90=" + f8(walledHot1));
+
+    // 9. INTERIOR CONTROL — identical hot wall away from the rim
+    resetOpenBare();
+    int ihx = 100, ihy0 = 50, ihy1 = 70;
+    placeEdgeWall(ihx, ihy0, ihy1, 480.0f);
+    float intHot0 = meanEdgeWall(ihx, ihy0, ihy1);
+    double eIh0 = totalThermalEnergy(fluid, rigid, gas);
+    for (int n = 0; n < 90; ++n) worldTick();
+    float intHot1 = meanEdgeWall(ihx, ihy0, ihy1);
+    double eIh1 = totalThermalEnergy(fluid, rigid, gas);
+    double ihRel = accountOk(eIh0, eIh1);
+    emit("interior_hot_cools_in_map", intHot1 < intHot0 - 0.002f,
+        "T0=" + f8(intHot0) + " T90=" + f8(intHot1));
+    emit("interior_no_direct_edge_dump",
+        thermalEnergyEscaped < ehCondEsc * 0.05,
+        "condEsc=" + f8(thermalEnergyEscaped) + " edgeCondEsc=" + f8(ehCondEsc));
+    emit("interior_hot_accounted", ihRel < 0.03,
+        "rel=" + f8(ihRel) + " netExt=" + f8(netExternalHeat(fluid, gas)));
+
+    ThermalWorldStats endStats = collectStats(fluid, rigid, gas);
+    emit("no_nan_inf_negK", endStats.nNan == 0 && endStats.nInf == 0 && endStats.nNegK == 0, "");
 
     out << "summary\t" << (failed == 0 ? "PASS" : "FAIL") << '\t'
         << passed << " passed, " << failed << " failed\n";

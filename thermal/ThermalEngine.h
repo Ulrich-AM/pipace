@@ -44,6 +44,10 @@ struct ThermalEngine {
     std::vector<uint8_t> chunkQuietTicks;
 
     ThermalWorkCounts work{};
+    // Direct conduction to/from the infinite ambient reservoir (open borders only).
+    // Mass-carried heat uses GasEngine::escapedHeat / FluidEngine::escapedHeat.
+    double thermalEnergyEscaped = 0.0;
+    double thermalEnergyEntered = 0.0;
     double lastStepMs = 0.0;
     double timingAccum = 0.0;
     double timingAverage = 0.0;
@@ -73,6 +77,7 @@ struct ThermalEngine {
     bool isChunkActive(int x, int y) const;
     double totalThermalEnergy(FluidEngine const &fluid, RigidBodyEngine const &rigid,
         GasEngine const &gas) const;
+    double netExternalHeat(FluidEngine const &fluid, GasEngine const &gas) const;
 
     static float liquidCapacity(FluidEngine const &fluid, int index);
     static float wallCapacity(FluidEngine const &fluid, int index);
@@ -87,7 +92,10 @@ struct ThermalEngine {
     void runSpreadDiagnostics(FluidEngine &fluid, RigidBodyEngine &rigid, GasEngine &gas);
 
 private:
+    bool resolveNode(FluidEngine &fluid, RigidBodyEngine &rigid, GasEngine &gas,
+        int x, int y, float *&energy, float &cap, float &k, int &bodyId, bool &isGas);
     void conductActive(FluidEngine &fluid, RigidBodyEngine &rigid, GasEngine &gas, float dt);
+    void conductOpenBoundary(FluidEngine &fluid, RigidBodyEngine &rigid, GasEngine &gas, float dt);
     void conductRigidBodies(RigidBodyEngine &rigid, float dt, float areaOverDx);
     void sleepChunks(FluidEngine &fluid, RigidBodyEngine &rigid, GasEngine &gas);
     void wakeMovingBodies(RigidBodyEngine const &rigid);

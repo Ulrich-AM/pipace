@@ -37,6 +37,10 @@ struct ThermalProperties {
     float softeningTempK = 0.0f;
     // Gas-phase Cp. 0 = use specificHeat (air). Water liquid Cp is specificHeat.
     float gasSpecificHeat = 0.0f;   // J/(kg·K)
+    // Solid-phase Cp/k. 0 = use specificHeat/conductivity (ordinary solids).
+    // Water ice uses these; liquid water keeps specificHeat/conductivity.
+    float solidSpecificHeat = 0.0f; // J/(kg·K)
+    float solidConductivity = 0.0f; // W/(m·K)
     bool valid = false;
 };
 

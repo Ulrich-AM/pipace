@@ -444,7 +444,7 @@ void WorldRenderer::paintNormal(FluidEngine &fluid, RigidBodyEngine const &rigid
         MaterialId pendingMat = rigid.pending[static_cast<size_t>(index)];
         MaterialId occMat = rigid.worldCellMaterial(x, y);
         if (occMat != MATERIAL_EMPTY) {
-            MaterialVisual vis = visualForSubstance(substanceForMaterialId(occMat));
+            MaterialVisual vis = visualForSolid(occMat);
             float wetness = 0.0f;
             MaterialDefinition const &mat = materialDef(occMat);
             if (mat.moistureCapacity > 1.0e-8f)
@@ -495,7 +495,7 @@ void WorldRenderer::paintNormal(FluidEngine &fluid, RigidBodyEngine const &rigid
             float stain = wetDarkenMul(style, wetness) * (1.0f - 0.38f * dmg) * (1.0f - 0.62f * crack);
             fluid.pixels[static_cast<size_t>(index)] = scaleRgb(cr, cg, cb, stain);
         } else if (pendingMat != MATERIAL_EMPTY) {
-            MaterialVisual vis = visualForSubstance(substanceForMaterialId(pendingMat));
+            MaterialVisual vis = visualForSolid(pendingMat);
             fluid.pixels[static_cast<size_t>(index)] = packRgb(std::min(255, vis.r + 40),
                 std::min(255, vis.g + 40), std::min(255, vis.b + 20));
         }
@@ -525,7 +525,7 @@ void WorldRenderer::paintNormal(FluidEngine &fluid, RigidBodyEngine const &rigid
             } else {
                 int body = occupantAt(x, y);
                 if (body < 0) continue;
-                dark = visualForSubstance(substanceForMaterialId(rigid.worldCellMaterial(x, y))).outlineDarken;
+                dark = visualForSolid(rigid.worldCellMaterial(x, y)).outlineDarken;
                 for (int k = 0; k < 4; ++k) {
                     if (!sameBody(x + kN4x[k], y + kN4y[k], body)) { edge = true; break; }
                 }

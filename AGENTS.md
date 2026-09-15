@@ -67,14 +67,15 @@ These mappings are **implementation, not laws**:
 |---|---|
 | Water + Liquid, Honey + Liquid | FluidEngine (water/honey volume channels) |
 | Wood/Glass/Metal + Solid | RigidBodyEngine (MaterialId masks) |
+| Water + Solid | RigidBodyEngine (`MATERIAL_WATER_SOLID` mask, still SUBSTANCE_WATER) |
 | Stone + Solid | rigid body **or** static `solid[]` walls (`kStaticWallSubstance`) |
 | Air + Gas | GasEngine (air component) |
 | Water + Gas | GasEngine (`waterVapor` component; same SubstanceId) |
 
-`supportsPhase` is capability metadata. Water **liquid ⇄ gas** is live; there is
-**no** melting/freezing solver yet. Do **not** add SUBSTANCE_ICE / SUBSTANCE_STEAM.
+`supportsPhase` is capability metadata. Water **liquid ⇄ gas** and **liquid ⇄ solid**
+are live. Do **not** add SUBSTANCE_ICE / SUBSTANCE_STEAM.
 Density stays phase-specific: mechanical.densityRel (solid), fluid.density (liquid),
-gas amount/EoS (gas). Honey/water mixtures do not boil yet.
+gas amount/EoS (gas). Honey/water mixtures do not boil or freeze yet.
 
 Water/honey cells that hold both channels are **mixtures**, not a new SubstanceId.
 `MatterSample` reports the dominant component plus fractions. Generalized mixtures
@@ -112,6 +113,9 @@ Hybrid free-surface solver:
 - Optional vorticity confinement (`O`)
 - 16×16 chunk wake/sleep; active solve region + halo
 - Volume / momentum / KE diagnostics; F1–F10 test scenes; stage timings
+- `FluidConfig.walledBorders` also gates thermal exchange with an infinite ambient
+  reservoir at `AMBIENT_TEMPERATURE_K` (no separate thermal-border toggle). Gas
+  mass-carried heat stays on `GasEngine::escapedHeat`.
 
 `LiquidProperties` is a compatibility name for `FluidProperties`. Fluid lookup is
 `fluidForSubstance` / `mix*` / `sandboxReferenceLiquid()`. Two volume channels
@@ -167,10 +171,8 @@ Do **not** sacrifice conservation or replace the donor/receiver limiter with sca
 Completed architecture: SubstanceId, registry, grouped properties, MatterPhase /
 MatterIdentity, world query, material migration, moisture stabilization.
 
-**Next major milestone: real phase changes** — water `liquid ⇄ gas` boiling and
-condensation are live (`world/WaterPhaseChange.cpp`). Solid water / ice is still
-not implemented. Conversion helpers: `substance/PhaseTransfer.h`. Design note:
-`docs/PHASE_CHANGES.md`.
+**Next major milestone: SACE / mixtures** — water `liquid ⇄ gas` and `liquid ⇄ solid`
+are live (`world/WaterPhaseChange.cpp`). Honey mixtures still skip phase change.
 
 Longer sequence (historical): liquid correctness → performance → modularization →
 honey composition → rigid coupling → temperature/gas → **phase changes** → SACE.

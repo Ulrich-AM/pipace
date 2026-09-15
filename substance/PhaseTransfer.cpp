@@ -128,7 +128,7 @@ void runPhaseTransferDiagnostics() {
         canTransition(SUBSTANCE_WATER, MatterPhase::Gas, MatterPhase::Liquid), "");
     emit("water_liquid_to_solid_supported",
         canTransition(SUBSTANCE_WATER, MatterPhase::Liquid, MatterPhase::Solid),
-        "metadata only; no ice body");
+        "live freeze uses this metadata");
     emit("wood_solid_to_liquid_unsupported",
         !canTransition(SUBSTANCE_WOOD, MatterPhase::Solid, MatterPhase::Liquid), "");
     emit("invalid_id_fails_safe",
@@ -143,10 +143,26 @@ void runPhaseTransferDiagnostics() {
 
     PhaseTransferResult iceAttempt = convertPhaseAmount(
         SUBSTANCE_WATER, MatterPhase::Liquid, MatterPhase::Solid, 1.0, kCpm);
-    emit("water_solid_convert_blocked_without_mechanical",
-        !iceAttempt.success && !hasMechanicalProperties(SUBSTANCE_WATER)
-            && canTransition(SUBSTANCE_WATER, MatterPhase::Liquid, MatterPhase::Solid),
-        "canTransition=1 convert=0; do not fake stone density");
+    double icePixelMass = solidFractionToMassKg(SUBSTANCE_WATER, 1.0, kCpm);
+    emit("water_solid_convert_uses_ice_density",
+        iceAttempt.success && hasMechanicalProperties(SUBSTANCE_WATER)
+            && nearRel(iceAttempt.massTransferred, waterCellMass)
+            && nearRel(iceAttempt.destinationAmountAdded, waterCellMass / icePixelMass)
+            && icePixelMass < waterCellMass,
+        "mass=" + f8(iceAttempt.massTransferred)
+            + " solid_frac=" + f8(iceAttempt.destinationAmountAdded)
+            + " ice_pixel_kg=" + f8(icePixelMass));
+    emit("convert_liquid_solid_latent_sign",
+        iceAttempt.success && iceAttempt.energyTransferred < 0.0
+            && nearRel(iceAttempt.energyTransferred, -fusion),
+        "E=" + f8(iceAttempt.energyTransferred));
+    PhaseTransferResult iceBack = convertPhaseAmount(
+        SUBSTANCE_WATER, MatterPhase::Solid, MatterPhase::Liquid,
+        iceAttempt.destinationAmountAdded, kCpm);
+    emit("water_solid_liquid_roundtrip",
+        iceBack.success && nearRel(iceBack.destinationAmountAdded, fill0)
+            && nearRel(iceBack.massTransferred, waterCellMass),
+        "fill=" + f8(iceBack.destinationAmountAdded));
 
     emit("no_ice_substance_id",
         SUBSTANCE_COUNT == 8 && substanceFromInternalName("ice") == SUBSTANCE_NONE, "");

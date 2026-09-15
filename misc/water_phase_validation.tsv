@@ -1,0 +1,17 @@
+section	case	result	metric_a	metric_b	metric_c	metric_d	detail
+tick_rate	20_hz	MEASURE	81.4434234053	6960	373.149993896	48	seconds=1 liquid_T=623.150024414 nonfinite=0 neg_water=0 neg_gas=0 vapor_over_total=0 vapor_in_solid=0 negK=0 stranded_heat=0
+tick_rate	30_hz	MEASURE	91.179552488	7792.03105164	373.150024414	48	seconds=1 liquid_T=623.150024414 nonfinite=0 neg_water=0 neg_gas=0 vapor_over_total=0 vapor_in_solid=0 negK=0 stranded_heat=0
+tick_rate	20_vs_30	FAIL	0.106779741917	0.10677974024	3.0517578125e-05	0	relative differences; 2% materiality threshold
+performance	idle_full_scan	PASS	0.4402825	0	0	0	phase-only ms/tick; baseline without phase call=0; nonfinite=0 neg_water=0 neg_gas=0 vapor_over_total=0 vapor_in_solid=0 negK=0 stranded_heat=0
+performance	small_boiling_pool	PASS	0.588863333333	16	0	16	phase-only ms/tick; baseline without phase call=0; nonfinite=0 neg_water=0 neg_gas=0 vapor_over_total=0 vapor_in_solid=0 negK=0 stranded_heat=0
+performance	large_boiling_pool	PASS	4.33226	614	0	1800	phase-only ms/tick; baseline without phase call=0; nonfinite=0 neg_water=0 neg_gas=0 vapor_over_total=0 vapor_in_solid=0 negK=0 stranded_heat=0
+performance	vapor_condensation_chamber	PASS	1.15271	0	1676	124	phase-only ms/tick; baseline without phase call=0; nonfinite=0 neg_water=0 neg_gas=0 vapor_over_total=0 vapor_in_solid=0 negK=0 stranded_heat=0
+stress	closed_energy_no_forcing	FAIL	-1.03356645909e-07	0.0613293314534	29624680	27807818.1811	nonfinite=0 neg_water=0 neg_gas=0 vapor_over_total=0 vapor_in_solid=0 negK=0 stranded_heat=0
+stress	sealed_hot_600_ticks	PASS	-0.00010164851733	14160.800293	48	223078	nonfinite=0 neg_water=0 neg_gas=0 vapor_over_total=0 vapor_in_solid=0 negK=0 stranded_heat=0
+stress	forced_30_phase_cycles	PASS	3.05991880367e-06	7.12680861511	8.49819444481	42.6987609863	nonfinite=0 neg_water=0 neg_gas=0 vapor_over_total=0 vapor_in_solid=0 negK=0 stranded_heat=0
+stress	static_ceiling	PASS	1.31012618567e-05	12812.4573882	48	1226	nonfinite=0 neg_water=0 neg_gas=0 vapor_over_total=0 vapor_in_solid=0 negK=0 stranded_heat=0
+stress	rigid_ceiling	PASS	1.02210394175e-05	11712	48	1356	nonfinite=0 neg_water=0 neg_gas=0 vapor_over_total=0 vapor_in_solid=0 negK=0 stranded_heat=0
+stress	open_edge_actual_escape	PASS	-1.35444275173e-05	5.3060805825	10.3189058731	1.94579160213	nonfinite=0 neg_water=0 neg_gas=0 vapor_over_total=0 vapor_in_solid=0 negK=0 stranded_heat=0
+stress	water_honey_mixture	PASS	0	1	0.40000000596	623.150024414	nonfinite=0 neg_water=0 neg_gas=0 vapor_over_total=0 vapor_in_solid=0 negK=0 stranded_heat=0
+stress	subactive_residual_water	FAIL	0.00499999988824	0.00499999988824	0	873.150024414	phase response expected for superheated residual; nonfinite=0 neg_water=0 neg_gas=0 vapor_over_total=0 vapor_in_solid=0 negK=0 stranded_heat=0
+stress	high_vapor_concentration	PASS	6.21999049599e-07	1375.09875107	48	451.483276367	nonfinite=0 neg_water=0 neg_gas=0 vapor_over_total=0 vapor_in_solid=0 negK=0 stranded_heat=0
