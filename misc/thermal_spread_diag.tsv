@@ -1,0 +1,25 @@
+case	name	tick	center_T	ring1_T	ring2_T	energy	max_T	mean_T	n_away	com_y	active_chunks
+case	hot_gas_patch	0	450	450	380.28888	2.3841744e+09	450	293.47021	49	78	0
+case	hot_gas_patch	15	418.38312	414.90216	364.83762	2.3841744e+09	447.42841	293.44568	113	76.198296	16
+case	hot_gas_patch	30	355.46365	353.70789	337.2399	2.3841744e+09	430.32916	293.43024	170	74.217323	24
+case	hot_gas_patch	90	305.61938	304.77744	301.58542	2.3841744e+09	388.9339	293.42737	308	68.814224	34
+test	hot_gas_center_cools	PASS	T0=450 T90=305.61938
+test	hot_gas_neighbors_warm	PASS	above0=293.14999 above90=331.53815
+test	hot_gas_region_expands	PASS	n0=49 n90=308
+test	hot_gas_sealed_energy	PASS	rel=8.2944395e-12
+test	hot_gas_rises	PASS	com0=78 com90=68.814224
+test	hot_gas_sleep_does_not_freeze	PASS	c15=16 c30=24 nAway90=308
+test	hot_wall_warms_air	PASS	air0=293.14999 air90=341.09085
+test	hot_wall_cools	PASS	wall0=480 wall90=464.34421
+test	hot_wall_sealed_energy	PASS	rel=1.5783027e-08
+test	hot_liquid_warms_air	PASS	air0=293.15002 air90=310.81427
+test	hot_liquid_cools	PASS	liq0=340 liq90=330.33032
+test	hot_liquid_sealed_energy	PASS	rel=1.4618826e-08
+case	cold_gas_patch	0	250	250	269.17776	2.3839892e+09	293.14999	293.06189	49	50	0
+case	cold_gas_patch	90	271.32944	272.25357	278.64523	2.3839892e+09	293.15054	293.06458	177	50	38
+test	cold_gas_center_warms	PASS	T0=250 T90=271.32944
+test	cold_gas_neighbors_cool	PASS	below0=293.14999 below90=289.87711
+test	cold_gas_sealed_energy	PASS	rel=2.6626196e-12
+test	open_boundary_heat_accounted	PASS	E0=1.3314852e+08 E1=1.3277065e+08 escapedHeat=377874.01 rel=1.444323e-10
+test	no_nan_inf_negK	PASS	
+summary	PASS	17 passed, 0 failed

@@ -36,6 +36,7 @@ struct GasEngine {
     double expectedAmount = 0.0;
     double amountError = 0.0;
     double escapedAmount = 0.0; // net leaving through OpenAmbient edges (entered is negative)
+    double escapedHeat = 0.0;   // Joules carried by escapedAmount; inflow is negative
     double currentWaterVapor = 0.0;
     double expectedWaterVapor = 0.0;
     double escapedWaterVapor = 0.0;

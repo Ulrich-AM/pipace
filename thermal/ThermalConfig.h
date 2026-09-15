@@ -10,7 +10,11 @@ struct ThermalConfig {
     float sleepAmbientEps = 0.25f;    // K from ambient to stay awake
     int sleepQuietTicks = 12;
     float conductivityScale = 25000.0f;
-    float gasConductivityScale = 40.0f; // air is a poor conductor; do not use the solid sandbox scale
+    // Cell edge is 0.25 m, so physical air diffusion across a cell is thousands of
+    // seconds. This sandbox scale (~400) makes gas-gas / gas-surface conduction
+    // visible in a few seconds while staying far below the solid scale (25000).
+    // Bulk hot-air mixing is buoyancy (GasConfig::buoyancyScale), not this number.
+    float gasConductivityScale = 400.0f;
     float heatToolWatts = 2.5e6f;     // sandbox watts at strength 1, per covered cell
     bool coupleGasPressureToTemperature = false; // documented path; keep off
 };

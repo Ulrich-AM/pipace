@@ -454,9 +454,12 @@ void GasEngine::applyBoundaryFlux(float dt) {
             waterVapor[static_cast<size_t>(i)] -= dv;
             escapedWaterVapor += dv;
             expectedWaterVapor -= dv;
+            escapedHeat += dq;
         } else if (flux < 0.0f) {
             float cap = thermalCapacity(gasMassKg(-flux), thermalForSubstance(substanceForGasSpecies()).specificHeat);
-            heat[static_cast<size_t>(i)] += energyFromTemp(cap, AMBIENT_TEMPERATURE_K);
+            float added = energyFromTemp(cap, AMBIENT_TEMPERATURE_K);
+            heat[static_cast<size_t>(i)] += added;
+            escapedHeat -= added;
         }
         amount[static_cast<size_t>(i)] -= flux;
         if (amount[static_cast<size_t>(i)] < 0.0f) {
@@ -469,6 +472,7 @@ void GasEngine::applyBoundaryFlux(float dt) {
         if (std::abs(flux) > 1.0e-6f) {
             int x = i % GW, y = i / GW;
             wakeChunkAtCell(x, y);
+            wakeThermalAt(x, y);
         }
     };
     for (int y = 0; y < GH; ++y) {
@@ -550,6 +554,18 @@ void GasEngine::applyFluxes() {
 
 void GasEngine::integrateVelocity(FluidEngine const &fluid, float dt) {
     float damp = std::clamp(1.0f - config.velocityDamping, 0.0f, 1.0f);
+    float gravity = fluid.gridGravity();
+    float buoy = config.buoyancyScale;
+    float airCp = thermalForSubstance(SUBSTANCE_AIR).specificHeat;
+    auto gasT = [&](int index) -> float {
+        float a = amount[static_cast<size_t>(index)];
+        if (a <= GAS_MIN_AMOUNT) return AMBIENT_TEMPERATURE_K;
+        float h = heat[static_cast<size_t>(index)];
+        if (!(h > 0.0f)) return AMBIENT_TEMPERATURE_K;
+        float cap = thermalCapacity(gasMassKg(a), airCp);
+        if (cap < MIN_THERMAL_CAPACITY) return AMBIENT_TEMPERATURE_K;
+        return tempFromEnergy(h, cap);
+    };
     for (int y = 0; y < GH; ++y) for (int x = 1; x < GW; ++x) {
         int iL = ci(x - 1, y), iR = ci(x, y);
         float &vel = u[static_cast<size_t>(ui(x, y))];
@@ -571,6 +587,21 @@ void GasEngine::integrateVelocity(FluidEngine const &fluid, float dt) {
         }
         float grad = pressure[static_cast<size_t>(iB)] - pressure[static_cast<size_t>(iT)];
         vel += -config.pressureAccel * grad * dt;
+        if (buoy > 1.0e-8f && gravity > 0.0f) {
+            int cT = chunkIndex(x, y - 1);
+            int cB = chunkIndex(x, y);
+            bool live = (cT >= 0 && cT < CHUNK_W * CHUNK_H
+                    && (chunkActivity[static_cast<size_t>(cT)] || chunkSolveMask[static_cast<size_t>(cT)]))
+                || (cB >= 0 && cB < CHUNK_W * CHUNK_H
+                    && (chunkActivity[static_cast<size_t>(cB)] || chunkSolveMask[static_cast<size_t>(cB)]));
+            if (live) {
+                float Tface = 0.5f * (gasT(iT) + gasT(iB));
+                float dT = std::clamp(Tface - AMBIENT_TEMPERATURE_K, -400.0f, 400.0f);
+                float accel = -gravity * buoy * (dT / AMBIENT_TEMPERATURE_K);
+                accel = std::clamp(accel, -3.0f * gravity, 3.0f * gravity);
+                vel += accel * dt;
+            }
+        }
         vel *= damp;
         vel = std::clamp(vel, -config.maxVelocity, config.maxVelocity);
     }
@@ -641,6 +672,7 @@ void GasEngine::resetAmbient(FluidEngine &fluid) {
     std::fill(u.begin(), u.end(), 0.0f);
     std::fill(v.begin(), v.end(), 0.0f);
     escapedAmount = 0.0;
+    escapedHeat = 0.0;
     escapedWaterVapor = 0.0;
     recomputePressure();
     commitExpected();
@@ -862,9 +894,11 @@ void GasEngine::wallRect(FluidEngine &fluid, int x0, int y0, int x1, int y1) {
 void GasEngine::vacuumAll() {
     std::fill(amount.begin(), amount.end(), 0.0f);
     std::fill(waterVapor.begin(), waterVapor.end(), 0.0f);
+    std::fill(heat.begin(), heat.end(), 0.0f);
     std::fill(u.begin(), u.end(), 0.0f);
     std::fill(v.begin(), v.end(), 0.0f);
     escapedAmount = 0.0;
+    escapedHeat = 0.0;
     escapedWaterVapor = 0.0;
 }
 
@@ -877,6 +911,9 @@ void GasEngine::fillRectAmount(FluidEngine const &fluid, int x0, int y0, int x1,
         if (vol < GAS_MIN_VOLUME) continue;
         amount[static_cast<size_t>(i)] = vol * atm;
         waterVapor[static_cast<size_t>(i)] = 0.0f;
+        float cap = thermalCapacity(gasMassKg(amount[static_cast<size_t>(i)]),
+            thermalForSubstance(SUBSTANCE_AIR).specificHeat);
+        heat[static_cast<size_t>(i)] = energyFromTemp(cap, AMBIENT_TEMPERATURE_K);
     }
 }
 
@@ -954,6 +991,7 @@ void GasEngine::loadTestScene(FluidEngine &fluid, RigidBodyEngine &rigid, int sc
     std::fill(u.begin(), u.end(), 0.0f);
     std::fill(v.begin(), v.end(), 0.0f);
     escapedAmount = 0.0;
+    escapedHeat = 0.0;
     commitExpected();
     wakeAll();
 }

@@ -84,6 +84,7 @@ struct ThermalEngine {
     static float rigidPixelTempK(RigidBody const &b, int localIndex);
 
     void runDiagnostics(FluidEngine &fluid, RigidBodyEngine &rigid, GasEngine &gas);
+    void runSpreadDiagnostics(FluidEngine &fluid, RigidBodyEngine &rigid, GasEngine &gas);
 
 private:
     void conductActive(FluidEngine &fluid, RigidBodyEngine &rigid, GasEngine &gas, float dt);
