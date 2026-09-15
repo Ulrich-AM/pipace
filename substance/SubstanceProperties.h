@@ -20,7 +20,8 @@ constexpr float MIN_THERMAL_MASS_KG = 1.0e-9f;
 constexpr float MIN_SAFE_TEMPERATURE_K = 0.05f;
 constexpr float MAX_SAFE_TEMPERATURE_K = 1.0e7f;
 
-// Heat storage / conduction. Melting/boiling/latent are metadata until Prompt 3.
+// Heat storage / conduction. Melting/boiling/latent here are table-authoring
+// copies; PhaseProperties is the query path. No phase-change solver yet.
 struct ThermalProperties {
     float specificHeat = 1000.0f;   // J/(kg·K)
     float conductivity = 0.026f;    // W/(m·K) physical

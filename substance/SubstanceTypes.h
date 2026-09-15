@@ -75,10 +75,7 @@ struct SubstanceDefinition {
     SubstanceClass classification = SubstanceClass::Unknown;
     CompositionKind compositionKind = CompositionKind::Unknown;
     char const *formulaHint = nullptr; // only when genuinely known (e.g. water H2O)
-    bool canExistAsSolid = false;
-    bool canExistAsLiquid = false;
-    bool canExistAsGas = false;
-    // Mirrors of PhaseProperties capability flags. Current phase is world state.
+    // Phase capability lives on phase.*Capable. Current world phase is NOT here.
 
     MechanicalProperties mechanical{};
     FluidProperties fluid{};

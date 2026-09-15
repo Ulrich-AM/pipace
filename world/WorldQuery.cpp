@@ -16,10 +16,12 @@ MatterSample sampleMatterAt(FluidEngine const &fluid, RigidBodyEngine const &rig
     GasEngine const &gas, int x, int y)
 {
     MatterSample sample;
+    if (!FluidEngine::inside(x, y)) return sample;
+
     ThermalCellSample thermal = ThermalEngine::sampleCell(fluid, rigid, gas, x, y);
     sample.temperatureK = thermal.temperatureK;
     sample.hasMatter = thermal.hasMatter;
-    if (!thermal.hasMatter || !FluidEngine::inside(x, y)) return sample;
+    if (!thermal.hasMatter) return sample;
 
     int i = FluidEngine::ci(x, y);
     switch (thermal.kind) {
@@ -48,6 +50,7 @@ MatterSample sampleMatterAt(FluidEngine const &fluid, RigidBodyEngine const &rig
             break;
         case ThermalSampleKind::Empty:
         default:
+            sample.hasMatter = false;
             break;
     }
     return sample;
@@ -69,6 +72,16 @@ void runSubstancePhaseDiagnostics(FluidEngine &fluid, RigidBodyEngine &rigid, Ga
     emit("supports_wood_liquid", !supportsPhase(SUBSTANCE_WOOD, MatterPhase::Liquid), "wood must not be liquid-capable");
     emit("supports_air_gas", supportsPhase(SUBSTANCE_AIR, MatterPhase::Gas), "");
     emit("supports_air_solid", !supportsPhase(SUBSTANCE_AIR, MatterPhase::Solid), "air must not be solid-capable");
+    emit("supports_honey_liquid", supportsPhase(SUBSTANCE_HONEY, MatterPhase::Liquid), "");
+    emit("supports_honey_solid_conservative",
+        supportsPhase(SUBSTANCE_HONEY, MatterPhase::Solid) && !hasMechanicalProperties(SUBSTANCE_HONEY),
+        "honey is solid-capable metadata without a solid table");
+    emit("supports_honey_not_gas", !supportsPhase(SUBSTANCE_HONEY, MatterPhase::Gas), "");
+    emit("supports_glass_liquid_no_fluid",
+        supportsPhase(SUBSTANCE_GLASS, MatterPhase::Liquid) && !hasFluidProperties(SUBSTANCE_GLASS),
+        "glass liquid-capable without a fluid table");
+    emit("supports_metal_liquid_no_fluid",
+        supportsPhase(SUBSTANCE_METAL, MatterPhase::Liquid) && !hasFluidProperties(SUBSTANCE_METAL), "");
     emit("no_ice_id", SUBSTANCE_COUNT == 8 && substanceFromInternalName("ice") == SUBSTANCE_NONE, "");
     emit("no_steam_id", substanceFromInternalName("steam") == SUBSTANCE_NONE, "");
     emit("no_current_phase_on_def", true, "SubstanceDefinition stores capability flags only");
@@ -76,6 +89,23 @@ void runSubstancePhaseDiagnostics(FluidEngine &fluid, RigidBodyEngine &rigid, Ga
     emit("metal_has_mechanical", hasMechanicalProperties(SUBSTANCE_METAL) && hasPropertiesForPhase(SUBSTANCE_METAL, MatterPhase::Solid), "");
     emit("air_has_gas", hasGasProperties(SUBSTANCE_AIR), "");
     emit("plasma_unsupported", !supportsPhase(SUBSTANCE_WATER, MatterPhase::Plasma), "");
+    emit("none_phase_unsupported", !supportsPhase(SUBSTANCE_WATER, MatterPhase::None), "");
+    emit("invalid_id_no_phase", !supportsPhase(999, MatterPhase::Liquid) && !supportsPhase(999, MatterPhase::Solid), "");
+
+    MatterIdentity waterLiq = makeMatterIdentity(SUBSTANCE_WATER, MatterPhase::Liquid);
+    emit("identity_roundtrip_water_liquid",
+        waterLiq.substance == SUBSTANCE_WATER && waterLiq.phase == MatterPhase::Liquid, "");
+    MatterIdentity wallId = staticWallIdentity();
+    emit("identity_static_wall",
+        wallId.substance == kStaticWallSubstance && wallId.substance == SUBSTANCE_STONE
+            && wallId.phase == MatterPhase::Solid, "");
+    MatterIdentity gasId = identityForGasSpecies();
+    emit("identity_gas_species_air",
+        gasId.substance == SUBSTANCE_AIR && gasId.phase == MatterPhase::Gas
+            && substanceForGasSpecies() == SUBSTANCE_AIR, "");
+    MatterIdentity rigidWood = rigidIdentityForMaterial(MATERIAL_WOOD);
+    emit("identity_rigid_wood",
+        rigidWood.substance == SUBSTANCE_WOOD && rigidWood.phase == MatterPhase::Solid, "");
 
     fluid.resetWorld();
     rigid.clear();
@@ -94,6 +124,13 @@ void runSubstancePhaseDiagnostics(FluidEngine &fluid, RigidBodyEngine &rigid, Ga
         "sub=" + std::to_string(waterCell.identity.substance)
             + " phase=" + std::to_string(static_cast<int>(waterCell.identity.phase)));
 
+    MatterSample neighborAir = sampleMatterAt(fluid, rigid, gas, cx + 1, cy);
+    emit("query_liquid_gas_interface",
+        neighborAir.hasMatter && neighborAir.identity.substance == SUBSTANCE_AIR
+            && neighborAir.identity.phase == MatterPhase::Gas
+            && waterCell.identity.phase == MatterPhase::Liquid,
+        "neighbor sub=" + std::to_string(neighborAir.identity.substance));
+
     fluid.honey[static_cast<size_t>(wi)] = 1.0f;
     MatterSample honeyCell = sampleMatterAt(fluid, rigid, gas, cx, cy);
     emit("query_honey_liquid",
@@ -110,6 +147,11 @@ void runSubstancePhaseDiagnostics(FluidEngine &fluid, RigidBodyEngine &rigid, Ga
         "dom=" + std::to_string(mixCell.identity.substance)
             + " honey=" + std::to_string(mixCell.honeyFraction)
             + " water=" + std::to_string(mixCell.waterFraction));
+    emit("query_mixture_not_new_id",
+        mixCell.mixture && mixCell.identity.substance != SUBSTANCE_NONE
+            && mixCell.identity.substance < SUBSTANCE_COUNT
+            && mixCell.identity.substance != SUBSTANCE_HONEY,
+        "mixtures keep a dominant built-in SubstanceId");
 
     fluid.clearWorld();
     rigid.clear();
@@ -134,6 +176,11 @@ void runSubstancePhaseDiagnostics(FluidEngine &fluid, RigidBodyEngine &rigid, Ga
         wallCell.hasMatter && wallCell.identity.substance == kStaticWallSubstance
             && wallCell.identity.phase == MatterPhase::Solid,
         "sub=" + std::to_string(wallCell.identity.substance));
+    emit("query_static_wall_thermal_identity",
+        thermalForSubstance(kStaticWallSubstance).specificHeat
+            == thermalForSubstance(SUBSTANCE_STONE).specificHeat
+            && mechanicalForSubstance(kStaticWallSubstance).densityRel
+                == mechanicalForSubstance(SUBSTANCE_STONE).densityRel, "");
 
     fluid.clearWorld();
     rigid.clear();
@@ -145,6 +192,25 @@ void runSubstancePhaseDiagnostics(FluidEngine &fluid, RigidBodyEngine &rigid, Ga
         "sub=" + std::to_string(airCell.identity.substance)
             + " phase=" + std::to_string(static_cast<int>(airCell.identity.phase))
             + " amt=" + std::to_string(airCell.amount));
+
+    MatterSample oob = sampleMatterAt(fluid, rigid, gas, -1, -1);
+    emit("query_oob",
+        !oob.hasMatter && oob.identity.substance == SUBSTANCE_NONE
+            && oob.identity.phase == MatterPhase::None, "");
+    MatterSample oobFar = sampleMatterAt(fluid, rigid, gas, GW, GH);
+    emit("query_oob_far",
+        !oobFar.hasMatter && oobFar.identity.substance == SUBSTANCE_NONE, "");
+
+    int ei = FluidEngine::ci(20, 20);
+    fluid.fill[static_cast<size_t>(ei)] = 0.0f;
+    fluid.honey[static_cast<size_t>(ei)] = 0.0f;
+    gas.amount[static_cast<size_t>(ei)] = 0.0f;
+    gas.heat[static_cast<size_t>(ei)] = 0.0f;
+    MatterSample emptyCell = sampleMatterAt(fluid, rigid, gas, 20, 20);
+    emit("query_empty",
+        !emptyCell.hasMatter && emptyCell.identity.substance == SUBSTANCE_NONE
+            && emptyCell.identity.phase == MatterPhase::None,
+        "kind empty after zero fill and gas");
 
     out << "summary\t" << (failed == 0 ? "PASS" : "FAIL") << '\t' << passed << " passed, " << failed << " failed\n";
 }

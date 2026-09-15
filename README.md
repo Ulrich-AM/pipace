@@ -1,62 +1,72 @@
-# Water Test
+# PIPACE
 
-A dependency-free C++/Win32 pixel-water playground based on the supplied hybrid fluid-engine specification.
+**Purely Inaccurate Physics And Chemical Engine**
 
-## Run
+PIPACE is a small pixel-based physics sandbox where liquids, gases, heat, rigid bodies, and materials can interact in the same world.
 
-Double-click `run.bat`. It builds `build\pipace.exe` on the first run with the MSYS2 UCRT64 `g++` compiler, then launches it.
+It is inspired by sandboxes where you can simply place things down and see what happens, but the long-term goal is to push the simulation much further with deeper material properties, chemistry, phase changes, and user-created substances.
 
-You can also build with CMake:
+The name is intentionally honest. PIPACE tries to be believable where it can, approximate where it has to, and avoid pretending every part of the simulation is perfectly accurate.
 
-```powershell
-cmake -S . -B build
-cmake --build build --config Release
+## What can it do right now?
+
+PIPACE is still in development, but it already includes:
+
+- liquids such as water and honey
+- mixing and dyeing liquids
+- gases and gas pressure
+- temperature and heat transfer
+- rigid pixel-built solids
+- collisions, fracture, and material strength
+- porous materials that can absorb and drip water
+- different material properties for wood, stone, glass, metal, and more
+- several debug views for seeing what the simulation is doing
+- quality and performance settings for weaker computers
+
+Under the hood, materials are treated as **substances** with their own physical properties and supported phases. This is being built so that one substance can eventually exist as a solid, liquid, or gas without being treated as three unrelated materials.
+
+## Where is it going?
+
+Some of the bigger planned systems are:
+
+- melting, freezing, boiling, and condensation
+- chemical reactions
+- combustion
+- more substances and mixtures
+- electricity
+- more tools for building contraptions
+- **SACE**, a system for estimating the properties of substances that are not already built into the game
+
+The idea is to eventually let the sandbox produce things that were never manually added beforehand.
+
+## Running PIPACE
+
+PIPACE currently targets Windows.
+
+Run:
+
+```text
+run.bat
 ```
 
-## Controls
+This builds and launches the program.
 
-- Click **SETTINGS** (or press `Esc`) for **Quality** (Low / Medium / High / Auto), air solver rate, 20/30 Hz sim, solver toggles, **simulation threads**, scenes, and the rest of the old keyboard options. Low drops pressure/substep/limiter caps, turns air off, uses flat drawing, and runs at 20 Hz so weaker machines stay smooth.
-- Use the top-bar view buttons (**NORM**, **CHNK**, liquid **FILL/LIQP/LVEL/LDIV**, rigid **RGDN/RGDO**, gas **GASP/GASA/GASV**). Hover a button to read what it does in **INSPECTOR**.
+You can also build it with CMake if you prefer.
 
-Everyday painting:
+## A note about accuracy
 
-- Pick **FLUIDS / SOLIDS / TOOLS / MISC** in the bar under the canvas. The right-hand list shows that tab's elements (water, wood/stone, erase, wall). Gases / plasma / energy are empty placeholders.
-- **SOLIDS** (wood / stone) fall unless **Anchored** is on in Properties. Anchored bodies stay put and still collide.
-- **WALL** is under **MISC** (static world cells).
-- Mouse wheel or `[` / `]`: brush size.
-- **PAUSE** / **RESUME**, or `Space`: pause. While paused, **Step** in Settings advances one tick.
-- Top `-` / `+`, or `-` / `+` keys: playback speed (`0.1x`–`4x`). Physics step stays 1/30 s.
-- Right-click a rigid body to delete it. Hover a cell to see it in **INSPECTOR**.
-- The search field is a placeholder (no filtering yet). The bottom console bar logs simple `[PHYS]` lines; it does not run commands.
+PIPACE is not meant to be a laboratory simulator.
 
-The menu covers:
+Some systems use real units and physical data, while others use simplified or sandbox-scaled models so the simulation can stay interactive.
 
-- Clear / reset world, slosh impulse
-- Views: Normal, Fill, Pressure, Velocity, Divergence, Chunks, Rigid
-- Glow, rigid overlay, wood/stone draw material
-- Vorticity, advection (SL / BFECC), residual merge, pressure iterations
-- Fluid test scenes and rigid test scenes
+The general rule is:
 
-## Implemented model
+> Exact where known, rule-based where understood, approximate where necessary.
 
-- Fractional cell-centered liquid fill; rendering remains one crisp simulation pixel per world cell.
-- Staggered MAC velocity arrays: horizontal velocity on vertical faces and vertical velocity on horizontal faces.
-- Semi-Lagrangian velocity advection with optional extrema-clamped BFECC, gravity, solid no-through boundaries, divergence calculation, and red-black Gauss-Seidel pressure projection.
-- Previous-frame pressure is retained as a temporal warm start; free surfaces use approximate fractional face weights and adaptive 8/14/24-iteration pressure budgets with residual early-out.
-- Iteratively donor/receiver-limited face fluxes allow simultaneous `A -> B -> C` through-flow while keeping volume bounded and scan-order independent.
-- Conservative residual-volume consolidation gathers sub-visible remnants into physically plausible neighboring liquid rather than deleting them or letting them form map-wide films.
-- Fixed 1/30-second physical updates with CFL-driven fluid substeps. The toolbar changes playback speed, not physics behavior.
-- A persistent 3x3-smoothed color field drives near-surface masks, normals, curvature, coherent surface tension, and physically gated spray breakup.
-- Water uses an intentional scale of 4 cells per meter and 9.81 m/s² gravity (39.24 cells/s²). Its low viscosity skips diffusion; a real spatial-diffusion path is available for future thicker liquids.
-- Conservative ballistic droplets with volume and momentum transfer on re-entry.
-- Open world edges act as a void: outward-flowing liquid and splash particles are removed instead of being reflected or deposited back inside.
-- A `LiquidProperties` structure provides density, viscosity, and surface tension for future chemistry materials without implementing them yet.
-- 16x16 chunks sleep from measured velocity/divergence/fill/pressure stability. Sleeping chunks stay asleep through leftover MAC speed until fill actually changes or liquid goes airborne. Disturbances wake a halo and the connected fluid region; advection, forces, projection, and transport operate on its bounding region.
-- Live diagnostics include thin-cell count/volume, momentum, kinetic energy, hovered-cell state, pressure iterations, CFL cap, and averaged stage timings.
-- Run `build\pipace.exe --benchmark` to generate a deterministic TSV report beside the executable.
-- Run `build\pipace.exe --thread-benchmark` to compare simulation-step timings at 1 / 2 / 4 / Auto workers.
-- Run `build\pipace.exe --rigid-benchmark` for a short rigid-body conservation/timing report.
-- Run `build\pipace.exe --gas-diag` for Air conservation / chamber regression rows in `gas_diag.tsv`.
-- Run `build\pipace.exe --solid-diag` for grab / fracture / moisture regression rows in `solid_diag.tsv`.
+And if something goes catastrophically wrong, PIPACE will probably consider that a learning opportunity.
 
-The old falling-sand water mover, per-cell water velocity, lateral target search, directional scan bias, and individual-cell sleeping system have been removed.
+## Status
+
+PIPACE is actively being developed and a lot can still change.
+
+For now, the best way to understand it is probably to open it, place some things down, and see what happens.

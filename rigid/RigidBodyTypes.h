@@ -12,8 +12,8 @@ constexpr MaterialId MATERIAL_STONE = 2;
 constexpr MaterialId MATERIAL_GLASS = 3;
 constexpr MaterialId MATERIAL_METAL = 4;
 constexpr MaterialId MATERIAL_COUNT = 5;
-// Compatibility (Prompt 1): rigid source masks still store MaterialId.
-// Map to the shared engine identity with substanceForMaterial().
+// Rigid source masks still store MaterialId. Map to engine identity with
+// substanceForMaterial(). Not a second property database.
 
 enum class StructuralDamageType : uint8_t {
     Impact = 0,
@@ -42,8 +42,9 @@ struct StructuralBond {
     bool broken = false;
 };
 
-// Compatibility adapter. Authoritative mechanical/porous/visual RGB live on
-// SubstanceDefinition (substanceForMaterialId -> substanceDef).
+// Compatibility adapter for code that still keys off MaterialId (masks,
+// fracture, moisture, mass, RGB). Values are copied from SubstanceDefinition
+// at first use; do not add independent physical constants here.
 struct MaterialDefinition {
     char const *name;
     float density;   // relative to water density 1.0

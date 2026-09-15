@@ -5,6 +5,11 @@ test	supports_wood_solid	PASS
 test	supports_wood_liquid	PASS	wood must not be liquid-capable
 test	supports_air_gas	PASS	
 test	supports_air_solid	PASS	air must not be solid-capable
+test	supports_honey_liquid	PASS	
+test	supports_honey_solid_conservative	PASS	honey is solid-capable metadata without a solid table
+test	supports_honey_not_gas	PASS	
+test	supports_glass_liquid_no_fluid	PASS	glass liquid-capable without a fluid table
+test	supports_metal_liquid_no_fluid	PASS	
 test	no_ice_id	PASS	
 test	no_steam_id	PASS	
 test	no_current_phase_on_def	PASS	SubstanceDefinition stores capability flags only
@@ -12,10 +17,22 @@ test	water_has_fluid	PASS
 test	metal_has_mechanical	PASS	
 test	air_has_gas	PASS	
 test	plasma_unsupported	PASS	
+test	none_phase_unsupported	PASS	
+test	invalid_id_no_phase	PASS	
+test	identity_roundtrip_water_liquid	PASS	
+test	identity_static_wall	PASS	
+test	identity_gas_species_air	PASS	
+test	identity_rigid_wood	PASS	
 test	query_water_liquid	PASS	sub=1 phase=2
+test	query_liquid_gas_interface	PASS	neighbor sub=7
 test	query_honey_liquid	PASS	sub=2
 test	query_mixture_dominant_water	PASS	dom=1 honey=0.400000 water=0.600000
+test	query_mixture_not_new_id	PASS	mixtures keep a dominant built-in SubstanceId
 test	query_wood_solid	PASS	sub=3 phase=1
 test	query_static_wall_stone_solid	PASS	sub=4
+test	query_static_wall_thermal_identity	PASS	
 test	query_air_gas	PASS	sub=7 phase=3 amt=1.000000
-summary	PASS	20 passed, 0 failed
+test	query_oob	PASS	
+test	query_oob_far	PASS	
+test	query_empty	PASS	kind empty after zero fill and gas
+summary	PASS	37 passed, 0 failed

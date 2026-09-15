@@ -632,9 +632,12 @@ void drawShell(HDC dc, ShellState &shell, View const &view) {
         int hx = view.hoverX, hy = view.hoverY;
         int hi = FluidEngine::ci(hx, hy);
         ins(trf("info_cell", std::to_wstring(hx), std::to_wstring(hy)));
-        auto insIdentity = [&](SubstanceId id, MatterPhase phase) {
+        auto insIdentity = [&](SubstanceId id, MatterPhase phase, bool dominant) {
             SubstanceDefinition const &def = substanceDef(id);
-            ins(trf("ins_substance", tr(def.displayNameKey)));
+            if (dominant)
+                ins(trf("ins_substance_dominant", tr(def.displayNameKey)));
+            else
+                ins(trf("ins_substance", tr(def.displayNameKey)));
             ins(trf("ins_phase", tr(matterPhaseKey(phase))));
             ins(trf("ins_substance_id", std::to_wstring(def.id)));
             if (def.mechanical.valid)
@@ -662,7 +665,7 @@ void drawShell(HDC dc, ShellState &shell, View const &view) {
                 if (s.kind == ThermalSampleKind::Liquid)
                     matName = tr(substanceDef(e->dominantLiquidSubstance(hi)).displayNameKey);
                 else if (s.kind == ThermalSampleKind::Gas) matName = tr(substanceDef(SUBSTANCE_AIR).displayNameKey);
-                else if (s.kind == ThermalSampleKind::Wall) matName = tr(substanceDef(SUBSTANCE_STONE).displayNameKey);
+                else if (s.kind == ThermalSampleKind::Wall) matName = tr(substanceDef(kStaticWallSubstance).displayNameKey);
                 else if (s.kind == ThermalSampleKind::Rigid)
                     matName = tr(substanceDef(substanceForMaterial(s.materialId)).displayNameKey);
                 ins(trf("ins_material", matName));
@@ -676,7 +679,7 @@ void drawShell(HDC dc, ShellState &shell, View const &view) {
         }
         if (e->solid[static_cast<size_t>(hi)]) {
             ins(tr("ins_kind_wall"));
-            insIdentity(kStaticWallSubstance, MatterPhase::Solid);
+            insIdentity(kStaticWallSubstance, MatterPhase::Solid, false);
         }
         int body = rg ? rg->occupant[static_cast<size_t>(hi)] : -1;
         if (body >= 0 && rg && body < static_cast<int>(rg->bodies.size())) {
@@ -685,7 +688,7 @@ void drawShell(HDC dc, ShellState &shell, View const &view) {
             wchar_t const *matName = tr(substanceDef(substanceForMaterial(mat)).displayNameKey);
             ins(tr("ins_kind_rigid"));
             ins(trf("ins_material", matName));
-            insIdentity(substanceForMaterial(mat), MatterPhase::Solid);
+            insIdentity(substanceForMaterial(mat), MatterPhase::Solid, false);
             ins(trf("ins_id", std::to_wstring(b.id)));
             ins(trf("ins_component", std::to_wstring(b.id)));
             ins(trf("ins_mass", shortFloat(b.mass, 2)));
@@ -732,15 +735,16 @@ void drawShell(HDC dc, ShellState &shell, View const &view) {
             ins(trf("ins_vel", shortFloat(e->cellU(hx, hy), 2), shortFloat(e->cellV(hx, hy), 2)));
             ins(trf("ins_surface", e->surfaceMask[static_cast<size_t>(hi)] ? tr("yes") : tr("no")));
             if (fill > 1.0e-8f) {
-                ins(L"");
-                int honeyPct = std::clamp(static_cast<int>(std::lround(static_cast<double>(e->honeyFraction(hi) * 100.0f))), 0, 100);
-                int waterPct = 100 - honeyPct;
-                ins(trf("ins_comp_water", std::to_wstring(waterPct)));
-                ins(trf("ins_comp_honey", std::to_wstring(honeyPct)));
-                insIdentity(e->dominantLiquidSubstance(hi), MatterPhase::Liquid);
-                if (e->liquidComponentAmount(hi, SUBSTANCE_WATER) > 1.0e-6f
-                    && e->liquidComponentAmount(hi, SUBSTANCE_HONEY) > 1.0e-6f)
-                    ins(tr("ins_mixture"));
+                bool mix = e->liquidComponentAmount(hi, SUBSTANCE_WATER) > 1.0e-6f
+                    && e->liquidComponentAmount(hi, SUBSTANCE_HONEY) > 1.0e-6f;
+                insIdentity(e->dominantLiquidSubstance(hi), MatterPhase::Liquid, mix);
+                if (mix) {
+                    int honeyPct = std::clamp(static_cast<int>(std::lround(static_cast<double>(e->honeyFraction(hi) * 100.0f))), 0, 100);
+                    int waterPct = 100 - honeyPct;
+                    ins(tr("ins_composition"));
+                    ins(trf("ins_comp_water", std::to_wstring(waterPct)));
+                    ins(trf("ins_comp_honey", std::to_wstring(honeyPct)));
+                }
             }
         }
         ins(trf("ins_volume", shortFloat(e->currentVolume, 1), shortFloat(e->expectedVolume, 1)));
@@ -760,7 +764,7 @@ void drawShell(HDC dc, ShellState &shell, View const &view) {
         if (g && !e->solid[static_cast<size_t>(hi)] && body < 0) {
             int gi = hi;
             ins(tr("ins_gas_material"));
-            insIdentity(SUBSTANCE_AIR, MatterPhase::Gas);
+            insIdentity(SUBSTANCE_AIR, MatterPhase::Gas, false);
             ins(trf("ins_gas_amount", shortFloat(g->amount[static_cast<size_t>(gi)], 3)));
             ins(trf("ins_gas_vol", shortFloat(g->volume[static_cast<size_t>(gi)], 3)));
             ins(trf("ins_gas_pa", shortFloat(g->pressurePa(gi), 0)));

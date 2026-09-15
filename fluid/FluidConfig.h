@@ -2,18 +2,9 @@
 
 #include "FluidTypes.h"
 
-// Compatibility snapshots of the two currently simulated liquid substances.
-// Authoritative values live on SubstanceDefinition. Physics should use
-// sandboxReferenceLiquid() (solver unit reference) or mix* helpers, not
-// treat config.water as "the liquid in the world".
-inline LiquidProperties kHoneyLiquid() {
-    return fluidForSubstance(SUBSTANCE_HONEY);
-}
-
+// Solver knobs only. Liquid tables live on SubstanceDefinition
+// (fluidForSubstance / mix* / sandboxReferenceLiquid).
 struct FluidConfig {
-    // Compatibility copies of water/honey fluid tables. Prompt 4 may drop these.
-    LiquidProperties water = fluidForSubstance(SUBSTANCE_WATER);
-    LiquidProperties honey = fluidForSubstance(SUBSTANCE_HONEY);
     float cellsPerMeter = 4.0f;
     float gravityMetersPerSecondSquared = 9.81f;
     float maxVelocity = 75.0f;             // prevents pathological CFL spikes

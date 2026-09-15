@@ -31,16 +31,18 @@ PIPACE/
     ThermalTypes.h / ThermalConfig.h / ThermalEngine.h/.cpp  # heat storage, conduction, sleep
   fluid/
     FluidTypes.h           # Grid constants, enums, SplashParticle, LiquidProperties alias, TimingAverages
-    FluidConfig.h          # FluidConfig (compatibility copies of water/honey fluid tables)
+    FluidConfig.h          # FluidConfig (solver knobs; no liquid property copies)
     FluidEngine.h/.cpp     # Owns all fluid arrays + simulation stages (behavior-preserving extract)
   rigid/
-    RigidBodyTypes.h       # MaterialId, pixel-mask RigidBody, MaterialDefinition adapter
+    RigidBodyTypes.h       # MaterialId masks + MaterialDefinition adapter (from SubstanceDefinition)
     RigidBodyEngine.h/.cpp # Drawable pixel-native rigid bodies + world/fluid coupling
   substance/
     SubstanceProperties.h  # Grouped intrinsic properties (mechanical/fluid/thermal/phase/porous/…)
     SubstanceTypes.h / SubstanceRegistry.h/.cpp  # SubstanceId, MatterPhase, registry
   world/
-    WorldQuery.h/.cpp      # sampleMatterAt (SubstanceId + phase), phase-capability diags
+    WorldQuery.h/.cpp      # sampleMatterAt (SubstanceId + phase), phase/registry diags
+  docs/
+    PHASE_CHANGES.md       # Next-milestone design note (not implemented)
   CMakeLists.txt / build.bat / run.bat
   README.md
   AGENTS.md
@@ -48,14 +50,16 @@ PIPACE/
 ```
 
 Physical properties are canonical on `SubstanceDefinition` grouped structs
-(`mechanical` / `fluid` / `thermal` / `phase` / `porous`). `MaterialDefinition`,
-`FluidConfig.water` / `.honey`, and `k*Thermal()` are compatibility adapters that
-delegate into the substance table. Do not add new duplicate property tables.
+(`mechanical` / `fluid` / `thermal` / `phase` / `porous`). Do not add new
+duplicate property tables.
 
-**Identity vs phase vs engine:** `SubstanceDefinition` describes WHAT a material is.
-`MatterPhase` describes WHICH phase a world cell/body currently represents (not stored
-on the definition). Engine storage describes HOW that phase is simulated today.
-These mappings are implementation, not laws:
+**Identity vs phase vs engine:**
+
+- `SubstanceDefinition` = intrinsic identity + properties (WHAT it is)
+- `MatterPhase` = current represented phase (WHICH phase this cell/body is)
+- engine storage = numerical representation (HOW that phase is simulated today)
+
+These mappings are **implementation, not laws**:
 
 | Current representation | Engine |
 |---|---|
@@ -64,14 +68,30 @@ These mappings are implementation, not laws:
 | Stone + Solid | rigid body **or** static `solid[]` walls (`kStaticWallSubstance`) |
 | Air + Gas | GasEngine |
 
-`supportsPhase` is capability metadata only. Do **not** implement melting/boiling/freezing
-here. Do **not** add SUBSTANCE_ICE / SUBSTANCE_STEAM. Density stays phase-specific:
+`supportsPhase` is capability metadata only. There is **no** melting/boiling/freezing
+solver yet. Do **not** add SUBSTANCE_ICE / SUBSTANCE_STEAM. Density stays phase-specific:
 mechanical.densityRel (solid), fluid.density (liquid), gas amount/EoS (gas).
+
+Water/honey cells that hold both channels are **mixtures**, not a new SubstanceId.
+`MatterSample` reports the dominant component plus fractions. Generalized mixtures
+and SACE are future work.
 
 Solver unit liquid is `sandboxReferenceLiquid()` (currently SUBSTANCE_WATER's fluid
 table: relative density 1.0). That is a reference, not “all liquid is water”.
 
-Build: `run.bat` or CMake → `build/pipace.exe`. Headless: `--benchmark`, `--scale-benchmark`, `--rigid-benchmark`, `--thread-benchmark`, `--liquid-diag`, `--substance-phase-diag`. Grid size via `PIPACE_GRID_WIDTH` / `PIPACE_GRID_HEIGHT` (default 200×120). SETTINGS → Simulation threads (Auto / 1 / 2 / 4 / 6 / 8). Auto is 1 worker on the default grid; see `misc/THREAD_PASS_NOTES.md`.
+**Compatibility adapters that remain (justified):**
+
+- `MaterialDefinition` / `materialDef(MaterialId)` — rigid masks still store
+  `MaterialId`; fracture, moisture, mass, and RGB read this view. Values come
+  from `SubstanceDefinition` at first use.
+- `LiquidProperties` — name alias for `FluidProperties`.
+- `GasSpecies::Air` — single bridge to `SUBSTANCE_AIR` + `MatterPhase::Gas`.
+- `LiquidPaint.asHoney` — UI paint flag; simulation uses `paint.substance()`.
+
+Removed copies: `FluidConfig.water` / `.honey`, `kHoneyLiquid()`, `k*Thermal()`
+wrappers, `GasConfig.thermal`.
+
+Build: `run.bat` or CMake → `build/pipace.exe`. Headless: `--benchmark`, `--scale-benchmark`, `--rigid-benchmark`, `--thread-benchmark`, `--liquid-diag`, `--substance-phase-diag`, `--substance-registry-diag`. Grid size via `PIPACE_GRID_WIDTH` / `PIPACE_GRID_HEIGHT` (default 200×120). SETTINGS → Simulation threads (Auto / 1 / 2 / 4 / 6 / 8). Auto is 1 worker on the default grid; see `misc/THREAD_PASS_NOTES.md`.
 
 ## Fluid engine (what exists)
 
@@ -89,7 +109,9 @@ Hybrid free-surface solver:
 - 16×16 chunk wake/sleep; active solve region + halo
 - Volume / momentum / KE diagnostics; F1–F10 test scenes; stage timings
 
-`LiquidProperties` already exists for future multi-liquid / SACE-driven materials. Behavior is still water-centric.
+`LiquidProperties` is a compatibility name for `FluidProperties`. Fluid lookup is
+`fluidForSubstance` / `mix*` / `sandboxReferenceLiquid()`. Two volume channels
+(water/honey) exist; there is no mixture SubstanceId.
 
 ## Modularization rules (critical)
 
@@ -138,12 +160,15 @@ Do **not** sacrifice conservation or replace the donor/receiver limiter with sca
 
 ## Near-term roadmap order (condensed)
 
-1. Liquid correctness (leaks, void boundary, hole flicker)
-2. Performance pass (lists, caches, paint batching, renderer)
-3. Finish modularization
-4. Dye tracers → honey multi-liquid proof
-5. Pixel-native rigid bodies + two-way fluid coupling (first drawable-body milestone is in `rigid/`)
-6. Temperature → gas engine → SACE → phase changes
+Completed architecture: SubstanceId, registry, grouped properties, MatterPhase /
+MatterIdentity, world query, material migration, moisture stabilization.
+
+**Next major milestone: real phase changes** — water `solid ⇄ liquid ⇄ gas`
+without Ice/Steam IDs. Design note: `docs/PHASE_CHANGES.md`. Do not start that
+solver from an architecture-only task.
+
+Longer sequence (historical): liquid correctness → performance → modularization →
+honey composition → rigid coupling → temperature/gas → **phase changes** → SACE.
 
 Detail lives in `misc/PIPACE_Project_Roadmap_TODO.txt` and `misc/PIPACE_SACE_Concept_Notes.txt`.
 

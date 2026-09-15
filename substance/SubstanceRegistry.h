@@ -22,3 +22,6 @@ inline MaterialId rigidMaterialForSubstance(SubstanceId substance) {
 }
 
 SubstanceId substanceFromInternalName(char const *name);
+
+// Headless: --substance-registry-diag  -> misc/substance_registry_diag.tsv
+void runSubstanceRegistryDiagnostics();

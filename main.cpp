@@ -13,6 +13,7 @@
 #include "ui/UiLanguage.h"
 #include "render/WorldRenderer.h"
 #include "world/WorldQuery.h"
+#include "substance/SubstanceRegistry.h"
 
 #include <algorithm>
 #include <array>
@@ -1339,6 +1340,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR commandLine, int show)
     if (commandLine && wcsstr(commandLine, L"--solid-diag")) { rigid.runSolidDiagnostics(engine); return 0; }
     if (commandLine && wcsstr(commandLine, L"--moisture-diag")) { rigid.runMoistureDiagnostics(engine); return 0; }
     if (commandLine && wcsstr(commandLine, L"--moisture-drip-diag")) { rigid.runMoistureDripDiagnostics(engine); return 0; }
+    if (commandLine && wcsstr(commandLine, L"--substance-registry-diag")) { runSubstanceRegistryDiagnostics(); return 0; }
     if (commandLine && wcsstr(commandLine, L"--substance-phase-diag")) { runSubstancePhaseDiagnostics(engine, rigid, gas); return 0; }
     if (commandLine && wcsstr(commandLine, L"--thermal-diag")) { thermal.runDiagnostics(engine, rigid, gas); return 0; }
     if (commandLine && wcsstr(commandLine, L"--gas-diag")) { gas.runDiagnostics(engine, rigid); return 0; }

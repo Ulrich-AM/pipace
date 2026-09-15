@@ -220,8 +220,8 @@ void seedEnglish() {
     set("ins_liquid_total", L"Liquid free/abs/splash/total {0} / {1} / {2} / {3}");
     set("ins_pending_drip", L"Pending drip: {0}");
     set("ins_fill", L"Fill: {0}");
-    set("ins_comp_water", L"{0}% water");
-    set("ins_comp_honey", L"{0}% honey");
+    set("ins_comp_water", L"Water {0}%");
+    set("ins_comp_honey", L"Honey {0}%");
     set("ins_dye", L"Dye: {0}%");
     set("ins_temp", L"Temperature: {0} K");
     set("ins_temp_header", L"TEMP");
@@ -233,6 +233,7 @@ void seedEnglish() {
     set("ins_mat_air", L"Air");
     set("ins_mat_none", L"(none)");
     set("ins_substance", L"Substance: {0}");
+    set("ins_substance_dominant", L"Substance: {0} (dominant)");
     set("ins_phase", L"Phase: {0}");
     set("ins_phase_none", L"(none)");
     set("ins_phase_solid", L"Solid");
@@ -240,6 +241,7 @@ void seedEnglish() {
     set("ins_phase_gas", L"Gas");
     set("ins_phase_plasma", L"Plasma");
     set("ins_mixture", L"Mixture: water + honey");
+    set("ins_composition", L"Composition:");
     set("ins_substance_id", L"Substance ID: {0}");
     set("ins_density", L"Density: {0}");
     set("ins_viscosity", L"Viscosity: {0}");

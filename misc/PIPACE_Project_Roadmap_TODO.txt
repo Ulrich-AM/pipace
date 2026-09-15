@@ -487,9 +487,11 @@ PHASE 8 - BROADER MATERIAL / LIQUID SYSTEM
 
 After honey proves the architecture:
 
-[ ] General MaterialID system.
-[ ] General LiquidProperties retrieval.
-[ ] Remove hard-coded assumptions that all liquid is "water".
+[x] General MaterialID system.
+[x] General LiquidProperties retrieval.
+[x] Remove hard-coded assumptions that all liquid is "water".
+    Solver unit remains sandboxReferenceLiquid() (water's table).
+    Water/honey are composition channels, not a mixture SubstanceId.
 
 Potential liquid properties:
 [ ] Density.
@@ -647,8 +649,8 @@ material properties should be estimated. Physics engines determine HOW the
 current phases move.
 
 Substance identity:
-[ ] Substance/material database.
-[ ] Stable internal SubstanceID system.
+[x] Substance/material database. (built-in SubstanceDefinition registry)
+[x] Stable internal SubstanceID system.
 [ ] Base-16 generated display IDs.
     Examples:
       Element #A
@@ -696,8 +698,8 @@ Reaction system:
 [ ] Reaction energy.
 [ ] Heat generation/absorption.
 [ ] Products may enter solid/liquid/gas engines.
-[ ] Mixture property calculation.
-[ ] Phase-change rules.
+[x] Mixture property calculation. (water/honey channels only; no mixture SubstanceId)
+[ ] Phase-change rules.  NEXT: water solid ⇄ liquid ⇄ gas. See docs/PHASE_CHANGES.md.
 
 Conservation rules:
 [ ] Conserve atom counts across ordinary chemical reactions.
@@ -997,21 +999,24 @@ NEAR-TERM RECOMMENDED ORDER
 
 The following is a suggested sequence, not a rigid requirement:
 
-[ ] 1. Fix current liquid correctness bugs.
-[ ] 2. Implement/experiment with MacCormack.
-[ ] 3. Add NSL/FOU/NVA only if useful for low-end quality scaling.
-[ ] 4. Begin Settings tab and expose existing solver/render options.
-[ ] 5. Add dye/passive tracers.
-[ ] 6. Perform fluid performance pass.
-[ ] 7. Modularize the monolithic source while preserving behavior.
-[ ] 8. Use honey as the first true multi-liquid/composition experiment.
-[ ] 9. Build pixel-native rigid bodies with authoritative local pixel masks.
-[ ] 10. Add cut/split/merge behavior and two-way rigid-body/fluid interaction.
-[ ] 11. Generalize material/substance identity and solid/liquid property systems.
-[ ] 12. Add temperature/internal-energy foundations.
-[ ] 13. Build the lightweight gas engine.
+[x] 1. Fix current liquid correctness bugs. (ongoing leak/flicker follow-ups remain)
+[x] 2. Implement/experiment with MacCormack. (BFECC path exists)
+[~] 3. Add NSL/FOU/NVA only if useful for low-end quality scaling.
+[x] 4. Begin Settings tab and expose existing solver/render options.
+[x] 5. Add dye/passive tracers.
+[x] 6. Perform fluid performance pass.
+[~] 7. Modularize the monolithic source while preserving behavior.
+[x] 8. Use honey as the first true multi-liquid/composition experiment.
+[x] 9. Build pixel-native rigid bodies with authoritative local pixel masks.
+[x] 10. Add cut/split/merge behavior and two-way rigid-body/fluid interaction.
+[x] 11. Generalize material/substance identity and solid/liquid property systems.
+    SubstanceId, registry, grouped properties, MatterPhase, world query,
+    MaterialDefinition adapter. Moisture conservation/drip stabilized.
+[x] 12. Add temperature/internal-energy foundations.
+[x] 13. Build the lightweight gas engine.
 [ ] 14. Integrate SACE chemistry and generated-substance caching.
-[ ] 15. Add phase changes.
+[ ] 15. Add phase changes.  **NEXT MILESTONE: WATER solid ⇄ liquid ⇄ gas.**
+    Design: docs/PHASE_CHANGES.md. No Ice/Steam SubstanceIds.
 [ ] 16. Add dedicated explosion/shock behavior.
 [ ] 17. Expand materials, tools, test scenes, and quality settings.
 
@@ -1062,9 +1067,9 @@ Put tempting ideas here instead of interrupting the current milestone.
 [?] Dissolved gases.
 [?] Cavitation approximation.
 [?] Capillary/wicking materials.
-[?] Porous solids.
+[x] Porous solids. (wood/stone moisture)
 [?] Soft bodies.
-[?] Fracture/destruction.
+[x] Fracture/destruction.
 [?] Electricity/conductivity.
 [?] Electrolysis.
 [?] Corrosion.

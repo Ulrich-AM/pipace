@@ -1,9 +1,17 @@
 #include "substance/SubstanceRegistry.h"
 
+#include "fluid/DiagOutput.h"
+
+#include <cmath>
 #include <cstring>
+#include <fstream>
+#include <iomanip>
+#include <string>
 
 namespace {
 
+// Table authoring still writes transition metadata on ThermalProperties.
+// PhaseProperties is the query path (phaseForSubstance). Copied once at init.
 void copyPhaseTransitionFromThermal(SubstanceDefinition &s) {
     s.phase.meltingPointK = s.thermal.meltingPointK;
     s.phase.boilingPointK = s.thermal.boilingPointK;
@@ -63,9 +71,6 @@ SubstanceDefinition makeWater() {
     s.thermal.softeningTempK = 0.0f;
 
     // Phase capability
-    s.canExistAsSolid = true;
-    s.canExistAsLiquid = true;
-    s.canExistAsGas = true;
     s.phase.valid = true;
     s.phase.solidCapable = true;
     s.phase.liquidCapable = true;
@@ -121,9 +126,6 @@ SubstanceDefinition makeHoney() {
     s.thermal.softeningTempK = 0.0f;
 
     // Phase capability
-    s.canExistAsSolid = true;
-    s.canExistAsLiquid = true;
-    s.canExistAsGas = false;
     s.phase.valid = true;
     s.phase.solidCapable = true;
     s.phase.liquidCapable = true;
@@ -173,9 +175,6 @@ SubstanceDefinition makeWood() {
     s.thermal.softeningTempK = 450.0f;
 
     // Phase capability
-    s.canExistAsSolid = true;
-    s.canExistAsLiquid = false;
-    s.canExistAsGas = false;
     s.phase.valid = true;
     s.phase.solidCapable = true;
     s.phase.liquidCapable = false;
@@ -252,9 +251,6 @@ SubstanceDefinition makeStone() {
     s.thermal.softeningTempK = 0.0f;
 
     // Phase capability
-    s.canExistAsSolid = true;
-    s.canExistAsLiquid = false;
-    s.canExistAsGas = false;
     s.phase.valid = true;
     s.phase.solidCapable = true;
     s.phase.liquidCapable = false;
@@ -329,9 +325,6 @@ SubstanceDefinition makeGlass() {
     s.thermal.softeningTempK = 800.0f;
 
     // Phase capability
-    s.canExistAsSolid = true;
-    s.canExistAsLiquid = true;
-    s.canExistAsGas = false;
     s.phase.valid = true;
     s.phase.solidCapable = true;
     s.phase.liquidCapable = true;
@@ -391,9 +384,6 @@ SubstanceDefinition makeMetal() {
     s.thermal.softeningTempK = 1000.0f;
 
     // Phase capability
-    s.canExistAsSolid = true;
-    s.canExistAsLiquid = true;
-    s.canExistAsGas = false;
     s.phase.valid = true;
     s.phase.solidCapable = true;
     s.phase.liquidCapable = true;
@@ -453,9 +443,6 @@ SubstanceDefinition makeAir() {
     s.thermal.softeningTempK = 0.0f;
 
     // Phase capability
-    s.canExistAsSolid = false;
-    s.canExistAsLiquid = false;
-    s.canExistAsGas = true;
     s.phase.valid = true;
     s.phase.solidCapable = false;
     s.phase.liquidCapable = false;
@@ -492,4 +479,162 @@ SubstanceId substanceFromInternalName(char const *name) {
         if (internal && std::strcmp(internal, name) == 0) return id;
     }
     return SUBSTANCE_NONE;
+}
+
+namespace {
+
+char const *classificationName(SubstanceClass c) {
+    switch (c) {
+        case SubstanceClass::PureSubstance: return "pure";
+        case SubstanceClass::Mixture: return "mixture";
+        case SubstanceClass::Composite: return "composite";
+        case SubstanceClass::Biological: return "biological";
+        case SubstanceClass::Unknown: return "unknown";
+    }
+    return "unknown";
+}
+
+char const *compositionName(CompositionKind k) {
+    switch (k) {
+        case CompositionKind::PureChemical: return "pure_chemical";
+        case CompositionKind::Mixture: return "mixture";
+        case CompositionKind::Composite: return "composite";
+        case CompositionKind::Unknown: return "unknown";
+    }
+    return "unknown";
+}
+
+} // namespace
+
+void runSubstanceRegistryDiagnostics() {
+    std::ofstream out(miscFile("substance_registry_diag.tsv"));
+    out << std::setprecision(8);
+    SubstanceDefinition const *table = builtinSubstanceTable();
+
+    out << "id\tinternal_name\tclassification\tcomposition_kind"
+        << "\tsolid_capable\tliquid_capable\tgas_capable"
+        << "\tmechanical_valid\tfluid_valid\tthermal_valid"
+        << "\tporous_valid\tchemical_valid\telectrical_valid\n";
+    for (SubstanceId id = 0; id < SUBSTANCE_COUNT; ++id) {
+        SubstanceDefinition const &s = table[id];
+        out << s.id << '\t' << s.internalName
+            << '\t' << classificationName(s.classification)
+            << '\t' << compositionName(s.compositionKind)
+            << '\t' << (s.phase.solidCapable ? 1 : 0)
+            << '\t' << (s.phase.liquidCapable ? 1 : 0)
+            << '\t' << (s.phase.gasCapable ? 1 : 0)
+            << '\t' << (s.mechanical.valid ? 1 : 0)
+            << '\t' << (s.fluid.valid ? 1 : 0)
+            << '\t' << (s.thermal.valid ? 1 : 0)
+            << '\t' << (s.porous.valid ? 1 : 0)
+            << '\t' << (s.chemical.valid ? 1 : 0)
+            << '\t' << (s.electrical.valid ? 1 : 0) << '\n';
+    }
+
+    int passed = 0, failed = 0;
+    auto emit = [&](char const *name, bool ok, std::string const &detail) {
+        out << "test\t" << name << '\t' << (ok ? "PASS" : "FAIL") << '\t' << detail << '\n';
+        if (ok) ++passed; else ++failed;
+    };
+    auto near = [](float a, float b, float tol = 1.0e-4f) {
+        return std::fabs(a - b) <= tol;
+    };
+
+    bool idsUnique = true;
+    bool namesUnique = true;
+    bool indexMatches = true;
+    for (SubstanceId id = 0; id < SUBSTANCE_COUNT; ++id) {
+        if (table[id].id != id) indexMatches = false;
+        for (SubstanceId other = static_cast<SubstanceId>(id + 1); other < SUBSTANCE_COUNT; ++other) {
+            if (table[id].id == table[other].id) idsUnique = false;
+            if (table[id].internalName && table[other].internalName
+                && std::strcmp(table[id].internalName, table[other].internalName) == 0)
+                namesUnique = false;
+        }
+    }
+    emit("ids_unique", idsUnique, "");
+    emit("names_unique", namesUnique, "");
+    emit("table_index_matches_id", indexMatches, "");
+    emit("builtin_count", SUBSTANCE_COUNT == 8, std::to_string(SUBSTANCE_COUNT));
+    emit("none_is_slot_zero", table[SUBSTANCE_NONE].id == SUBSTANCE_NONE
+        && std::strcmp(table[SUBSTANCE_NONE].internalName, "none") == 0, "");
+    emit("none_no_fake_physics",
+        !table[SUBSTANCE_NONE].mechanical.valid
+            && !table[SUBSTANCE_NONE].fluid.valid
+            && !table[SUBSTANCE_NONE].thermal.valid
+            && !table[SUBSTANCE_NONE].porous.valid
+            && !table[SUBSTANCE_NONE].phase.valid, "");
+
+    SubstanceDefinition const &bad = substanceDef(999);
+    emit("invalid_lookup_fallback_none", bad.id == SUBSTANCE_NONE, "");
+    emit("invalid_lookup_no_crash", true, "substanceDef(999) returned");
+    emit("invalid_lookup_no_fake_valid",
+        !bad.mechanical.valid && !bad.fluid.valid && !bad.thermal.valid
+            && !bad.porous.valid && !bad.chemical.valid && !bad.electrical.valid, "");
+    SubstanceDefinition const &badWide = substanceDef(65535);
+    emit("invalid_lookup_wide", badWide.id == SUBSTANCE_NONE && !badWide.fluid.valid, "");
+
+    SubstanceDefinition const &water = substanceDef(SUBSTANCE_WATER);
+    emit("water_fluid_valid", water.fluid.valid, "");
+    emit("water_thermal_valid", water.thermal.valid, "");
+    emit("water_mechanical_invalid", !water.mechanical.valid, "");
+    emit("water_porous_invalid", !water.porous.valid, "");
+    emit("water_electrical_inactive", !water.electrical.valid, "");
+    emit("water_density", near(water.fluid.density, 1.0f), std::to_string(water.fluid.density));
+    emit("water_viscosity", near(water.fluid.viscosity, 0.006f), std::to_string(water.fluid.viscosity));
+    emit("water_surface_tension", near(water.fluid.surfaceTension, 0.055f), std::to_string(water.fluid.surfaceTension));
+    emit("water_specific_heat", near(water.thermal.specificHeat, 4184.0f, 0.01f), std::to_string(water.thermal.specificHeat));
+    emit("water_conductivity", near(water.thermal.conductivity, 0.598f), std::to_string(water.thermal.conductivity));
+    emit("water_melting_phase", near(phaseForSubstance(SUBSTANCE_WATER).meltingPointK, 273.15f), "");
+    emit("water_boiling_phase", near(phaseForSubstance(SUBSTANCE_WATER).boilingPointK, 373.15f), "");
+    emit("sandbox_reference_is_water_fluid",
+        sandboxReferenceLiquid().density == water.fluid.density
+            && sandboxReferenceLiquid().viscosity == water.fluid.viscosity, "");
+
+    SubstanceDefinition const &wood = substanceDef(SUBSTANCE_WOOD);
+    emit("wood_mechanical_valid", wood.mechanical.valid, "");
+    emit("wood_porous_valid", wood.porous.valid, "");
+    emit("wood_fluid_invalid", !wood.fluid.valid, "");
+    emit("wood_density_rel", near(wood.mechanical.densityRel, 0.45f), std::to_string(wood.mechanical.densityRel));
+    emit("wood_porosity", near(wood.porous.porosity, 0.55f), std::to_string(wood.porous.porosity));
+    emit("wood_adapter_density",
+        near(materialDef(MATERIAL_WOOD).density, wood.mechanical.densityRel), "");
+
+    SubstanceDefinition const &metal = substanceDef(SUBSTANCE_METAL);
+    emit("metal_mechanical_valid", metal.mechanical.valid, "");
+    emit("metal_porous_invalid", !metal.porous.valid, "");
+    emit("metal_fluid_invalid", !metal.fluid.valid, "");
+    emit("metal_density_rel", near(metal.mechanical.densityRel, 7.80f), std::to_string(metal.mechanical.densityRel));
+    emit("metal_adapter_density",
+        near(materialDef(MATERIAL_METAL).density, metal.mechanical.densityRel), "");
+
+    SubstanceDefinition const &air = substanceDef(SUBSTANCE_AIR);
+    emit("air_gas_capable", air.phase.gasCapable && !air.phase.solidCapable && !air.phase.liquidCapable, "");
+    emit("air_fluid_invalid", !air.fluid.valid, "");
+    emit("air_mechanical_invalid", !air.mechanical.valid, "");
+    emit("air_thermal_valid", air.thermal.valid, "");
+    emit("air_specific_heat", near(air.thermal.specificHeat, 1005.0f, 0.01f), std::to_string(air.thermal.specificHeat));
+
+    SubstanceDefinition const &honey = substanceDef(SUBSTANCE_HONEY);
+    emit("honey_fluid_valid", honey.fluid.valid, "");
+    emit("honey_mechanical_invalid", !honey.mechanical.valid, "");
+    emit("honey_density", near(honey.fluid.density, 1.42f), std::to_string(honey.fluid.density));
+    emit("honey_chemical_unknown", !honey.chemical.valid, "mixture; no fake formula");
+
+    SubstanceDefinition const &glass = substanceDef(SUBSTANCE_GLASS);
+    emit("glass_porous_invalid", !glass.porous.valid, "");
+    emit("glass_mechanical_valid", glass.mechanical.valid, "");
+
+    emit("static_wall_is_stone", kStaticWallSubstance == SUBSTANCE_STONE, "");
+    emit("static_wall_thermal_matches_stone",
+        thermalForSubstance(kStaticWallSubstance).specificHeat
+            == thermalForSubstance(SUBSTANCE_STONE).specificHeat, "");
+    emit("all_electrical_inactive",
+        !water.electrical.valid && !wood.electrical.valid && !metal.electrical.valid
+            && !air.electrical.valid && !honey.electrical.valid, "");
+    emit("no_ice_or_steam_slots",
+        substanceFromInternalName("ice") == SUBSTANCE_NONE
+            && substanceFromInternalName("steam") == SUBSTANCE_NONE, "");
+
+    out << "summary\t" << (failed == 0 ? "PASS" : "FAIL") << '\t' << passed << " passed, " << failed << " failed\n";
 }

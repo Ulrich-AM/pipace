@@ -4,6 +4,7 @@
 #include "fluid/DiagOutput.h"
 #include "gas/GasEngine.h"
 #include "rigid/RigidBodyEngine.h"
+#include "substance/SubstanceRegistry.h"
 
 #include <algorithm>
 #include <array>
@@ -198,7 +199,7 @@ ThermalCellSample ThermalEngine::sampleCell(FluidEngine const &fluid, RigidBodyE
     if (fluid.solid[static_cast<size_t>(i)]) {
         s.kind = ThermalSampleKind::Wall;
         s.hasMatter = true;
-        s.materialId = MATERIAL_STONE; // kStaticWallSubstance compatibility mask id
+        s.materialId = rigidMaterialForSubstance(kStaticWallSubstance);
         s.capacityJK = wallCapacity(fluid, i);
         s.energyJ = fluid.solidHeat[static_cast<size_t>(i)];
         s.temperatureK = wallTempK(fluid, i);

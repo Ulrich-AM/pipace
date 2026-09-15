@@ -24,21 +24,11 @@
 // Gas pressure remains isothermal (amount/volume). Path for P∝T/T_amb is documented
 // in ThermalEngine; it is not enabled in this update.
 //
-// Melting/boiling/latent fields are metadata only — no phase change yet.
-// Authoritative tables: substanceDef(id).thermal  (thermalForSubstance).
+// Melting/boiling/latent live on PhaseProperties (copied from thermal authoring
+// at registry build). No phase-change solver yet.
+// Authoritative heat tables: thermalForSubstance(id) / substanceDef(id).thermal.
 
 // ThermalProperties and ambient/density constants live in substance/SubstanceProperties.h.
-
-// Compatibility wrappers. Authoritative: thermalForSubstance / substanceDef(id).thermal.
-inline ThermalProperties const &kWaterThermal() { return thermalForSubstance(SUBSTANCE_WATER); }
-inline ThermalProperties const &kHoneyThermal() { return thermalForSubstance(SUBSTANCE_HONEY); }
-inline ThermalProperties const &kAirThermal() { return thermalForSubstance(SUBSTANCE_AIR); }
-inline ThermalProperties const &kWoodThermal() { return thermalForSubstance(SUBSTANCE_WOOD); }
-inline ThermalProperties const &kStoneThermal() { return thermalForSubstance(SUBSTANCE_STONE); }
-inline ThermalProperties const &kGlassThermal() { return thermalForSubstance(SUBSTANCE_GLASS); }
-inline ThermalProperties const &kMetalThermal() { return thermalForSubstance(SUBSTANCE_METAL); }
-inline ThermalProperties const &kWallThermal() { return thermalForSubstance(kStaticWallSubstance); }
-inline ThermalProperties const &kEmptyThermal() { return thermalForSubstance(SUBSTANCE_NONE); }
 
 inline float cellLengthM(float cellsPerMeter) {
     float cpm = cellsPerMeter > 0.1f ? cellsPerMeter : 4.0f;

@@ -1,7 +1,6 @@
 #pragma once
 
 #include "GasTypes.h"
-#include "thermal/ThermalTypes.h"
 
 struct GasConfig {
     float referencePressurePa = GAS_REFERENCE_PRESSURE_PA;
@@ -24,7 +23,6 @@ struct GasConfig {
     float brushAtmPerSec = 2.0f;   // pressurize/depressurize at Power 1
     float brushMaxAtm = 8.0f;
     GasSimMode simMode = GasSimMode::Full;
-    // Ambient gas identity is SUBSTANCE_AIR + MatterPhase::Gas.
-    // Authoritative thermal: thermalForSubstance(SUBSTANCE_AIR).
-    ThermalProperties thermal = thermalForSubstance(SUBSTANCE_AIR);
+    // Ambient gas identity is GasSpecies::Air -> SUBSTANCE_AIR + MatterPhase::Gas.
+    // Authoritative thermal: thermalForSubstance(substanceForGasSpecies()).
 };
