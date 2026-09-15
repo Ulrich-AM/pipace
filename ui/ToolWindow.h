@@ -23,9 +23,7 @@ struct EraseToolSettings {
     bool deleteSolids = true;
     bool strictSolids = false;
     bool deleteLiquids = true;
-    bool strictLiquids = false; // UI only; not implemented
     bool deleteGases = false;
-    bool strictGases = false;   // UI only; not implemented
 };
 
 struct GrabToolSettings {
@@ -77,13 +75,15 @@ struct ToolWindowState {
     RECT hits[28]{};
     int hitCount = 0;
     int hitId[28]{};
+    char const *hitTip[28]{};
 };
 
 bool paletteHasToolWindow(PaletteId id);
-void syncToolWindow(ShellState &shell, PaletteId id);
+void syncToolWindow(ShellState &shell, PaletteId id, bool openIfTool);
 void clampToolWindow(ShellState &shell);
 void ensureToolWindowPlacement(ShellState &shell);
 bool toolWindowCoversPoint(ShellState const &shell, int x, int y);
+char const *toolWindowTipKey(ShellState const &shell);
 void drawToolWindow(HDC dc, ShellState &shell);
 SettingsMouseResult handleToolWindowMouseDown(ShellState &shell, int x, int y);
 void dragToolWindow(ShellState &shell, int x, int y);

@@ -164,7 +164,7 @@ void ShellState::log(wchar_t const *line) {
     if (consoleLines.size() > 80) consoleLines.erase(consoleLines.begin(), consoleLines.begin() + 20);
 }
 
-void ShellState::applyPalette(PaletteId id, Tool &tool, MaterialId &drawMaterial) {
+void ShellState::applyPalette(PaletteId id, Tool &tool, MaterialId &drawMaterial, bool openToolWindow) {
     palette = id;
     switch (id) {
         case PaletteId::None: break;
@@ -184,17 +184,17 @@ void ShellState::applyPalette(PaletteId id, Tool &tool, MaterialId &drawMaterial
         case PaletteId::Pressurize: category = Category::Energy; tool = Tool::Pressurize; break;
         case PaletteId::Depressurize: category = Category::Energy; tool = Tool::Depressurize; break;
     }
-    syncToolWindow(*this, id);
+    syncToolWindow(*this, id, openToolWindow);
 }
 
 void ShellState::applyCategory(Category cat, Tool &tool, MaterialId &drawMaterial) {
     category = cat;
     if (elementCount() <= 0) {
         palette = PaletteId::None;
-        syncToolWindow(*this, PaletteId::None);
+        syncToolWindow(*this, PaletteId::None, false);
         return;
     }
-    applyPalette(elementAt(0), tool, drawMaterial);
+    applyPalette(elementAt(0), tool, drawMaterial, false);
 }
 
 int ShellState::elementCount() const {
@@ -1434,6 +1434,12 @@ bool hoverTipBody(ShellState const &shell, View const &view, wchar_t const *&bod
             return body && body[0] != 0;
         }
         return false;
+    }
+    if (toolWindowCoversPoint(shell, shell.mouseX, shell.mouseY)) {
+        char const *key = toolWindowTipKey(shell);
+        if (!key) return false;
+        body = tr(key);
+        return body && body[0] != 0;
     }
     if (ViewBarDef const *hoverView = viewBarByHit(shell.hoverId)) {
         body = tr(hoverView->helpKey);

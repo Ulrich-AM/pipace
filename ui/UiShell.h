@@ -73,7 +73,7 @@ struct ShellState {
     void ensureFonts();
     void releaseFonts();
     void log(wchar_t const *line);
-    void applyPalette(PaletteId id, Tool &tool, MaterialId &drawMaterial);
+    void applyPalette(PaletteId id, Tool &tool, MaterialId &drawMaterial, bool openToolWindow = true);
     void applyCategory(Category cat, Tool &tool, MaterialId &drawMaterial);
     PaletteId elementAt(int slot) const;
     int elementCount() const;
