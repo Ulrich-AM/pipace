@@ -70,7 +70,9 @@ SubstanceDefinition makeWater() {
     s.thermal.expansionCoeff = 2.07e-4f;
     s.thermal.softeningTempK = 0.0f;
 
-    // Phase capability
+    // Phase capability. Solid/gas flags are metadata only — no ice body and no
+    // steam SubstanceId. Water has no MechanicalProperties; do not borrow stone.
+    // Gas-phase mass uses chemical.molarMass (see substance/PhaseTransfer.h).
     s.phase.valid = true;
     s.phase.solidCapable = true;
     s.phase.liquidCapable = true;

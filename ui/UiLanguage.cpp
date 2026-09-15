@@ -207,7 +207,8 @@ void seedEnglish() {
     set("tw_solids", L"Solids");
     set("tw_liquids", L"Liquids");
     set("tw_gases", L"Gases");
-    set("tw_strict_delete", L"Strict");
+    set("tw_strict_delete", L"Strict Delete");
+    set("tw_close", L"X");
     set("tw_brush_shape", L"Brush Shape");
     set("tw_shape_circle", L"Circle");
     set("tw_shape_square", L"Square");
@@ -222,6 +223,24 @@ void seedEnglish() {
     set("tw_group_touch_radius", L"Group Touch Radius");
     set("tw_toggle_anchor", L"Toggle Anchor On Touch");
     set("tw_heat_power", L"Heat Power");
+    set("tip_tw_title", L"Drag the header to move this window.");
+    set("tip_tw_close", L"Close this window. The selected tool stays active.");
+    set("tip_tw_brush_size", L"Changes the radius of this tool's brush.");
+    set("tip_tw_solids", L"Allow this tool to affect rigid solids.");
+    set("tip_tw_liquids", L"Allow this tool to affect liquids.");
+    set("tip_tw_gases", L"Allow this tool to affect gases.");
+    set("tip_tw_strict_delete", L"Deletes the entire rigid body if any part of it is touched.");
+    set("tip_tw_brush_shape", L"Changes the area affected by the tool.");
+    set("tip_tw_grab_strength", L"How firmly grabbed bodies follow the cursor.");
+    set("tip_tw_group_grab", L"Grab multiple rigid bodies within the group radius.");
+    set("tip_tw_group_grab_radius", L"Maximum distance used when selecting bodies for Group Grab.");
+    set("tip_tw_phantom_grab", L"Temporarily disables collisions for grabbed rigid bodies.");
+    set("tip_tw_color_mode", L"Paints compatible matter instead of placing new material.");
+    set("tip_tw_dye_color", L"Color used while Color Mode is on.");
+    set("tip_tw_group_touch", L"Applies enabled touch actions to multiple nearby rigid bodies.");
+    set("tip_tw_group_touch_radius", L"Maximum distance used when selecting bodies for Group Touch.");
+    set("tip_tw_toggle_anchor", L"Toggles the anchored state of touched rigid bodies.");
+    set("tip_tw_heat_power", L"Adds or removes heat under the brush. Negative values cool.");
 
     set("ins_nothing", L"Nothing selected.");
     set("ins_hover_1", L"Hover the canvas to");

@@ -39,10 +39,11 @@ PIPACE/
   substance/
     SubstanceProperties.h  # Grouped intrinsic properties (mechanical/fluid/thermal/phase/porous/…)
     SubstanceTypes.h / SubstanceRegistry.h/.cpp  # SubstanceId, MatterPhase, registry
+    PhaseTransfer.h/.cpp  # fill/mass/gas-amount conversion; no live phase solver
   world/
     WorldQuery.h/.cpp      # sampleMatterAt (SubstanceId + phase), phase/registry diags
   docs/
-    PHASE_CHANGES.md       # Next-milestone design note (not implemented)
+    PHASE_CHANGES.md       # Phase-change design; conversion helpers exist, no solver yet
   CMakeLists.txt / build.bat / run.bat
   README.md
   AGENTS.md
@@ -91,7 +92,7 @@ table: relative density 1.0). That is a reference, not “all liquid is water”
 Removed copies: `FluidConfig.water` / `.honey`, `kHoneyLiquid()`, `k*Thermal()`
 wrappers, `GasConfig.thermal`.
 
-Build: `run.bat` or CMake → `build/pipace.exe`. Headless: `--benchmark`, `--scale-benchmark`, `--rigid-benchmark`, `--thread-benchmark`, `--liquid-diag`, `--substance-phase-diag`, `--substance-registry-diag`. Grid size via `PIPACE_GRID_WIDTH` / `PIPACE_GRID_HEIGHT` (default 200×120). SETTINGS → Simulation threads (Auto / 1 / 2 / 4 / 6 / 8). Auto is 1 worker on the default grid; see `misc/THREAD_PASS_NOTES.md`.
+Build: `run.bat` or CMake → `build/pipace.exe`. Headless: `--benchmark`, `--scale-benchmark`, `--rigid-benchmark`, `--thread-benchmark`, `--liquid-diag`, `--substance-phase-diag`, `--substance-registry-diag`, `--phase-transfer-diag`. Grid size via `PIPACE_GRID_WIDTH` / `PIPACE_GRID_HEIGHT` (default 200×120). SETTINGS → Simulation threads (Auto / 1 / 2 / 4 / 6 / 8). Auto is 1 worker on the default grid; see `misc/THREAD_PASS_NOTES.md`.
 
 ## Fluid engine (what exists)
 
@@ -164,8 +165,9 @@ Completed architecture: SubstanceId, registry, grouped properties, MatterPhase /
 MatterIdentity, world query, material migration, moisture stabilization.
 
 **Next major milestone: real phase changes** — water `solid ⇄ liquid ⇄ gas`
-without Ice/Steam IDs. Design note: `docs/PHASE_CHANGES.md`. Do not start that
-solver from an architecture-only task.
+without Ice/Steam IDs. Conversion helpers live in `substance/PhaseTransfer.h`
+(mass/fill/gas amount, latent heat, `canTransition`). There is still **no**
+temperature-triggered solver. Design note: `docs/PHASE_CHANGES.md`.
 
 Longer sequence (historical): liquid correctness → performance → modularization →
 honey composition → rigid coupling → temperature/gas → **phase changes** → SACE.

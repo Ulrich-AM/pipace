@@ -29,13 +29,12 @@ enum TwHit : int {
     TwSolids,
     TwStrictSolids,
     TwLiquids,
-    TwStrictLiquids,
     TwGases,
-    TwStrictGases,
     TwGroup,
     TwPhantom,
     TwColorMode,
     TwToggleAnchor,
+    TwIdle,
     TwDye0,
     TwDye1,
     TwDye2,
@@ -56,14 +55,16 @@ void clearHits(ToolWindowState &w) {
     for (int i = 0; i < kTwHitCap; ++i) {
         w.hits[i] = RECT{};
         w.hitId[i] = TwNone;
+        w.hitTip[i] = nullptr;
     }
 }
 
-void addHit(ToolWindowState &w, RECT const &rc, int id) {
+void addHit(ToolWindowState &w, RECT const &rc, int id, char const *tip = nullptr) {
     if (w.hitCount >= kTwHitCap) return;
     int i = w.hitCount++;
     w.hits[i] = rc;
     w.hitId[i] = id;
+    w.hitTip[i] = tip;
 }
 
 int hitAt(ToolWindowState const &w, int x, int y) {
@@ -82,11 +83,6 @@ void drawCheck(HDC dc, RECT box, bool on, bool enabled) {
     }
 }
 
-void drawRadio(HDC dc, RECT box, bool on) {
-    fillRect(dc, box, on ? kBtnSel : kBtn);
-    frameRect(dc, box, on ? kBorder : kBorderDim);
-}
-
 } // namespace
 
 bool paletteHasToolWindow(PaletteId id) {
@@ -94,15 +90,31 @@ bool paletteHasToolWindow(PaletteId id) {
         || id == PaletteId::Touch || id == PaletteId::Heat;
 }
 
-void syncToolWindow(ShellState &shell, PaletteId id) {
+void syncToolWindow(ShellState &shell, PaletteId id, bool openIfTool) {
     if (!paletteHasToolWindow(id)) {
         shell.toolWin.open = false;
         shell.toolWin.userClosed = false;
         shell.toolWin.dragging = false;
         return;
     }
+    if (!openIfTool) {
+        shell.toolWin.open = false;
+        shell.toolWin.userClosed = true;
+        shell.toolWin.dragging = false;
+        return;
+    }
     shell.toolWin.userClosed = false;
     shell.toolWin.open = true;
+}
+
+char const *toolWindowTipKey(ShellState const &shell) {
+    if (!shell.toolWin.open) return nullptr;
+    for (int i = shell.toolWin.hitCount - 1; i >= 0; --i) {
+        if (!ptIn(shell.toolWin.hits[i], shell.mouseX, shell.mouseY)) continue;
+        if (shell.toolWin.hitTip[i] && shell.toolWin.hitTip[i][0]) return shell.toolWin.hitTip[i];
+        return nullptr;
+    }
+    return nullptr;
 }
 
 void clampToolWindow(ShellState &shell) {
@@ -173,19 +185,17 @@ void drawToolWindow(HDC dc, ShellState &shell) {
 
     int x = w.x, y0 = w.y;
     int width = w.w;
-    int headH = 22;
+    int headH = 30;
     int pad = 8;
-    int y = y0 + headH + 6;
-    int contentBottom = y;
 
     auto measureEnd = [&]() {
         switch (shell.palette) {
-            case PaletteId::Erase: return 248;
-            case PaletteId::Grab: return 168;
-            case PaletteId::Brush: return 210;
-            case PaletteId::Touch: return 150;
-            case PaletteId::Heat: return 168;
-            default: return 120;
+            case PaletteId::Erase: return 228;
+            case PaletteId::Grab: return 176;
+            case PaletteId::Brush: return 218;
+            case PaletteId::Touch: return 158;
+            case PaletteId::Heat: return 176;
+            default: return 128;
         }
     };
     w.h = measureEnd();
@@ -195,51 +205,59 @@ void drawToolWindow(HDC dc, ShellState &shell) {
     w.panel = panel;
     fillRect(dc, panel, kPanel);
     frameRect(dc, panel, kBorder);
+    RECT inner = insetRect(panel, 1);
+    frameRect(dc, inner, kBorderDim);
 
-    RECT title{x, y0, x + width - 22, y0 + headH};
-    RECT closeRc{x + width - 22, y0, x + width, y0 + headH};
+    RECT closeRc{panel.right - 28, panel.top + 6, panel.right - 8, panel.top + 28};
+    RECT title{panel.left + 1, panel.top + 1, closeRc.left - 4, panel.top + headH};
     w.titleBar = title;
     w.closeBtn = closeRc;
-    fillRect(dc, RECT{x, y0, x + width, y0 + headH}, kBtn);
-    frameRect(dc, RECT{x, y0, x + width, y0 + headH}, kBorder);
+    addHit(w, panel, TwIdle, nullptr);
+    bool titleOver = ptIn(title, shell.mouseX, shell.mouseY);
+    if (titleOver || w.dragging) fillRect(dc, title, RGB(52, 52, 56));
     HFONT old = static_cast<HFONT>(SelectObject(dc, shell.smallFont ? shell.smallFont : shell.uiFont));
-    RECT titlePad = title; titlePad.left += 8;
+    SetBkMode(dc, TRANSPARENT);
+    SetTextColor(dc, kText);
+    RECT titlePad{title.left + 12, title.top + 6, title.right, title.bottom};
     drawLabel(dc, titlePad, shell.paletteName(shell.palette), kText, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
-    drawLabel(dc, closeRc, L"X", kText, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-    addHit(w, title, TwTitle);
-    addHit(w, closeRc, TwClose);
+    bool closeOver = ptIn(closeRc, shell.mouseX, shell.mouseY);
+    drawButton(dc, closeRc, tr("tw_close"), closeOver ? BtnState::Hover : BtnState::Normal);
+    addHit(w, title, TwTitle, "tip_tw_title");
+    addHit(w, closeRc, TwClose, "tip_tw_close");
 
     int left = x + pad;
     int right = x + width - pad;
-    y = y0 + headH + 8;
+    int y = y0 + headH + 8;
 
     auto section = [&](char const *key) {
         RECT r{left, y, right, y + 16};
         drawLabel(dc, r, tr(key), kDimText, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
         y += 18;
     };
-    auto spinRow = [&](char const *labelKey, std::wstring const &value, int idM, int idP, bool enabled) {
+    auto spinRow = [&](char const *labelKey, std::wstring const &value, int idM, int idP, bool enabled, char const *tip) {
         RECT lab{left, y, right - 70, y + 18};
         drawLabel(dc, lab, tr(labelKey), enabled ? kText : kDimText, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
         RECT minus{right - 66, y, right - 46, y + 18};
         RECT val{right - 46, y, right - 20, y + 18};
         RECT plus{right - 20, y, right, y + 18};
-        drawButton(dc, minus, L"-", enabled ? BtnState::Normal : BtnState::Disabled);
+        bool overM = enabled && ptIn(minus, shell.mouseX, shell.mouseY);
+        bool overP = enabled && ptIn(plus, shell.mouseX, shell.mouseY);
+        drawButton(dc, minus, L"-", enabled ? (overM ? BtnState::Hover : BtnState::Normal) : BtnState::Disabled);
         drawLabel(dc, val, value.c_str(), enabled ? kText : kDimText, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-        drawButton(dc, plus, L"+", enabled ? BtnState::Normal : BtnState::Disabled);
-        if (enabled) {
-            addHit(w, minus, idM);
-            addHit(w, plus, idP);
-        }
+        drawButton(dc, plus, L"+", enabled ? (overP ? BtnState::Hover : BtnState::Normal) : BtnState::Disabled);
+        RECT row{left, y, right, y + 18};
+        addHit(w, row, TwIdle, tip);
+        addHit(w, minus, idM, tip);
+        addHit(w, plus, idP, tip);
         y += 22;
     };
-    auto checkRow = [&](char const *key, bool on, int id, bool enabled, int indent) {
+    auto checkRow = [&](char const *key, bool on, int id, bool enabled, int indent, char const *tip) {
         RECT box{left + indent, y + 2, left + indent + 14, y + 16};
         drawCheck(dc, box, on, enabled);
         RECT lab{box.right + 6, y, right, y + 18};
         drawLabel(dc, lab, tr(key), enabled ? kText : kDimText, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
         RECT hit{left + indent, y, right, y + 18};
-        if (enabled) addHit(w, hit, id);
+        addHit(w, hit, enabled ? id : TwIdle, tip);
         y += 20;
     };
     auto shapeRow = [&](BrushShape cur) {
@@ -250,9 +268,11 @@ void drawToolWindow(HDC dc, ShellState &shell) {
         for (int i = 0; i < 3; ++i) {
             RECT rc{left + i * (bw + 4), y, left + i * (bw + 4) + bw, y + 20};
             bool on = static_cast<int>(cur) == i;
-            drawRadio(dc, rc, on);
+            bool over = ptIn(rc, shell.mouseX, shell.mouseY);
+            fillRect(dc, rc, on ? kBtnSel : (over ? kBtnHover : kBtn));
+            frameRect(dc, rc, on || over ? kBorder : kBorderDim);
             drawLabel(dc, rc, tr(keys[i]), kText, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-            addHit(w, rc, ids[i]);
+            addHit(w, rc, ids[i], "tip_tw_brush_shape");
         }
         y += 26;
     };
@@ -260,57 +280,58 @@ void drawToolWindow(HDC dc, ShellState &shell) {
     PaletteId pal = shell.palette;
     if (pal == PaletteId::Erase) {
         EraseToolSettings &s = shell.tools.erase;
-        spinRow("tw_brush_size", std::to_wstring(s.brushSize), TwSpin0M, TwSpin0P, true);
+        spinRow("tw_brush_size", std::to_wstring(s.brushSize), TwSpin0M, TwSpin0P, true, "tip_tw_brush_size");
         section("tw_delete");
-        checkRow("tw_solids", s.deleteSolids, TwSolids, true, 0);
-        checkRow("tw_strict_delete", s.strictSolids, TwStrictSolids, s.deleteSolids, 16);
-        checkRow("tw_liquids", s.deleteLiquids, TwLiquids, true, 0);
-        checkRow("tw_strict_delete", s.strictLiquids, TwStrictLiquids, false, 16);
-        checkRow("tw_gases", s.deleteGases, TwGases, true, 0);
-        checkRow("tw_strict_delete", s.strictGases, TwStrictGases, false, 16);
+        checkRow("tw_solids", s.deleteSolids, TwSolids, true, 0, "tip_tw_solids");
+        checkRow("tw_strict_delete", s.strictSolids, TwStrictSolids, s.deleteSolids, 16, "tip_tw_strict_delete");
+        checkRow("tw_liquids", s.deleteLiquids, TwLiquids, true, 0, "tip_tw_liquids");
+        checkRow("tw_gases", s.deleteGases, TwGases, true, 0, "tip_tw_gases");
         shapeRow(s.shape);
     } else if (pal == PaletteId::Grab) {
         GrabToolSettings &s = shell.tools.grab;
-        spinRow("tw_grab_strength", shortFloat(s.strength, 2), TwSpin0M, TwSpin0P, true);
-        checkRow("tw_group_grab", s.groupGrab, TwGroup, true, 0);
-        spinRow("tw_group_grab_radius", shortFloat(s.groupRadius, 0), TwSpin1M, TwSpin1P, s.groupGrab);
-        checkRow("tw_phantom_grab", s.phantom, TwPhantom, true, 0);
+        spinRow("tw_grab_strength", shortFloat(s.strength, 2), TwSpin0M, TwSpin0P, true, "tip_tw_grab_strength");
+        checkRow("tw_group_grab", s.groupGrab, TwGroup, true, 0, "tip_tw_group_grab");
+        spinRow("tw_group_grab_radius", shortFloat(s.groupRadius, 0), TwSpin1M, TwSpin1P, s.groupGrab, "tip_tw_group_grab_radius");
+        checkRow("tw_phantom_grab", s.phantom, TwPhantom, true, 0, "tip_tw_phantom_grab");
     } else if (pal == PaletteId::Brush) {
         BrushToolSettings &s = shell.tools.brush;
-        spinRow("tw_brush_size", std::to_wstring(s.brushSize), TwSpin0M, TwSpin0P, true);
+        spinRow("tw_brush_size", std::to_wstring(s.brushSize), TwSpin0M, TwSpin0P, true, "tip_tw_brush_size");
         shapeRow(s.shape);
-        checkRow("tw_color_mode", s.colorMode, TwColorMode, true, 0);
+        checkRow("tw_color_mode", s.colorMode, TwColorMode, true, 0, "tip_tw_color_mode");
         RECT dLab{left, y, right, y + 16};
         drawLabel(dc, dLab, tr("tw_dye_color"), s.colorMode ? kText : kDimText, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        addHit(w, dLab, TwIdle, "tip_tw_dye_color");
         y += 18;
         int sw = (right - left - 14) / 8;
         for (int i = 0; i < 8; ++i) {
             RECT rc{left + i * (sw + 2), y, left + i * (sw + 2) + sw, y + 16};
             fillRect(dc, rc, kDyeRgb[i]);
-            frameRect(dc, rc, (s.colorMode && shell.dyeSwatch == i) ? kBorder : kBorderDim);
-            if (s.colorMode) addHit(w, rc, TwDye0 + i);
+            bool over = ptIn(rc, shell.mouseX, shell.mouseY);
+            frameRect(dc, rc, (s.colorMode && (shell.dyeSwatch == i || over)) ? kBorder : kBorderDim);
+            addHit(w, rc, TwDye0 + i, "tip_tw_dye_color");
         }
         y += 22;
     } else if (pal == PaletteId::Touch) {
         TouchToolSettings &s = shell.tools.touch;
-        checkRow("tw_group_touch", s.groupTouch, TwGroup, true, 0);
-        spinRow("tw_group_touch_radius", shortFloat(s.groupRadius, 0), TwSpin1M, TwSpin1P, s.groupTouch);
-        checkRow("tw_toggle_anchor", s.toggleAnchor, TwToggleAnchor, true, 0);
+        checkRow("tw_group_touch", s.groupTouch, TwGroup, true, 0, "tip_tw_group_touch");
+        spinRow("tw_group_touch_radius", shortFloat(s.groupRadius, 0), TwSpin1M, TwSpin1P, s.groupTouch, "tip_tw_group_touch_radius");
+        checkRow("tw_toggle_anchor", s.toggleAnchor, TwToggleAnchor, true, 0, "tip_tw_toggle_anchor");
     } else if (pal == PaletteId::Heat) {
         HeatToolSettings &s = shell.tools.heat;
         wchar_t pbuf[24]{};
         swprintf_s(pbuf, L"%+.2f", static_cast<double>(s.power));
-        spinRow("tw_heat_power", pbuf, TwSpin0M, TwSpin0P, true);
-        spinRow("tw_brush_size", std::to_wstring(s.brushSize), TwSpin1M, TwSpin1P, true);
+        spinRow("tw_heat_power", pbuf, TwSpin0M, TwSpin0P, true, "tip_tw_heat_power");
+        spinRow("tw_brush_size", std::to_wstring(s.brushSize), TwSpin1M, TwSpin1P, true, "tip_tw_brush_size");
         shapeRow(s.shape);
     }
 
-    contentBottom = y + 6;
+    int contentBottom = y + 6;
     if (contentBottom - y0 > w.h) {
         w.h = contentBottom - y0;
         panel.bottom = y0 + w.h;
         w.panel = panel;
         frameRect(dc, panel, kBorder);
+        frameRect(dc, insetRect(panel, 1), kBorderDim);
     }
     SelectObject(dc, old);
 }
@@ -326,15 +347,13 @@ SettingsMouseResult handleToolWindowMouseDown(ShellState &shell, int x, int y) {
         shell.toolWin.dragging = false;
         return SettingsMouseResult::Consume;
     }
-    if (hit == TwTitle || hit == TwNone) {
-        if (hit == TwTitle || ptIn(shell.toolWin.titleBar, x, y)) {
-            shell.toolWin.dragging = true;
-            shell.toolWin.dragOX = x - shell.toolWin.x;
-            shell.toolWin.dragOY = y - shell.toolWin.y;
-            return SettingsMouseResult::Drag;
-        }
-        return SettingsMouseResult::Consume;
+    if (hit == TwTitle) {
+        shell.toolWin.dragging = true;
+        shell.toolWin.dragOX = x - shell.toolWin.x;
+        shell.toolWin.dragOY = y - shell.toolWin.y;
+        return SettingsMouseResult::Drag;
     }
+    if (hit == TwIdle || hit == TwNone) return SettingsMouseResult::Consume;
 
     auto nudgeInt = [](int &v, int d, int lo, int hi) { v = std::clamp(v + d, lo, hi); };
     auto nudgeF = [](float &v, float d, float lo, float hi) { v = std::clamp(v + d, lo, hi); };

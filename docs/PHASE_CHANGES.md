@@ -17,6 +17,43 @@ id. There will be no `SUBSTANCE_ICE` or `SUBSTANCE_STEAM`.
 Today water is only simulated as liquid (`FluidEngine` volume). Capability flags
 already say it can be solid and gas. Those flags are metadata, not transfer.
 
+Mass/fill/gas-amount conversion helpers now live in `substance/PhaseTransfer.h`.
+They do **not** move matter between engines. Heating still leaves water as liquid.
+
+## Current sandbox units
+
+These are the units the helpers use. They match thermal/gas code; they are not SI
+lab apparatus except where noted.
+
+| Quantity | Meaning |
+|---|---|
+| `cellsPerMeter` | Default 4 → cell edge **0.25 m** |
+| Implied depth | One cell, so **V = dx³ = 0.015625 m³** |
+| Liquid `fill` | Fractional occupancy of that cell volume. `fill = 1` is one full liquid cell. |
+| Liquid density | `FluidProperties.density`, relative to water = 1.0 |
+| Full water cell mass | `1 × 1000 kg/m³ × 0.015625 m³` = **15.625 kg** |
+| Gas `amount` | Conserved cell-atmospheres. **1.0 amount in 1.0 volume = 1 atm** (isothermal `P = amount / volume`). |
+| Air mass | `amount × 1.204 kg/m³ × V` (same as `gasMassKg`) |
+| Water vapor mass | `amount × ρ_vapor × V`, `ρ_vapor` from water `chemical.molarMass` at reference P and ambient T. Still `SUBSTANCE_WATER`. GasEngine still stores only Air. |
+| Thermal energy | Joules |
+| Latent heats | `PhaseProperties.latentHeatFusion` / `latentHeatVaporization` (J/kg) |
+
+## Suggested first implementation plan (later)
+
+Do **not** implement the live solver in the conversion-foundation pass.
+
+1. ~~Document mass conversion~~ Conversion helpers exist for liquid fill ↔ mass ↔
+   gas amount. Water still has **no solid mechanical table**. Water vapor mass
+   uses molar mass; GasEngine has **no water-vapor species channel**.
+2. Thermal plateau: while `T` is at the transition point, incoming heat pays
+   latent cost instead of raising temperature.
+3. Transfer liquid → gas in a single cell first (boiling at 1 atm), conserving
+   mass and energy, then update `sampleMatterAt`.
+4. Transfer gas → liquid (condensation) with the same conservation.
+5. Solid ⇄ liquid after a water solid representation exists (rigid pixel and/or
+   static ice wall). Do not fake ice as stone.
+6. Only then consider partial-cell fractions and pressure dependence.
+
 ## Invariants
 
 1. **SubstanceId stays constant** across a phase change. Ice and steam are water
@@ -59,24 +96,6 @@ already say it can be solid and gas. Those flags are metadata, not transfer.
 
 10. **SACE is not required** for built-in water. Chemistry stays separate from
     phase motion.
-
-## Suggested first implementation plan (later)
-
-Do **not** implement this in the architecture pass.
-
-1. Document mass conversion: full liquid cell ↔ gas amount ↔ solid pixel mass
-   using water's phase-specific densities (fluid.density vs mechanical.densityRel
-   vs gas EoS). Water currently has **no solid mechanical table** and **no water
-   vapor EoS** — those must be added as water's solid/gas properties, still
-   under `SUBSTANCE_WATER`, before transfer can be physical.
-2. Thermal plateau: while `T` is at the transition point, incoming heat pays
-   latent cost instead of raising temperature.
-3. Transfer liquid → gas in a single cell first (boiling at 1 atm), conserving
-   mass and energy, then update `sampleMatterAt`.
-4. Transfer gas → liquid (condensation) with the same conservation.
-5. Solid ⇄ liquid after a water solid representation exists (rigid pixel and/or
-   static ice wall). Do not fake ice as stone.
-6. Only then consider partial-cell fractions and pressure dependence.
 
 ## What not to do
 
