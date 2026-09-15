@@ -52,8 +52,8 @@ HBITMAP backBitmap = nullptr;
 HGDIOBJ backOld = nullptr;
 int backWidth = 0, backHeight = 0;
 
-constexpr int kUiClientW = 1440;
-constexpr int kUiClientH = 860;
+constexpr int kUiClientW = 1600; // 16:9 client
+constexpr int kUiClientH = 900;
 constexpr DWORD kUiWinStyle = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX;
 
 void outerWindowSize(int &width, int &height) {
@@ -92,8 +92,23 @@ void refreshLayout(HWND hwnd) {
     ui::computeShellLayout(shell, rc.right, rc.bottom);
 }
 
-void clientToGrid(int mx, int my, int &gx, int &gy) {
+RECT worldViewRect() {
     RECT const &c = shell.layout.canvasInner;
+    int boxW = std::max(1, static_cast<int>(c.right - c.left));
+    int boxH = std::max(1, static_cast<int>(c.bottom - c.top));
+    int scale = std::max(1, std::min(boxW / GW, boxH / GH));
+    int dw = GW * scale;
+    int dh = GH * scale;
+    RECT d{};
+    d.left = c.left + (boxW - dw) / 2;
+    d.top = c.top + (boxH - dh) / 2;
+    d.right = d.left + dw;
+    d.bottom = d.top + dh;
+    return d;
+}
+
+void clientToGrid(int mx, int my, int &gx, int &gy) {
+    RECT const &c = worldViewRect();
     int w = std::max(1, static_cast<int>(c.right - c.left));
     int h = std::max(1, static_cast<int>(c.bottom - c.top));
     gx = std::clamp(static_cast<int>((mx - c.left) * GW / w), 0, GW - 1);
@@ -101,7 +116,7 @@ void clientToGrid(int mx, int my, int &gx, int &gy) {
 }
 
 void clientToGridF(int mx, int my, float &gx, float &gy) {
-    RECT const &c = shell.layout.canvasInner;
+    RECT const &c = worldViewRect();
     float w = std::max(1.0f, static_cast<float>(c.right - c.left));
     float h = std::max(1.0f, static_cast<float>(c.bottom - c.top));
     gx = std::clamp((static_cast<float>(mx - c.left) + 0.5f) * static_cast<float>(GW) / w, 0.0f, static_cast<float>(GW) - 0.001f);
@@ -109,7 +124,7 @@ void clientToGridF(int mx, int my, float &gx, float &gy) {
 }
 
 bool inCanvas(int x, int y) {
-    return ui::ptIn(shell.layout.canvasInner, x, y);
+    return ui::ptIn(worldViewRect(), x, y);
 }
 
 ui::View makeView() {
@@ -560,7 +575,7 @@ void overlayLineGhost() {
 }
 
 void gridToClientCenter(int gx, int gy, int &sx, int &sy) {
-    RECT const &c = shell.layout.canvasInner;
+    RECT const &c = worldViewRect();
     float w = std::max(1.0f, static_cast<float>(c.right - c.left));
     float h = std::max(1.0f, static_cast<float>(c.bottom - c.top));
     sx = c.left + static_cast<int>(std::lround((static_cast<float>(gx) + 0.5f) * w / static_cast<float>(GW)));
@@ -587,7 +602,7 @@ void drawBrushOverlay(HDC dc) {
     if (!shell.hasPlacement() && !linePainting) return;
     bool over = inCanvas(shell.mouseX, shell.mouseY);
     if (!over && !linePainting) return;
-    RECT const &c = shell.layout.canvasInner;
+    RECT const &c = worldViewRect();
     float cellW = std::max(1.0f, static_cast<float>(c.right - c.left) / static_cast<float>(GW));
     float cellH = std::max(1.0f, static_cast<float>(c.bottom - c.top) / static_cast<float>(GH));
     int rx = std::max(2, static_cast<int>(std::lround(static_cast<float>(brushRadius) * cellW)));
@@ -883,7 +898,7 @@ void fillWorldPixels() {
 }
 
 void blitCanvas(HDC dc) {
-    RECT const &c = shell.layout.canvasInner;
+    RECT const &c = worldViewRect();
     int dw = std::max(1, static_cast<int>(c.right - c.left));
     int dh = std::max(1, static_cast<int>(c.bottom - c.top));
     BITMAPINFO bmi{}; bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER); bmi.bmiHeader.biWidth = GW; bmi.bmiHeader.biHeight = -GH;

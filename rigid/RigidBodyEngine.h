@@ -31,6 +31,9 @@ struct RigidBodyEngine {
     double lastDried = 0.0;
     int lastSaturatedSurface = 0;
     int lastDripSites = 0;
+    int lastSourceSites = 0;
+    int lastOutletSites = 0;
+    double lastPendingQueued = 0.0;
     std::vector<float> moistureFlux;
 
     RigidBodyEngine();

@@ -44,7 +44,11 @@ constexpr float kExudeScale = 380.0f;       // maps wood dryingRate 0.001 → ~0
 constexpr float kGravityBias = 0.08f;       // mild downward saturation bias inside porous solids
 constexpr float kMoistureEps = 1.0e-7f;
 constexpr int kMaxDripSites = 2;
-constexpr float kMaxEmitPerTick = MIN_RENDER_FILL * 3.0f;
+// MIN_RENDER_FILL is 0.045. Full-pixel emit is preferred, but leftover pending just
+// under that used to sit stranded after sources fell below kDripSaturation.
+// Half-pixel (0.0225) still exceeds MIN_ACTIVE_FILL; isolated deposits become splashes.
+constexpr float kDripQuantum = 0.5f * MIN_RENDER_FILL;
+constexpr float kMaxEmitPerTick = MIN_RENDER_FILL; // at most one visible drop of pending per body per tick
 
 constexpr int kN4x[4] = {-1, 1, 0, 0};
 constexpr int kN4y[4] = {0, 0, -1, 1};
@@ -93,6 +97,9 @@ void RigidBodyEngine::clear() {
     lastDried = 0.0;
     lastSaturatedSurface = 0;
     lastDripSites = 0;
+    lastSourceSites = 0;
+    lastOutletSites = 0;
+    lastPendingQueued = 0.0;
 }
 
 void RigidBodyEngine::clearPending() {
@@ -2095,6 +2102,9 @@ void RigidBodyEngine::processMoisture(FluidEngine &fluid, float dt) {
     lastDried = 0.0;
     lastSaturatedSurface = 0;
     lastDripSites = 0;
+    lastSourceSites = 0;
+    lastOutletSites = 0;
+    lastPendingQueued = 0.0;
     if (dt <= 0.0f) return;
     constexpr int ndx[4] = {-1, 1, 0, 0};
     constexpr int ndy[4] = {0, 0, -1, 1};
@@ -2263,24 +2273,18 @@ void RigidBodyEngine::processMoisture(FluidEngine &fluid, float dt) {
             localToWorld(b, lx + 0.5f, ly + 0.5f, wx, wy);
             int gx = static_cast<int>(std::floor(wx));
             int gy = static_cast<int>(std::floor(wy));
-            int bestX = -1, bestY = -1;
-            float score = 0.0f;
-            auto consider = [&](int nx, int ny, float s) {
-                if (!cellFree(nx, ny)) return;
-                float room = std::max(0.0f, 1.0f - fluid.fill[static_cast<size_t>(FluidEngine::ci(nx, ny))]);
-                if (room < MIN_RENDER_FILL) return;
-                if (s > score) { score = s; bestX = nx; bestY = ny; }
-            };
-            consider(gx, gy + 1, 20.0f + wy);
-            consider(gx - 1, gy + 1, 12.0f + wy);
-            consider(gx + 1, gy + 1, 12.0f + wy);
-            if (bestX < 0) continue;
+            bool exterior = false;
+            for (int n = 0; n < 4; ++n) {
+                if (cellFree(gx + ndx[n], gy + ndy[n])) { exterior = true; break; }
+            }
+            if (!exterior) continue;
             ++satSurface;
             totalExcess += excess;
             maxDryRate = std::max(maxDryRate, por.dryingRate);
-            dripSites.push_back({i, bestX, bestY, excess, score});
+            dripSites.push_back({i, gx, gy, excess, wy});
         }
         lastSaturatedSurface += satSurface;
+        lastSourceSites += satSurface;
         if (totalExcess > kMoistureEps && !dripSites.empty()) {
             float budget = maxDryRate * kExudeScale * totalExcess * dt;
             budget = std::min(budget, totalExcess);
@@ -2296,7 +2300,42 @@ void RigidBodyEngine::processMoisture(FluidEngine &fluid, float dt) {
                 }
             }
         }
-        if (b.pendingDrip >= MIN_RENDER_FILL && !dripSites.empty()) {
+
+        lastPendingQueued += b.pendingDrip;
+        dripSites.clear();
+        if (b.pendingDrip >= kDripQuantum) {
+            MoistureDripSite bestOut[2]{};
+            int nBest = 0;
+            for (int i : b.occupiedLocal) {
+                if (b.mask[static_cast<size_t>(i)] == MATERIAL_EMPTY) continue;
+                int lx = i % b.maskW, ly = i / b.maskW;
+                float wx, wy;
+                localToWorld(b, lx + 0.5f, ly + 0.5f, wx, wy);
+                int gx = static_cast<int>(std::floor(wx));
+                int gy = static_cast<int>(std::floor(wy));
+                int bestX = -1, bestY = -1;
+                float score = 0.0f;
+                auto consider = [&](int nx, int ny, float s) {
+                    if (!cellFree(nx, ny)) return;
+                    float room = std::max(0.0f, 1.0f - fluid.fill[static_cast<size_t>(FluidEngine::ci(nx, ny))]);
+                    if (room < kDripQuantum) return;
+                    if (s > score) { score = s; bestX = nx; bestY = ny; }
+                };
+                consider(gx, gy + 1, 20.0f + wy);
+                consider(gx - 1, gy + 1, 12.0f + wy);
+                consider(gx + 1, gy + 1, 12.0f + wy);
+                if (bestX < 0) continue;
+                MoistureDripSite cand{i, bestX, bestY, 0.0f, score};
+                if (nBest < kMaxDripSites) bestOut[nBest++] = cand;
+                else {
+                    int worst = (bestOut[0].score <= bestOut[1].score) ? 0 : 1;
+                    if (cand.score > bestOut[worst].score) bestOut[worst] = cand;
+                }
+            }
+            for (int k = 0; k < nBest; ++k) dripSites.push_back(bestOut[k]);
+        }
+        lastOutletSites += static_cast<int>(dripSites.size());
+        if (b.pendingDrip >= kDripQuantum && !dripSites.empty()) {
             std::sort(dripSites.begin(), dripSites.end(), [](MoistureDripSite const &a, MoistureDripSite const &bSite) {
                 return a.score > bSite.score;
             });
@@ -2308,14 +2347,14 @@ void RigidBodyEngine::processMoisture(FluidEngine &fluid, float dt) {
             };
             int sites = 0;
             for (MoistureDripSite const &site : dripSites) {
-                if (b.pendingDrip < MIN_RENDER_FILL) break;
+                if (b.pendingDrip < kDripQuantum) break;
                 if (sites >= kMaxDripSites) break;
                 if (already(site.destX, site.destY)) continue;
                 if (!cellFree(site.destX, site.destY)) continue;
                 int ti = FluidEngine::ci(site.destX, site.destY);
                 float room = std::max(0.0f, 1.0f - fluid.fill[static_cast<size_t>(ti)]);
                 float give = std::min(b.pendingDrip, std::min(room, MIN_RENDER_FILL * 1.5f));
-                if (give < MIN_RENDER_FILL) continue;
+                if (give < kDripQuantum) continue;
                 b.pendingDrip -= give;
                 fluid.addLiquidFill(ti, give, depositHeat(give));
                 fluid.expectedVolume += give;
@@ -3484,24 +3523,40 @@ void RigidBodyEngine::runMoistureDripDiagnostics(FluidEngine &fluid) {
     };
 
     out << "section\tA_soaked_hanging_wood\n";
-    out << "tick\ttime_s\tbody_id\tfree_liquid\tabsorbed_liquid\tsplash_liquid\tpending_drip_liquid\ttotal_liquid\t"
-        "released_this_tick\tcumulative_released\tavg_wetness\tmax_wetness\twet_pixel_count\t"
-        "saturated_surface_pixels\tactive_drip_sites\tbody_mass\n";
+    out << "tick\ttime_s\tbody_id\tfree_liquid\tabsorbed_liquid\tsplash_liquid\tpending_drip\ttotal_liquid\t"
+        "emitted_this_tick\tcumulative_emitted\tsource_site_count\toutlet_site_count\tactive_outlets\t"
+        "avg_wetness\tmax_wetness\twet_pixel_count\tbody_mass\n";
     spawnBlock(MATERIAL_WOOD, 96, 36, 10, 8, 0.0f, 1.0f);
     double total0 = totalLiquid();
     double cumRel = 0.0;
     double relEarly = 0.0, relLate = 0.0;
     constexpr int kHangTicks = 360;
+    int strandedTicks = 0;
     int lastSites = 0;
+    int firstPendingTick = -1;
+    int firstEmitTick = -1;
+    int lastEmitTick = -1;
+    double maxPending = 0.0;
+    int maxUsedOutlets = 0;
     for (int tick = 0; tick <= kHangTicks; ++tick) {
         if (tick > 0) tickOnce();
         double freeL = freeVol(), splashL = splashVol();
-        double absL = totalAbsorbedLiquid(), pendL = totalPendingDrip();
-        double totalL = freeL + absL + splashL + pendL;
+        double absL = totalAbsorbedLiquid();
+        double pendL = lastPendingQueued;
+        double leftoverPend = totalPendingDrip();
+        double totalL = freeL + absL + splashL + leftoverPend;
         double rel = lastDried;
         if (tick > 0) cumRel += rel;
         if (tick > 0 && tick <= 60) relEarly += rel;
         if (tick > kHangTicks - 60) relLate += rel;
+        if (firstPendingTick < 0 && pendL > kMoistureEps) firstPendingTick = tick;
+        if (tick > 0 && rel >= kDripQuantum) {
+            if (firstEmitTick < 0) firstEmitTick = tick;
+            lastEmitTick = tick;
+        }
+        if (tick > 0 && pendL >= kDripQuantum && lastOutletSites > 0 && rel < kDripQuantum) ++strandedTicks;
+        maxPending = std::max(maxPending, pendL);
+        maxUsedOutlets = std::max(maxUsedOutlets, lastDripSites);
         int wetPixels = 0;
         float avgWet = 0.0f, maxWet = 0.0f;
         sampleWet(wetPixels, avgWet, maxWet);
@@ -3509,29 +3564,43 @@ void RigidBodyEngine::runMoistureDripDiagnostics(FluidEngine &fluid) {
         float mass = totalSolidMass();
         out << tick << '\t' << (tick * PHYSICS_DT) << '\t' << bid << '\t' << freeL << '\t' << absL << '\t'
             << splashL << '\t' << pendL << '\t' << totalL << '\t' << rel << '\t' << cumRel << '\t'
-            << avgWet << '\t' << maxWet << '\t' << wetPixels << '\t' << lastSaturatedSurface << '\t'
-            << lastDripSites << '\t' << mass << '\n';
+            << lastSourceSites << '\t' << lastOutletSites << '\t' << lastDripSites << '\t'
+            << avgWet << '\t' << maxWet << '\t' << wetPixels << '\t' << mass << '\n';
         lastSites = lastDripSites;
     }
     double total1 = totalLiquid();
     bool conserved = std::abs(total1 - total0) < 0.12;
     bool declined = relLate <= relEarly * 0.85f + MIN_RENDER_FILL;
     bool finite = cumRel > MIN_RENDER_FILL && cumRel < total0 + 1.0;
-    bool notCurtain = lastSites <= kMaxDripSites;
-    emit("A_soaked_hanging_wood", conserved && declined && finite && notCurtain,
-        "cumRel=" + std::to_string(cumRel) + " early=" + std::to_string(relEarly)
+    bool notCurtain = lastSites <= kMaxDripSites && maxUsedOutlets <= kMaxDripSites;
+    bool pendingFormed = firstEmitTick >= 0 || maxPending > kMoistureEps;
+    bool emittedSoon = firstEmitTick >= 0 && firstEmitTick <= 30;
+    emit("A_soaked_hanging_wood", conserved && declined && finite && notCurtain
+            && pendingFormed && emittedSoon,
+        "cumEmitted=" + std::to_string(cumRel) + " early=" + std::to_string(relEarly)
             + " late=" + std::to_string(relLate) + " dTotal=" + std::to_string(total1 - total0)
-            + " lastSites=" + std::to_string(lastSites));
+            + " maxPending=" + std::to_string(maxPending) + " firstPending=" + std::to_string(firstPendingTick)
+            + " firstEmit=" + std::to_string(firstEmitTick) + " lastEmit=" + std::to_string(lastEmitTick)
+            + " maxOutlets=" + std::to_string(maxUsedOutlets) + " lastSites=" + std::to_string(lastSites));
+    emit("A_pending_not_stranded", strandedTicks == 0 && emittedSoon,
+        "strandedTicks=" + std::to_string(strandedTicks)
+            + " firstEmit=" + std::to_string(firstEmitTick) + " maxPending=" + std::to_string(maxPending));
 
     spawnBlock(MATERIAL_WOOD, 96, 36, 10, 8, 0.0f, 0.70f);
     double damp0 = totalLiquid();
     double dampRel = 0.0;
+    double dampMaxPending = 0.0;
+    int dampSources = 0;
     for (int i = 0; i < 120; ++i) {
         tickOnce();
         dampRel += lastDried;
+        dampMaxPending = std::max(dampMaxPending, static_cast<double>(totalPendingDrip()));
+        dampSources = std::max(dampSources, lastSourceSites);
     }
-    emit("B_damp_below_threshold", dampRel < 1.0e-5 && std::abs(totalLiquid() - damp0) < 0.08,
-        "released=" + std::to_string(dampRel) + " dTotal=" + std::to_string(totalLiquid() - damp0));
+    emit("B_damp_below_threshold", dampRel < 1.0e-5 && dampMaxPending < 1.0e-6 && dampSources == 0
+            && std::abs(totalLiquid() - damp0) < 0.08,
+        "released=" + std::to_string(dampRel) + " maxPending=" + std::to_string(dampMaxPending)
+            + " sources=" + std::to_string(dampSources) + " dTotal=" + std::to_string(totalLiquid() - damp0));
 
     spawnBlock(MATERIAL_WOOD, 96, 40, 10, 8, 0.78539816f, 1.0f);
     float aabbY1 = bodies.empty() ? 0.0f : bodies[0].aabbY1;
