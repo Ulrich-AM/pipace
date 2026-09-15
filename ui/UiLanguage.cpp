@@ -152,6 +152,16 @@ void seedEnglish() {
 
     set("properties", L"PROPERTIES");
     set("inspector", L"INSPECTOR");
+    set("inspector_section_material", L"MATERIAL");
+    set("inspector_section_composition", L"COMPOSITION");
+    set("inspector_section_world", L"WORLD");
+    set("inspector_section_gas", L"GAS");
+    set("inspector_section_rigid", L"RIGID BODY");
+    set("inspector_section_thermal", L"THERMAL");
+    set("inspector_section_fluid", L"FLUID");
+    set("inspector_section_debug", L"DEBUG");
+    set("ins_cell", L"Cell: {0}, {1}");
+    set("ins_body_id", L"Body ID: {0}");
     set("prop_intro", L"How this placement behaves");
     set("prop_brush", L"Brush Size: {0} px");
     set("prop_anchored", L"Anchored");

@@ -29,6 +29,21 @@ constexpr COLORREF kPauseOn  = RGB(120, 90, 48);
 constexpr COLORREF kClear    = RGB(120, 56, 60);
 constexpr COLORREF kSettingsOn = RGB(70, 90, 110);
 
+// Inspector section headers and a few identity accents. Muted on kPanel.
+constexpr COLORREF kInsHeadMaterial    = RGB(196, 176, 148);
+constexpr COLORREF kInsHeadComposition = RGB(196, 164, 88);
+constexpr COLORREF kInsHeadWorld       = RGB(198, 198, 198);
+constexpr COLORREF kInsHeadGas         = RGB(148, 196, 208);
+constexpr COLORREF kInsHeadRigid       = RGB(196, 142, 90);
+constexpr COLORREF kInsHeadThermal     = RGB(210, 132, 100);
+constexpr COLORREF kInsHeadFluid       = RGB(118, 162, 206);
+constexpr COLORREF kInsHeadDebug       = RGB(168, 136, 186);
+constexpr COLORREF kInsPhaseSolid      = RGB(186, 176, 162);
+constexpr COLORREF kInsPhaseLiquid     = RGB(122, 168, 214);
+constexpr COLORREF kInsPhaseGas        = RGB(148, 200, 210);
+constexpr COLORREF kInsCompWater       = RGB(118, 168, 214);
+constexpr COLORREF kInsCompHoney       = RGB(210, 158, 72);
+
 inline void fillRect(HDC dc, RECT const &rc, COLORREF color) {
     HBRUSH b = CreateSolidBrush(color);
     FillRect(dc, &rc, b);

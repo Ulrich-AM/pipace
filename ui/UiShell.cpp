@@ -46,6 +46,28 @@ DyeDef const kDyeSwatches[8] = {
     {0.08f, 0.08f, 0.10f, RGB(28, 28, 32)}
 };
 
+COLORREF inspectorPhaseColor(MatterPhase phase) {
+    switch (phase) {
+        case MatterPhase::Solid: return kInsPhaseSolid;
+        case MatterPhase::Liquid: return kInsPhaseLiquid;
+        case MatterPhase::Gas: return kInsPhaseGas;
+        default: return kText;
+    }
+}
+
+std::wstring formatPercent(float fraction01) {
+    float p = std::clamp(fraction01 * 100.0f, 0.0f, 100.0f);
+    wchar_t buf[16]{};
+    if (p >= 99.95f) return L"100%";
+    if (p < 0.05f) return L"0%";
+    float tenths = std::round(p * 10.0f) / 10.0f;
+    if (std::fabs(tenths - std::round(tenths)) < 0.05f)
+        swprintf_s(buf, L"%.0f%%", static_cast<double>(tenths));
+    else
+        swprintf_s(buf, L"%.1f%%", static_cast<double>(tenths));
+    return buf;
+}
+
 const wchar_t *debugName(DebugView v) {
     switch (v) {
         case DebugView::Fill: return tr("bar_fill");
@@ -603,10 +625,27 @@ void drawShell(HDC dc, ShellState &shell, View const &view) {
     SelectObject(dc, shell.smallFont);
     RECT ib = insetLike(L.inspectBody, 8);
     y = ib.top;
-    auto ins = [&](std::wstring const &t) {
-        RECT r{ib.left, y, ib.right, y + 16};
-        drawLabel(dc, r, t.c_str(), kText, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
-        y += 17;
+    auto insC = [&](std::wstring const &t, COLORREF color) {
+        RECT r{ib.left, y, ib.right, y + 15};
+        drawLabel(dc, r, t.c_str(), color, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+        y += 16;
+    };
+    auto ins = [&](std::wstring const &t) { insC(t, kText); };
+    bool sectionOpen = false;
+    auto insHead = [&](char const *key, COLORREF color) {
+        if (sectionOpen) y += 7;
+        sectionOpen = true;
+        RECT r{ib.left, y, ib.right, y + 15};
+        drawLabel(dc, r, tr(key), color, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+        y += 16;
+    };
+    auto insSplit = [&](wchar_t const *left, std::wstring const &right, COLORREF leftColor) {
+        int split = ib.left + ((ib.right - ib.left) * 3) / 5;
+        RECT a{ib.left, y, split, y + 15};
+        RECT b{split, y, ib.right, y + 15};
+        drawLabel(dc, a, left, leftColor, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+        drawLabel(dc, b, right.c_str(), kText, DT_RIGHT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+        y += 16;
     };
     ins(shell.paletteName(shell.palette));
     {
@@ -614,8 +653,8 @@ void drawShell(HDC dc, ShellState &shell, View const &view) {
         drawLabel(dc, desc, shell.paletteHint(shell.palette), kDimText, DT_LEFT | DT_TOP | DT_WORDBREAK);
         y += 60;
     }
-    ins(L"");
     if (ViewBarDef const *hoverView = viewBarByHit(shell.hoverId)) {
+        ins(L"");
         ins(tr(hoverView->titleKey));
         RECT help{ib.left, y, ib.right, ib.bottom};
         drawLabel(dc, help, tr(hoverView->helpKey), kDimText, DT_LEFT | DT_TOP | DT_WORDBREAK);
@@ -631,66 +670,102 @@ void drawShell(HDC dc, ShellState &shell, View const &view) {
     } else {
         int hx = view.hoverX, hy = view.hoverY;
         int hi = FluidEngine::ci(hx, hy);
-        ins(trf("info_cell", std::to_wstring(hx), std::to_wstring(hy)));
-        auto insIdentity = [&](SubstanceId id, MatterPhase phase, bool dominant) {
-            SubstanceDefinition const &def = substanceDef(id);
-            if (dominant)
-                ins(trf("ins_substance_dominant", tr(def.displayNameKey)));
-            else
-                ins(trf("ins_substance", tr(def.displayNameKey)));
-            ins(trf("ins_phase", tr(matterPhaseKey(phase))));
-            ins(trf("ins_substance_id", std::to_wstring(def.id)));
-            if (def.mechanical.valid)
-                ins(trf("ins_density", shortFloat(def.mechanical.densityRel, 2)));
-            if (def.fluid.valid) {
-                ins(trf("ins_density", shortFloat(def.fluid.density, 2)));
-                ins(trf("ins_viscosity", shortFloat(def.fluid.viscosity, 3)));
-            }
-            if (def.thermal.valid)
-                ins(trf("ins_specific_heat", shortFloat(def.thermal.specificHeat, 0)));
-            if (def.phase.meltingPointK > 1.0f)
-                ins(trf("ins_melting_point", shortFloat(def.phase.meltingPointK, 2)));
-            if (def.phase.boilingPointK > 1.0f)
-                ins(trf("ins_boiling_point", shortFloat(def.phase.boilingPointK, 2)));
-        };
-        if (rg && view.gas) {
-            ThermalCellSample s = ThermalEngine::sampleCell(*e, *rg, *view.gas, hx, hy);
-            if (view.debugView == DebugView::Temperature) {
-                ins(tr("ins_temp_header"));
-                ins(trf("ins_temp", shortFloat(s.temperatureK, 2)));
-                wchar_t dTbuf[32]{};
-                swprintf_s(dTbuf, L"%+.2f", static_cast<double>(s.temperatureK - AMBIENT_TEMPERATURE_K));
-                ins(trf("ins_dT", dTbuf));
-                wchar_t const *matName = tr("ins_mat_none");
-                if (s.kind == ThermalSampleKind::Liquid)
-                    matName = tr(substanceDef(e->dominantLiquidSubstance(hi)).displayNameKey);
-                else if (s.kind == ThermalSampleKind::Gas) matName = tr(substanceDef(SUBSTANCE_AIR).displayNameKey);
-                else if (s.kind == ThermalSampleKind::Wall) matName = tr(substanceDef(kStaticWallSubstance).displayNameKey);
-                else if (s.kind == ThermalSampleKind::Rigid)
-                    matName = tr(substanceDef(substanceForMaterial(s.materialId)).displayNameKey);
-                ins(trf("ins_material", matName));
-                if (s.capacityJK > MIN_THERMAL_CAPACITY)
-                    ins(trf("ins_thermal_energy", shortFloat(s.energyJ, 0)));
-                bool active = view.thermal && view.thermal->isChunkActive(hx, hy);
-                ins(trf("ins_thermal_active", active ? tr("yes") : tr("no")));
-            } else {
-                ins(trf("ins_temp", shortFloat(s.temperatureK, 1)));
-            }
-        }
-        if (e->solid[static_cast<size_t>(hi)]) {
-            ins(tr("ins_kind_wall"));
-            insIdentity(kStaticWallSubstance, MatterPhase::Solid, false);
-        }
+        bool isWall = e->solid[static_cast<size_t>(hi)] != 0;
         int body = rg ? rg->occupant[static_cast<size_t>(hi)] : -1;
-        if (body >= 0 && rg && body < static_cast<int>(rg->bodies.size())) {
+        bool isRigid = body >= 0 && rg && body < static_cast<int>(rg->bodies.size());
+        float fill = e->fill[static_cast<size_t>(hi)];
+        bool hasLiquid = !isWall && !isRigid && fill > 1.0e-8f;
+        GasEngine const *g = view.gas;
+        bool hasGas = g && !isWall && !isRigid;
+        bool mix = hasLiquid
+            && e->liquidComponentAmount(hi, SUBSTANCE_WATER) > 1.0e-6f
+            && e->liquidComponentAmount(hi, SUBSTANCE_HONEY) > 1.0e-6f;
+        SubstanceId matId = SUBSTANCE_NONE;
+        MatterPhase matPhase = MatterPhase::None;
+        if (isRigid) {
+            matId = substanceForMaterial(rg->worldCellMaterial(hx, hy));
+            matPhase = MatterPhase::Solid;
+        } else if (isWall) {
+            matId = kStaticWallSubstance;
+            matPhase = MatterPhase::Solid;
+        } else if (hasLiquid) {
+            matId = e->dominantLiquidSubstance(hi);
+            matPhase = MatterPhase::Liquid;
+        } else if (hasGas) {
+            matId = SUBSTANCE_AIR;
+            matPhase = MatterPhase::Gas;
+        }
+        ThermalCellSample thermal{};
+        bool haveThermal = false;
+        if (rg && view.gas) {
+            thermal = ThermalEngine::sampleCell(*e, *rg, *view.gas, hx, hy);
+            haveThermal = true;
+        }
+        bool tempDebug = view.debugView == DebugView::Temperature;
+        SubstanceDefinition const &matDef = substanceDef(matId);
+
+        insHead("inspector_section_material", kInsHeadMaterial);
+        if (isWall) insC(tr("ins_kind_wall"), kDimText);
+        else if (isRigid) insC(tr("ins_kind_rigid"), kDimText);
+        else if (hasLiquid) insC(tr("ins_kind_liquid"), kDimText);
+        if (matId != SUBSTANCE_NONE) {
+            if (mix) ins(trf("ins_substance_dominant", tr(matDef.displayNameKey)));
+            else ins(trf("ins_substance", tr(matDef.displayNameKey)));
+            insC(trf("ins_phase", tr(matterPhaseKey(matPhase))), inspectorPhaseColor(matPhase));
+        }
+        if (haveThermal)
+            ins(trf("ins_temp", shortFloat(thermal.temperatureK, tempDebug ? 2 : 1)));
+        if (isWall && matDef.mechanical.valid)
+            ins(trf("ins_density", shortFloat(matDef.mechanical.densityRel, 2)));
+
+        if (hasLiquid && matDef.fluid.valid) {
+            insHead("inspector_section_fluid", kInsHeadFluid);
+            ins(trf("ins_density", shortFloat(matDef.fluid.density, 2)));
+            ins(trf("ins_viscosity", shortFloat(matDef.fluid.viscosity, 3)));
+        }
+
+        if (hasLiquid) {
+            float honeyFrac = e->honeyFraction(hi);
+            insHead("inspector_section_composition", kInsHeadComposition);
+            insSplit(tr("ins_mat_water"), formatPercent(1.0f - honeyFrac), kInsCompWater);
+            insSplit(tr("ins_mat_honey"), formatPercent(honeyFrac), kInsCompHoney);
+        }
+
+        insHead("inspector_section_world", kInsHeadWorld);
+        ins(trf("ins_cell", std::to_wstring(hx), std::to_wstring(hy)));
+        if (hasLiquid || (!isWall && !isRigid && fill > 0.0f))
+            ins(trf("ins_fill", shortFloat(fill, 3)));
+        if (!isWall && !isRigid) {
+            float dr = e->dyeR[static_cast<size_t>(hi)];
+            float dg = e->dyeG[static_cast<size_t>(hi)];
+            float db = e->dyeB[static_cast<size_t>(hi)];
+            float dyeAmt = (fill > 1.0e-8f) ? std::max(dr, std::max(dg, db)) / fill : 0.0f;
+            if (dyeAmt > 0.02f) ins(trf("ins_dye", shortFloat(dyeAmt * 100.0, 0)));
+            ins(trf("ins_pressure", shortFloat(e->pressure[static_cast<size_t>(hi)], 2)));
+            ins(trf("ins_vel", shortFloat(e->cellU(hx, hy), 2), shortFloat(e->cellV(hx, hy), 2)));
+            ins(trf("ins_surface", e->surfaceMask[static_cast<size_t>(hi)] ? tr("yes") : tr("no")));
+        }
+
+        if (hasGas) {
+            insHead("inspector_section_gas", kInsHeadGas);
+            if (matPhase != MatterPhase::Gas)
+                ins(trf("ins_substance", tr(substanceDef(SUBSTANCE_AIR).displayNameKey)));
+            ins(trf("ins_gas_amount", shortFloat(g->amount[static_cast<size_t>(hi)], 3)));
+            ins(trf("ins_gas_vol", shortFloat(g->volume[static_cast<size_t>(hi)], 3)));
+            ins(trf("ins_gas_pa", shortFloat(g->pressurePa(hi), 0)));
+            ins(trf("ins_gas_atm", shortFloat(g->pressureAtm(hi), 3)));
+            ins(trf("ins_gas_vel", shortFloat(g->cellU(hx, hy), 2), shortFloat(g->cellV(hx, hy), 2)));
+        }
+
+        if (isRigid) {
             RigidBody const &b = rg->bodies[static_cast<size_t>(body)];
-            MaterialId mat = rg->worldCellMaterial(hx, hy);
-            wchar_t const *matName = tr(substanceDef(substanceForMaterial(mat)).displayNameKey);
-            ins(tr("ins_kind_rigid"));
+            MaterialId maskMat = rg->worldCellMaterial(hx, hy);
+            wchar_t const *matName = tr(substanceDef(substanceForMaterial(maskMat)).displayNameKey);
+            MechanicalProperties const &mech = matDef.mechanical;
+            insHead("inspector_section_rigid", kInsHeadRigid);
+            ins(trf("ins_body_id", std::to_wstring(b.id)));
             ins(trf("ins_material", matName));
-            insIdentity(substanceForMaterial(mat), MatterPhase::Solid, false);
-            ins(trf("ins_id", std::to_wstring(b.id)));
-            ins(trf("ins_component", std::to_wstring(b.id)));
+            if (mech.valid) ins(trf("ins_density", shortFloat(mech.densityRel, 2)));
             ins(trf("ins_mass", shortFloat(b.mass, 2)));
             ins(trf("ins_pos", shortFloat(b.x, 1), shortFloat(b.y, 1)));
             ins(trf("ins_vel", shortFloat(b.vx, 2), shortFloat(b.vy, 2)));
@@ -699,16 +774,13 @@ void drawShell(HDC dc, ShellState &shell, View const &view) {
             ins(trf("ins_anchored", b.anchored ? tr("yes") : tr("no")));
             ins(trf("ins_sleeping", b.dormant ? tr("yes") : tr("no")));
             ins(trf("ins_at_rest", (b.sleeping && !b.anchored && !b.dormant) ? tr("yes") : tr("no")));
-            ins(trf("ins_pen", shortFloat(b.maxPenetration, 3)));
-            ins(trf("ins_jnjt", shortFloat(b.debugJn, 2), shortFloat(b.debugJt, 2)));
-            ins(trf("ins_poscorr", shortFloat(b.debugPosCorrX, 3), shortFloat(b.debugPosCorrY, 3)));
             ins(trf("ins_damage", shortFloat(b.maxDamage, 2)));
             ins(trf("ins_bond_body", shortFloat(b.maxBondDamage, 2), std::to_wstring(b.brokenBondCount)));
             ins(trf("ins_moisture", shortFloat(b.absorbedLiquid, 2), shortFloat(b.cachedWetness, 2)));
             float localM = 0.0f;
             if (hi < static_cast<int>(rg->occupantMoisture.size()))
                 localM = rg->occupantMoisture[static_cast<size_t>(hi)];
-            float cap = porousForSubstance(substanceForMaterial(mat)).moistureCapacity;
+            float cap = porousForSubstance(substanceForMaterial(maskMat)).moistureCapacity;
             ins(trf("ins_local_moisture", shortFloat(localM, 3)));
             ins(trf("ins_moisture_cap", shortFloat(cap, 3)));
             float matD = 0.0f, bondD = 0.0f, strength = 0.0f, crack = 0.0f, wet = 0.0f;
@@ -722,32 +794,35 @@ void drawShell(HDC dc, ShellState &shell, View const &view) {
                 ins(trf("ins_saturation", shortFloat(wet, 2)));
                 if (brokenN > 0) ins(tr("ins_bond_broken"));
             }
-        } else if (!e->solid[static_cast<size_t>(hi)]) {
-            float fill = e->fill[static_cast<size_t>(hi)];
-            ins(tr("ins_kind_liquid"));
-            ins(trf("ins_fill", shortFloat(fill, 3)));
-            float dr = e->dyeR[static_cast<size_t>(hi)];
-            float dg = e->dyeG[static_cast<size_t>(hi)];
-            float db = e->dyeB[static_cast<size_t>(hi)];
-            float dyeAmt = (fill > 1.0e-8f) ? std::max(dr, std::max(dg, db)) / fill : 0.0f;
-            if (dyeAmt > 0.02f) ins(trf("ins_dye", shortFloat(dyeAmt * 100.0, 0)));
-            ins(trf("ins_pressure", shortFloat(e->pressure[static_cast<size_t>(hi)], 2)));
-            ins(trf("ins_vel", shortFloat(e->cellU(hx, hy), 2), shortFloat(e->cellV(hx, hy), 2)));
-            ins(trf("ins_surface", e->surfaceMask[static_cast<size_t>(hi)] ? tr("yes") : tr("no")));
-            if (fill > 1.0e-8f) {
-                bool mix = e->liquidComponentAmount(hi, SUBSTANCE_WATER) > 1.0e-6f
-                    && e->liquidComponentAmount(hi, SUBSTANCE_HONEY) > 1.0e-6f;
-                insIdentity(e->dominantLiquidSubstance(hi), MatterPhase::Liquid, mix);
-                if (mix) {
-                    int honeyPct = std::clamp(static_cast<int>(std::lround(static_cast<double>(e->honeyFraction(hi) * 100.0f))), 0, 100);
-                    int waterPct = 100 - honeyPct;
-                    ins(tr("ins_composition"));
-                    ins(trf("ins_comp_water", std::to_wstring(waterPct)));
-                    ins(trf("ins_comp_honey", std::to_wstring(honeyPct)));
-                }
-            }
         }
-        ins(trf("ins_volume", shortFloat(e->currentVolume, 1), shortFloat(e->expectedVolume, 1)));
+
+        bool showThermal = haveThermal && (tempDebug
+            || matDef.phase.meltingPointK > 1.0f
+            || matDef.phase.boilingPointK > 1.0f
+            || ((isWall || isRigid || hasLiquid) && matDef.thermal.valid));
+        if (showThermal) {
+            insHead("inspector_section_thermal", kInsHeadThermal);
+            if (tempDebug) {
+                wchar_t dTbuf[32]{};
+                swprintf_s(dTbuf, L"%+.2f", static_cast<double>(thermal.temperatureK - AMBIENT_TEMPERATURE_K));
+                ins(trf("ins_dT", dTbuf));
+                if (thermal.capacityJK > MIN_THERMAL_CAPACITY)
+                    ins(trf("ins_thermal_energy", shortFloat(thermal.energyJ, 0)));
+                bool active = view.thermal && view.thermal->isChunkActive(hx, hy);
+                ins(trf("ins_thermal_active", active ? tr("yes") : tr("no")));
+            }
+            if (matDef.thermal.valid)
+                ins(trf("ins_specific_heat", shortFloat(matDef.thermal.specificHeat, 0)));
+            if (matDef.phase.meltingPointK > 1.0f)
+                ins(trf("ins_melting_point", shortFloat(matDef.phase.meltingPointK, 2)));
+            if (matDef.phase.boilingPointK > 1.0f)
+                ins(trf("ins_boiling_point", shortFloat(matDef.phase.boilingPointK, 2)));
+        }
+
+        insHead("inspector_section_debug", kInsHeadDebug);
+        if (matId != SUBSTANCE_NONE)
+            insC(trf("ins_substance_id", std::to_wstring(matDef.id)), kDimText);
+        insC(trf("ins_volume", shortFloat(e->currentVolume, 1), shortFloat(e->expectedVolume, 1)), kDimText);
         if (rg) {
             double splash = 0.0;
             for (SplashParticle const &p : e->splashes) splash += p.volume;
@@ -755,23 +830,18 @@ void drawShell(HDC dc, ShellState &shell, View const &view) {
             for (float amount : e->fill) freeL += amount;
             double absorbed = rg->totalAbsorbedLiquid();
             double pending = rg->totalPendingDrip();
-            ins(trf("ins_liquid_total", shortFloat(freeL, 2), shortFloat(absorbed, 2),
-                shortFloat(splash, 2), shortFloat(freeL + absorbed + splash + pending, 2)));
+            insC(trf("ins_liquid_total", shortFloat(freeL, 2), shortFloat(absorbed, 2),
+                shortFloat(splash, 2), shortFloat(freeL + absorbed + splash + pending, 2)), kDimText);
             if (pending > 1.0e-5)
-                ins(trf("ins_pending_drip", shortFloat(pending, 3)));
+                insC(trf("ins_pending_drip", shortFloat(pending, 3)), kDimText);
         }
-        GasEngine const *g = view.gas;
-        if (g && !e->solid[static_cast<size_t>(hi)] && body < 0) {
-            int gi = hi;
-            ins(tr("ins_gas_material"));
-            insIdentity(SUBSTANCE_AIR, MatterPhase::Gas, false);
-            ins(trf("ins_gas_amount", shortFloat(g->amount[static_cast<size_t>(gi)], 3)));
-            ins(trf("ins_gas_vol", shortFloat(g->volume[static_cast<size_t>(gi)], 3)));
-            ins(trf("ins_gas_pa", shortFloat(g->pressurePa(gi), 0)));
-            ins(trf("ins_gas_atm", shortFloat(g->pressureAtm(gi), 3)));
-            ins(trf("ins_gas_vel", shortFloat(g->cellU(hx, hy), 2), shortFloat(g->cellV(hx, hy), 2)));
-            ins(tr("ins_gas_comp"));
-            ins(trf("ins_gas_world", shortFloat(g->currentAmount, 1), shortFloat(g->expectedAmount, 1)));
+        if (g)
+            insC(trf("ins_gas_world", shortFloat(g->currentAmount, 1), shortFloat(g->expectedAmount, 1)), kDimText);
+        if (isRigid) {
+            RigidBody const &b = rg->bodies[static_cast<size_t>(body)];
+            insC(trf("ins_pen", shortFloat(b.maxPenetration, 3)), kDimText);
+            insC(trf("ins_jnjt", shortFloat(b.debugJn, 2), shortFloat(b.debugJt, 2)), kDimText);
+            insC(trf("ins_poscorr", shortFloat(b.debugPosCorrX, 3), shortFloat(b.debugPosCorrY, 3)), kDimText);
         }
     }
 
