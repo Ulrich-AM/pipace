@@ -72,6 +72,10 @@ These mappings are **implementation, not laws**:
 | Air + Gas | GasEngine (air component) |
 | Water + Gas | GasEngine (`waterVapor` component; same SubstanceId) |
 
+Static `solid[]` walls use Stone thermal/mechanical identity but are
+**moisture-inert** (no absorb / drip / wetness). Porous Stone rigid bodies still
+absorb. Condensation may form liquid in adjacent free cells, not inside the wall.
+
 `supportsPhase` is capability metadata. Water **liquid ⇄ gas** and **liquid ⇄ solid**
 are live. Do **not** add SUBSTANCE_ICE / SUBSTANCE_STEAM.
 Density stays phase-specific: mechanical.densityRel (solid), fluid.density (liquid),

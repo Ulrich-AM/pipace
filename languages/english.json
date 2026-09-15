@@ -228,6 +228,7 @@
   "ins_moisture": "Absorbed (body): {0} ({1})",
   "ins_local_moisture": "Moisture: {0}",
   "ins_moisture_cap": "Capacity: {0}",
+  "ins_wall_dry": "Moisture: none (static wall)",
   "ins_liquid_total": "Liquid free/abs/splash/total {0} / {1} / {2} / {3}",
   "ins_pending_drip": "Pending drip: {0}",
   "ins_fill": "Fill: {0}",

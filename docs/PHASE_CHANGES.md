@@ -25,9 +25,15 @@ Live **water liquid ⇄ solid** (rigid `MATERIAL_WATER_SOLID`, still
 
 Vapor placement: the occupancy model is one primary medium per cell, and liquid
 with `fill >= MIN_PRESSURE_FILL` has zero gas volume. Boiling therefore deposits
-vapor into a neighboring accessible gas cell (prefer above, then sides, then BFS
-within 64 cells). Condensate prefers existing nearby water, then cells next to
-solids, then lower neighbors.
+vapor into a neighboring accessible gas cell (fair spatial tie-break among equal
+room; dest pressure cap 48 atm). Condensate prefers existing nearby water, then
+cells next to surfaces that are actually cooler than the vapor, then lower
+neighbors. Hot walls do not get a near-solid bonus. Equal destinations cycle by
+a tick-salted spatial hash rather than first-neighbor / left-first order.
+
+Static world walls (`fluid.solid[]`, `kStaticWallSubstance`) conduct heat and
+block flow but never store moisture. Adjacent condensation is allowed; porous
+Stone rigid bodies still absorb.
 
 ## Current sandbox units
 

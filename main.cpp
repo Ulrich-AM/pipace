@@ -866,6 +866,10 @@ void fillWorldPixels() {
             continue;
         }
         if (debugView == DebugView::Moisture) {
+            if (engine.solid[static_cast<size_t>(index)]) {
+                engine.pixels[index] = rgb(88, 88, 88);
+                continue;
+            }
             if (occMat != MATERIAL_EMPTY)
                 engine.pixels[index] = moistureDebugColor(occMat, rigid.occupantMoisture[static_cast<size_t>(index)]);
             else if (pendingMat != MATERIAL_EMPTY)
@@ -875,7 +879,7 @@ void fillWorldPixels() {
         if (occMat != MATERIAL_EMPTY) {
             MaterialDefinition const &mat = materialDef(occMat);
             float wetness = 0.0f;
-            if (mat.moistureCapacity > 1.0e-8f)
+            if (!engine.solid[static_cast<size_t>(index)] && mat.moistureCapacity > 1.0e-8f)
                 wetness = std::clamp(rigid.occupantMoisture[static_cast<size_t>(index)] / mat.moistureCapacity, 0.0f, 1.0f);
             float dmg = std::clamp(rigid.occupantDamage[static_cast<size_t>(index)], 0.0f, 1.0f);
             float crack = 0.0f;
@@ -1538,8 +1542,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR commandLine, int show)
         runWaterPhaseDiagnostics(engine, rigid, gas, thermal);
         return 0;
     }
-    if (commandLine && wcsstr(commandLine, L"--water-solid-phase-diag")) {
-        runWaterSolidPhaseDiagnostics(engine, rigid, gas, thermal);
+    if (commandLine && wcsstr(commandLine, L"--water-phase-stability-diag")) {
+        runWaterPhaseStabilityDiagnostics(engine, rigid, gas, thermal);
         return 0;
     }
     if (commandLine && wcsstr(commandLine, L"--water-phase-validation")) {

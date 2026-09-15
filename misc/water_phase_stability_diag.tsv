@@ -1,0 +1,21 @@
+hotbox	tick	liq_kg	solid_kg	vap_kg	wallT	liqT	iceT	boiled	condensed	melted	blockBoil	blockMelt	blockCondense
+hotbox	0	359.3750014	286.5624987	0	519.7868652	363.5922852	255.8562469	0	0	0	0	0	0
+hotbox	39	441.0322596	176.1697591	28.73550155	519.7697144	366.6835022	262.0126953	0.3859930493	0.003341822861	0.2691264963	0	0	11
+hotbox	79	508.7020105	87.32144938	49.91393917	519.7435303	354.918335	266.414093	0.4085385199	0.01470335267	0.2500682895	0	0	2
+hotbox	119	506.5150985	44.95706075	94.46494906	518.8008423	357.9376831	270.9959106	2.669645754	0.00257099632	0.2635026176	0	0	1
+hotbox	179	498.0207489	1.114287695e-06	147.9162206	519.494873	364.2736511	0	1.054831386	0.05234209857	0	0	0	6
+hotbox	239	436.17209	1.114287695e-06	209.7648054	519.6570435	372.393158	0	0.768440423	0.001499249325	0	0	0	5
+test	hotbox_ice_melts	PASS	ice0=286.5624987 ice1=1.114287695e-06 melted=286.5625324 blockMeltDest=3 blockMeltE=18
+test	hotbox_liquid_clears_or_pressure_limited	PASS	liq0=359.375 liq1=436.17209 vap1=209.7648054 liqT=372.393158 pmax_atm=48 cap=48 blockBoilP=0 blockBoilDest=0 blockBoilE=0 pressure_limited
+test	hotbox_mass_conserved	PASS	m0=645.9374987 m1=645.9368964
+test	hotbox_no_nan	PASS	
+test	hotbox_blocked_reasons_reported	PASS	boil=0 melt=21 cond=1391
+test	hot_wall_does_not_attract	PASS	near_hot=0.01139643136 interior=0.01992835429 vap0=5.955550623 vap1=5.107997089
+test	cool_wall_allows_nearby_condense	PASS	near_cool=0.03066945199 interior=0.02231810096 condensed_kg=1.141315384
+test	condense_not_one_sided	PASS	left=0.04568707906 right=0.03919938031 leftCells=0 rightCells=0
+test	static_wall_moisture_zero	PASS	wall_moist=0
+test	stone_rigid_still_absorbs	PASS	bodies=1 absorbed=0.05286055431
+test	static_wall_no_drip	PASS	pending=5.795240577e-05
+test	no_ice_substance_id	PASS	
+test	no_nan_inf_negK	PASS	
+summary	PASS	13 passed, 0 failed

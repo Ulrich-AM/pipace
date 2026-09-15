@@ -447,7 +447,7 @@ void WorldRenderer::paintNormal(FluidEngine &fluid, RigidBodyEngine const &rigid
             MaterialVisual vis = visualForSolid(occMat);
             float wetness = 0.0f;
             MaterialDefinition const &mat = materialDef(occMat);
-            if (mat.moistureCapacity > 1.0e-8f)
+            if (!fluid.solid[index] && mat.moistureCapacity > 1.0e-8f)
                 wetness = std::clamp(rigid.occupantMoisture[static_cast<size_t>(index)] / mat.moistureCapacity, 0.0f, 1.0f);
             float dmg = std::clamp(rigid.occupantDamage[static_cast<size_t>(index)], 0.0f, 1.0f);
             float crack = 0.0f;

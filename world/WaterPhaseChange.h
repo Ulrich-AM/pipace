@@ -26,7 +26,19 @@ struct WaterPhaseTickStats {
     int blockedCondense = 0;
     int blockedFreeze = 0;
     int blockedMelt = 0;
+    int blockedBoilNoDest = 0;
+    int blockedBoilPressure = 0;
+    int blockedBoilEnergy = 0;
+    int blockedCondenseNoDest = 0;
+    int blockedCondenseHotDest = 0;
+    int blockedCondenseEnergy = 0;
+    int blockedMeltNoDest = 0;
+    int blockedMeltEnergy = 0;
+    int blockedFreezeNoDest = 0;
 };
+
+void runWaterPhaseStabilityDiagnostics(FluidEngine &fluid, RigidBodyEngine &rigid,
+    GasEngine &gas, ThermalEngine &thermal);
 
 // Live WATER liquid ⇄ gas and liquid ⇄ solid. Honey mixtures are skipped.
 // Occupancy stays one primary medium: vapor is placed in neighboring gas cells.

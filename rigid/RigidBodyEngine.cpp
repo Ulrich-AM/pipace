@@ -1472,6 +1472,8 @@ void RigidBodyEngine::rasterizeBodyOccupancy(RigidBody const &b, int index, bool
             if (li < b.moisture.size()) occupantMoisture[static_cast<size_t>(i)] = b.moisture[li];
             occupantCrack[static_cast<size_t>(i)] = getLocalCrackFactor(b, ix, iy);
         }
+        if (fluid && fluid->solid[static_cast<size_t>(i)])
+            occupantMoisture[static_cast<size_t>(i)] = 0.0f;
         if (occupantMat[static_cast<size_t>(i)] == MATERIAL_EMPTY) {
             occupantMat[static_cast<size_t>(i)] = MATERIAL_WOOD;
             for (int iOcc : b.occupiedLocal) {
@@ -2501,6 +2503,7 @@ void RigidBodyEngine::processMoisture(FluidEngine &fluid, float dt) {
             localToWorld(b, lx + 0.5f, ly + 0.5f, wx, wy);
             int gx = static_cast<int>(std::floor(wx));
             int gy = static_cast<int>(std::floor(wy));
+            if (fluid.isStaticSolid(gx, gy)) continue; // static world walls never store moisture
             float &stored = b.moisture[static_cast<size_t>(i)];
             if (stored > 0.0f && stored < kMoistureEps) {
                 b.pendingDrip += stored;
