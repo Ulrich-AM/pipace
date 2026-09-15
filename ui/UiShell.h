@@ -9,6 +9,7 @@
 #include <windows.h>
 
 #include "ui/UiCommands.h"
+#include "ui/ToolWindow.h"
 #include "render/WorldVisual.h"
 #include "ui/UiLayout.h"
 
@@ -41,6 +42,8 @@ struct ShellState {
     std::wstring searchText;
     std::wstring consoleDraft;
     std::vector<std::wstring> consoleLines;
+    ToolSettings tools{};
+    ToolWindowState toolWin{};
     int hoverId = 0;
     int mouseX = 0;
     int mouseY = 0;

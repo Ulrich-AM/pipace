@@ -1,6 +1,7 @@
 #pragma once
 
 #include "GasConfig.h"
+#include "fluid/BrushGeom.h"
 
 #include <chrono>
 #include <cstdint>
@@ -56,7 +57,9 @@ struct GasEngine {
     void resetAmbient(FluidEngine &fluid);
     void handleWorldEdit(FluidEngine &fluid);
     void applyPressureBrush(FluidEngine &fluid, int cx, int cy, int brushRadius,
-        float signedAtmPerSec, float dt);
+        float signedAtmPerSec, float dt, BrushShape shape = BrushShape::Circle);
+    void eraseAmountBrush(FluidEngine &fluid, int cx, int cy, int brushRadius,
+        BrushShape shape = BrushShape::Circle);
     void simulationTick(FluidEngine &fluid);
     void applyPressureForces(RigidBodyEngine &rigid, FluidEngine const &fluid) const;
     void loadTestScene(FluidEngine &fluid, RigidBodyEngine &rigid, int scene);

@@ -176,18 +176,22 @@ void ShellState::applyPalette(PaletteId id, Tool &tool, MaterialId &drawMaterial
         case PaletteId::Metal: category = Category::Solids; tool = Tool::Rigid; drawMaterial = MATERIAL_METAL; break;
         case PaletteId::Erase: category = Category::Tools; tool = Tool::Eraser; break;
         case PaletteId::Grab:  category = Category::Tools; tool = Tool::Grab; break;
+        case PaletteId::Brush: category = Category::Tools; tool = Tool::Brush; break;
+        case PaletteId::Touch: category = Category::Tools; tool = Tool::Touch; break;
         case PaletteId::Wall:  category = Category::Misc; tool = Tool::Solid; break;
         case PaletteId::Heat:  category = Category::Energy; tool = Tool::Heat; break;
         case PaletteId::Cool:  category = Category::Energy; tool = Tool::Cool; break;
         case PaletteId::Pressurize: category = Category::Energy; tool = Tool::Pressurize; break;
         case PaletteId::Depressurize: category = Category::Energy; tool = Tool::Depressurize; break;
     }
+    syncToolWindow(*this, id);
 }
 
 void ShellState::applyCategory(Category cat, Tool &tool, MaterialId &drawMaterial) {
     category = cat;
     if (elementCount() <= 0) {
         palette = PaletteId::None;
+        syncToolWindow(*this, PaletteId::None);
         return;
     }
     applyPalette(elementAt(0), tool, drawMaterial);
@@ -195,18 +199,22 @@ void ShellState::applyCategory(Category cat, Tool &tool, MaterialId &drawMateria
 
 int ShellState::elementCount() const {
     switch (category) {
-        case Category::Tools: return 2;
+        case Category::Tools: return 4;
         case Category::Fluids: return 2;
         case Category::Solids: return 4;
         case Category::Misc: return 1;
-        case Category::Energy: return 4;
+        case Category::Energy: return 1;
         default: return 0;
     }
 }
 
 PaletteId ShellState::elementAt(int slot) const {
     switch (category) {
-        case Category::Tools: return slot == 0 ? PaletteId::Erase : PaletteId::Grab;
+        case Category::Tools:
+            if (slot == 1) return PaletteId::Grab;
+            if (slot == 2) return PaletteId::Brush;
+            if (slot == 3) return PaletteId::Touch;
+            return PaletteId::Erase;
         case Category::Fluids: return slot == 1 ? PaletteId::Honey : PaletteId::Water;
         case Category::Solids:
             if (slot == 1) return PaletteId::Stone;
@@ -215,16 +223,13 @@ PaletteId ShellState::elementAt(int slot) const {
             return PaletteId::Wood;
         case Category::Misc: return PaletteId::Wall;
         case Category::Energy:
-            if (slot == 1) return PaletteId::Cool;
-            if (slot == 2) return PaletteId::Pressurize;
-            if (slot == 3) return PaletteId::Depressurize;
             return PaletteId::Heat;
         default: return PaletteId::None;
     }
 }
 
 bool ShellState::hasPlacement() const {
-    return palette != PaletteId::None && palette != PaletteId::Grab;
+    return palette != PaletteId::None && palette != PaletteId::Grab && palette != PaletteId::Touch;
 }
 
 wchar_t const *ShellState::categoryName(Category cat) const {
@@ -250,6 +255,8 @@ wchar_t const *ShellState::paletteName(PaletteId id) const {
         case PaletteId::Metal: return tr("el_metal");
         case PaletteId::Erase: return tr("el_erase");
         case PaletteId::Grab:  return tr("el_grab");
+        case PaletteId::Brush: return tr("el_brush");
+        case PaletteId::Touch: return tr("el_touch");
         case PaletteId::Wall:  return tr("el_wall");
         case PaletteId::Heat:  return tr("el_heat");
         case PaletteId::Cool:  return tr("el_cool");
@@ -270,6 +277,8 @@ wchar_t const *ShellState::paletteHint(PaletteId id) const {
         case PaletteId::Metal: return tr("hint_metal");
         case PaletteId::Erase: return tr("hint_erase");
         case PaletteId::Grab:  return tr("hint_grab");
+        case PaletteId::Brush: return tr("hint_brush");
+        case PaletteId::Touch: return tr("hint_touch");
         case PaletteId::Wall:  return tr("hint_wall");
         case PaletteId::Heat:  return tr("hint_heat");
         case PaletteId::Cool:  return tr("hint_cool");
@@ -308,11 +317,9 @@ HitId hitTest(ShellState const &shell, int x, int y, bool settingsOpen) {
     if ((id = check(L.clearBtn, HitId::Clear)) != HitId::None) return id;
     if ((id = check(L.search, HitId::Search)) != HitId::None) return id;
     if ((id = check(L.console, HitId::Console)) != HitId::None) return id;
-    if (!settingsOpen && (id = check(L.propBrushMinus, HitId::BrushMinus)) != HitId::None) return id;
-    if (!settingsOpen && (id = check(L.propBrushPlus, HitId::BrushPlus)) != HitId::None) return id;
-    if (!settingsOpen && shell.category == Category::Energy) {
-        if ((id = check(L.propPowerMinus, HitId::PowerMinus)) != HitId::None) return id;
-        if ((id = check(L.propPowerPlus, HitId::PowerPlus)) != HitId::None) return id;
+    if (!settingsOpen && shell.category != Category::Tools && shell.category != Category::Energy) {
+        if ((id = check(L.propBrushMinus, HitId::BrushMinus)) != HitId::None) return id;
+        if ((id = check(L.propBrushPlus, HitId::BrushPlus)) != HitId::None) return id;
     }
     if (!settingsOpen && shell.category == Category::Fluids) {
         for (int i = 0; i < 8; ++i) {
@@ -504,12 +511,15 @@ void drawShell(HDC dc, ShellState &shell, View const &view) {
     };
     propLine(tr("prop_intro"));
     y += 4;
-    RECT bLab{pb.left, y, pb.right, y + 18};
-    std::wstring br = trf("prop_brush", std::to_wstring(view.brushRadius));
-    drawLabel(dc, bLab, br.c_str(), kText);
-    drawButton(dc, L.propBrushMinus, L"-", btnState(shell, HitId::BrushMinus, false));
-    drawButton(dc, L.propBrushPlus, L"+", btnState(shell, HitId::BrushPlus, false));
-    y = L.propBrushMinus.bottom + 10;
+    bool showBrushRow = shell.category != Category::Tools && shell.category != Category::Energy;
+    if (showBrushRow) {
+        RECT bLab{pb.left, y, pb.right, y + 18};
+        std::wstring br = trf("prop_brush", std::to_wstring(view.brushRadius));
+        drawLabel(dc, bLab, br.c_str(), kText);
+        drawButton(dc, L.propBrushMinus, L"-", btnState(shell, HitId::BrushMinus, false));
+        drawButton(dc, L.propBrushPlus, L"+", btnState(shell, HitId::BrushPlus, false));
+        y = L.propBrushMinus.bottom + 10;
+    }
     if (shell.category == Category::Solids) {
         RECT aLab{pb.left, y, pb.right, y + 18};
         drawLabel(dc, aLab, tr("prop_anchored"), kText);
@@ -598,18 +608,13 @@ void drawShell(HDC dc, ShellState &shell, View const &view) {
         drawLabel(dc, note, tr("prop_dye_note"), kDimText, DT_LEFT | DT_TOP | DT_WORDBREAK);
     } else if (shell.category == Category::Tools) {
         if (shell.palette == PaletteId::Grab) propLine(tr("prop_tool_grab"));
+        else if (shell.palette == PaletteId::Brush) propLine(tr("prop_tool_brush"));
+        else if (shell.palette == PaletteId::Touch) propLine(tr("prop_tool_touch"));
         else propLine(tr("prop_tool_eraser"));
+        propLine(tr("prop_tool_window_hint"));
     } else if (shell.category == Category::Energy) {
-        if (shell.palette == PaletteId::Cool) propLine(tr("prop_tool_cool"));
-        else if (shell.palette == PaletteId::Pressurize) propLine(tr("prop_tool_pressurize"));
-        else if (shell.palette == PaletteId::Depressurize) propLine(tr("prop_tool_depressurize"));
-        else propLine(tr("prop_tool_heat"));
-        std::wstring pw = trf("prop_power", shortFloat(view.heatPower, 2));
-        RECT pLab{pb.left, y, pb.right, y + 18};
-        drawLabel(dc, pLab, pw.c_str(), kText);
-        drawButton(dc, L.propPowerMinus, L"-", btnState(shell, HitId::PowerMinus, false));
-        drawButton(dc, L.propPowerPlus, L"+", btnState(shell, HitId::PowerPlus, false));
-        y = L.propPowerPlus.bottom + 8;
+        propLine(tr("prop_tool_heat"));
+        propLine(tr("prop_tool_window_hint"));
     } else if (shell.category == Category::Misc) {
         propLine(tr("prop_tool_wall"));
     } else {

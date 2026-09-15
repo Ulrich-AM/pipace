@@ -1,6 +1,7 @@
 #pragma once
 
 #include "RigidBodyTypes.h"
+#include "fluid/BrushGeom.h"
 
 #include <cstdint>
 #include <vector>
@@ -43,8 +44,12 @@ struct RigidBodyEngine {
     void paintPendingLine(int x0, int y0, int x1, int y1, int brushRadius);
     void clearPending();
     int commitPending(FluidEngine &fluid);
-    void eraseDisc(int cx, int cy, int brushRadius, FluidEngine &fluid);
-    void eraseLine(int x0, int y0, int x1, int y1, int brushRadius, FluidEngine &fluid);
+    void eraseDisc(int cx, int cy, int brushRadius, FluidEngine &fluid,
+        BrushShape shape = BrushShape::Circle, bool strictBodies = false,
+        std::vector<uint32_t> *strokeSeen = nullptr);
+    void eraseLine(int x0, int y0, int x1, int y1, int brushRadius, FluidEngine &fluid,
+        BrushShape shape = BrushShape::Circle, bool strictBodies = false,
+        std::vector<uint32_t> *strokeSeen = nullptr);
     int bodyAtCell(int x, int y) const;
     void removeBody(int index, FluidEngine &fluid);
 
@@ -52,10 +57,16 @@ struct RigidBodyEngine {
     void gatherFluidForces(FluidEngine const &fluid);
     void syncOccupancy(FluidEngine &fluid);
 
-    bool beginGrab(float wx, float wy);
+    bool beginGrab(float wx, float wy, float strength = 1.0f, bool group = false,
+        float groupRadius = 8.0f, bool phantom = false);
     void updateGrabTarget(float wx, float wy, bool strong);
     void endGrab();
     int indexOfId(uint32_t id) const;
+    bool grabContainsId(uint32_t id) const;
+    bool grabContainsIndex(int index) const;
+    void pruneGrab();
+    void collectBodiesInRadius(float wx, float wy, float radius, std::vector<int> &out, bool includeAnchored = false) const;
+    void applyTouch(float wx, float wy, bool group, float groupRadius, bool toggleAnchor);
 
     void depositImpactDamage(int bodyIndex, float wx, float wy, float speed, float impulse, float nx = 0.0f, float ny = 0.0f);
     void applyStructuralDamage(int bodyIndex, StructuralDamageRequest const &request);

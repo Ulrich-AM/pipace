@@ -2150,11 +2150,12 @@ void FluidEngine::addSloshImpulse() {
     wakeAllFluidChunks();
 }
 
-void FluidEngine::paintDisc(int cx, int cy, Tool tool, int brushRadius, LiquidPaint paint) {
+void FluidEngine::paintDisc(int cx, int cy, Tool tool, int brushRadius, LiquidPaint paint,
+    BrushShape shape, bool eraseWalls, bool eraseLiquids) {
     for (int y = cy - brushRadius; y <= cy + brushRadius; ++y) for (int x = cx - brushRadius; x <= cx + brushRadius; ++x) {
-        if (!inside(x, y) || (x - cx) * (x - cx) + (y - cy) * (y - cy) > brushRadius * brushRadius) continue;
+        if (!inside(x, y) || !brushContains(shape, cx, cy, x, y, brushRadius)) continue;
         int index = ci(x, y);
-        if (tool == Tool::Water) {
+        if (tool == Tool::Water || tool == Tool::Brush) {
             float s = std::clamp(paint.dyeStrength, 0.0f, 1.0f);
             bool clearDye = (paint.dyeR + paint.dyeG + paint.dyeB) <= 1.0e-6f;
             if (paint.dyeOnly) {
@@ -2210,9 +2211,11 @@ void FluidEngine::paintDisc(int cx, int cy, Tool tool, int brushRadius, LiquidPa
                 }
             }
         } else {
-            solid[index] = 0;
-            solidHeat[index] = 0.0f;
-            if (fill[index] > 0.0f) {
+            if (eraseWalls && solid[index]) {
+                solid[index] = 0;
+                solidHeat[index] = 0.0f;
+            }
+            if (eraseLiquids && fill[index] > 0.0f) {
                 expectedVolume -= fill[index];
                 fill[index] = 0.0f;
                 liquidHeat[index] = 0.0f;
@@ -2221,10 +2224,11 @@ void FluidEngine::paintDisc(int cx, int cy, Tool tool, int brushRadius, LiquidPa
             }
         }
     }
-    if (tool == Tool::Eraser) {
+    if (tool == Tool::Eraser && eraseLiquids) {
         for (size_t i = 0; i < splashes.size();) {
-            float dx = splashes[i].x - (cx + 0.5f), dy = splashes[i].y - (cy + 0.5f);
-            if (dx * dx + dy * dy <= static_cast<float>(brushRadius * brushRadius)) {
+            int sx = static_cast<int>(std::floor(splashes[i].x));
+            int sy = static_cast<int>(std::floor(splashes[i].y));
+            if (brushContains(shape, cx, cy, sx, sy, brushRadius)) {
                 expectedVolume -= splashes[i].volume; splashes[i] = splashes.back(); splashes.pop_back();
             } else ++i;
         }
@@ -2234,9 +2238,16 @@ void FluidEngine::paintDisc(int cx, int cy, Tool tool, int brushRadius, LiquidPa
 
 void FluidEngine::finalizePaint() { paintDirty = true; }
 
-void FluidEngine::paintLine(int x0, int y0, int x1, int y1, Tool tool, int brushRadius, LiquidPaint paint) {
+void FluidEngine::paintLine(int x0, int y0, int x1, int y1, Tool tool, int brushRadius, LiquidPaint paint,
+    BrushShape shape, bool eraseWalls, bool eraseLiquids) {
     int dx = std::abs(x1 - x0), sx = x0 < x1 ? 1 : -1, dy = -std::abs(y1 - y0), sy = y0 < y1 ? 1 : -1, error = dx + dy;
-    for (;;) { paintDisc(x0, y0, tool, brushRadius, paint); if (x0 == x1 && y0 == y1) break; int twice = 2 * error; if (twice >= dy) { error += dy; x0 += sx; } if (twice <= dx) { error += dx; y0 += sy; } }
+    for (;;) {
+        paintDisc(x0, y0, tool, brushRadius, paint, shape, eraseWalls, eraseLiquids);
+        if (x0 == x1 && y0 == y1) break;
+        int twice = 2 * error;
+        if (twice >= dy) { error += dy; x0 += sx; }
+        if (twice <= dx) { error += dx; y0 += sy; }
+    }
 }
 
 void FluidEngine::runHeadlessBenchmark() {

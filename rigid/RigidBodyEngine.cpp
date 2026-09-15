@@ -757,7 +757,19 @@ int RigidBodyEngine::bodyAtCell(int x, int y) const {
 
 void RigidBodyEngine::removeBody(int index, FluidEngine &fluid) {
     if (index < 0 || index >= static_cast<int>(bodies.size())) return;
-    if (grab.active && bodies[static_cast<size_t>(index)].id == grab.bodyId) grab = GrabState{};
+    if (grab.active && grabContainsId(bodies[static_cast<size_t>(index)].id)) {
+        uint32_t gone = bodies[static_cast<size_t>(index)].id;
+        size_t w = 0;
+        for (size_t i = 0; i < grab.members.size(); ++i)
+            if (grab.members[i].bodyId != gone) grab.members[w++] = grab.members[i];
+        grab.members.resize(w);
+        if (grab.members.empty()) grab = GrabState{};
+        else if (grab.bodyId == gone) {
+            grab.bodyId = grab.members[0].bodyId;
+            grab.localX = grab.members[0].localX;
+            grab.localY = grab.members[0].localY;
+        }
+    }
     bodies.erase(bodies.begin() + index);
     lastContacts.clear();
     syncOccupancy(fluid);
@@ -820,26 +832,63 @@ void RigidBodyEngine::carveWorldCells(std::vector<int> const &cells, FluidEngine
     syncOccupancy(fluid);
 }
 
-void RigidBodyEngine::eraseDisc(int cx, int cy, int brushRadius, FluidEngine &fluid) {
-    int r2 = brushRadius * brushRadius;
+void RigidBodyEngine::eraseDisc(int cx, int cy, int brushRadius, FluidEngine &fluid,
+    BrushShape shape, bool strictBodies, std::vector<uint32_t> *strokeSeen) {
+    if (strictBodies) {
+        std::vector<uint32_t> ids;
+        ids.reserve(8);
+        for (int y = cy - brushRadius; y <= cy + brushRadius; ++y)
+            for (int x = cx - brushRadius; x <= cx + brushRadius; ++x) {
+                if (!FluidEngine::inside(x, y)) continue;
+                if (!brushContains(shape, cx, cy, x, y, brushRadius)) continue;
+                int bi = occupant[static_cast<size_t>(FluidEngine::ci(x, y))];
+                if (bi < 0 || bi >= static_cast<int>(bodies.size())) continue;
+                uint32_t id = bodies[static_cast<size_t>(bi)].id;
+                bool dup = false;
+                for (uint32_t existing : ids) if (existing == id) { dup = true; break; }
+                if (!dup) ids.push_back(id);
+            }
+        for (uint32_t id : ids) {
+            bool skip = false;
+            if (strokeSeen) {
+                for (uint32_t existing : *strokeSeen) if (existing == id) { skip = true; break; }
+            }
+            if (skip) continue;
+            if (strokeSeen) strokeSeen->push_back(id);
+            int idx = indexOfId(id);
+            if (idx >= 0) removeBody(idx, fluid);
+        }
+        return;
+    }
     std::vector<int> cells;
     for (int y = cy - brushRadius; y <= cy + brushRadius; ++y)
         for (int x = cx - brushRadius; x <= cx + brushRadius; ++x) {
             if (!FluidEngine::inside(x, y)) continue;
-            if ((x - cx) * (x - cx) + (y - cy) * (y - cy) > r2) continue;
+            if (!brushContains(shape, cx, cy, x, y, brushRadius)) continue;
             cells.push_back(FluidEngine::ci(x, y));
         }
     carveWorldCells(cells, fluid);
 }
 
-void RigidBodyEngine::eraseLine(int x0, int y0, int x1, int y1, int brushRadius, FluidEngine &fluid) {
-    int r2 = brushRadius * brushRadius;
+void RigidBodyEngine::eraseLine(int x0, int y0, int x1, int y1, int brushRadius, FluidEngine &fluid,
+    BrushShape shape, bool strictBodies, std::vector<uint32_t> *strokeSeen) {
+    if (strictBodies) {
+        int dx = std::abs(x1 - x0), sx = x0 < x1 ? 1 : -1, dy = -std::abs(y1 - y0), sy = y0 < y1 ? 1 : -1, error = dx + dy;
+        for (;;) {
+            eraseDisc(x0, y0, brushRadius, fluid, shape, true, strokeSeen);
+            if (x0 == x1 && y0 == y1) break;
+            int twice = 2 * error;
+            if (twice >= dy) { error += dy; x0 += sx; }
+            if (twice <= dx) { error += dx; y0 += sy; }
+        }
+        return;
+    }
     std::vector<int> cells;
     auto stamp = [&](int cx, int cy) {
         for (int y = cy - brushRadius; y <= cy + brushRadius; ++y)
             for (int x = cx - brushRadius; x <= cx + brushRadius; ++x) {
                 if (!FluidEngine::inside(x, y)) continue;
-                if ((x - cx) * (x - cx) + (y - cy) * (y - cy) > r2) continue;
+                if (!brushContains(shape, cx, cy, x, y, brushRadius)) continue;
                 cells.push_back(FluidEngine::ci(x, y));
             }
     };
@@ -895,6 +944,7 @@ void RigidBodyEngine::markSupport(std::vector<RigidContact> const &contacts) {
 
 bool RigidBodyEngine::sweptThroughStaticSolid(FluidEngine const &fluid, RigidBody const &b, int index,
     float x0, float y0, float theta0) const {
+    if (grab.phantom && grabContainsIndex(index)) return false;
     float c0 = std::cos(theta0), s0 = std::sin(theta0);
     float c1 = std::cos(b.theta), s1 = std::sin(b.theta);
     auto worldOf = [&](float x, float y, float c, float s, float lx, float ly, float &wx, float &wy) {
@@ -928,6 +978,7 @@ bool RigidBodyEngine::sweptThroughStaticSolid(FluidEngine const &fluid, RigidBod
 }
 
 void RigidBodyEngine::collectStaticContacts(FluidEngine const &fluid, RigidBody const &b, int index, std::vector<RigidContact> &out) const {
+    if (grab.phantom && grabContainsIndex(index)) return;
     int x0 = std::max(0, static_cast<int>(std::floor(b.aabbX0)));
     int y0 = std::max(0, static_cast<int>(std::floor(b.aabbY0)));
     int x1 = std::min(GW - 1, static_cast<int>(std::ceil(b.aabbX1)));
@@ -984,6 +1035,7 @@ void RigidBodyEngine::collectBodyContacts(std::vector<RigidContact> &out) {
     };
     auto tryEmit = [&](int a, int b, float x, float y, float nx, float ny, float pen) {
         if (a == b || a < 0 || b < 0) return;
+        if (grab.phantom && (grabContainsIndex(a) || grabContainsIndex(b))) return;
         int key = pairKey(a, b);
         if (pairCount[static_cast<size_t>(key)] >= 12) return;
         ++pairCount[static_cast<size_t>(key)];
@@ -1446,7 +1498,7 @@ void RigidBodyEngine::step(FluidEngine &fluid, float dt) {
         if (s == sub - 1) lastContacts = contacts;
     }
     splitDirtyBodies();
-    if (grab.active && indexOfId(grab.bodyId) < 0) grab = GrabState{};
+    pruneGrab();
     for (RigidBody &b : bodies) {
         if (b.immobile()) {
             b.vx = b.vy = b.omega = 0.0f;
@@ -1456,7 +1508,7 @@ void RigidBodyEngine::step(FluidEngine &fluid, float dt) {
         b.vx *= 0.997f; b.vy *= 0.997f; b.omega *= 0.995f;
         updateAabb(b);
         if (b.sleeping) continue;
-        if (grab.active && b.id == grab.bodyId) { b.quietTicks = 0; continue; }
+        if (grabContainsId(b.id)) { b.quietTicks = 0; continue; }
         bool still = std::abs(b.vx) < kSleepLin && std::abs(b.vy) < kSleepLin && std::abs(b.omega) < kSleepAng;
         if (still && b.supported) {
             b.quietTicks++;
@@ -1466,7 +1518,7 @@ void RigidBodyEngine::step(FluidEngine &fluid, float dt) {
         } else b.quietTicks = 0;
     }
     cullBodiesLeftIntoVoid();
-    if (grab.active && indexOfId(grab.bodyId) < 0) grab = GrabState{};
+    pruneGrab();
     syncOccupancy(fluid);
     processMoisture(fluid, dt);
     lastStepMs = FluidEngine::elapsedMs(start);
@@ -1509,6 +1561,60 @@ int RigidBodyEngine::indexOfId(uint32_t id) const {
     return -1;
 }
 
+bool RigidBodyEngine::grabContainsId(uint32_t id) const {
+    if (!grab.active || id == 0) return false;
+    for (GrabMember const &m : grab.members)
+        if (m.bodyId == id) return true;
+    return false;
+}
+
+bool RigidBodyEngine::grabContainsIndex(int index) const {
+    if (index < 0 || index >= static_cast<int>(bodies.size())) return false;
+    return grabContainsId(bodies[static_cast<size_t>(index)].id);
+}
+
+void RigidBodyEngine::pruneGrab() {
+    if (!grab.active) return;
+    size_t w = 0;
+    for (size_t i = 0; i < grab.members.size(); ++i) {
+        if (indexOfId(grab.members[i].bodyId) >= 0)
+            grab.members[w++] = grab.members[i];
+    }
+    grab.members.resize(w);
+    if (grab.members.empty()) {
+        grab = GrabState{};
+        return;
+    }
+    if (indexOfId(grab.bodyId) < 0) {
+        grab.bodyId = grab.members[0].bodyId;
+        grab.localX = grab.members[0].localX;
+        grab.localY = grab.members[0].localY;
+    }
+}
+
+void RigidBodyEngine::collectBodiesInRadius(float wx, float wy, float radius, std::vector<int> &out, bool includeAnchored) const {
+    out.clear();
+    if (bodies.empty()) return;
+    int r = std::max(0, static_cast<int>(std::ceil(radius)));
+    int cx = static_cast<int>(std::floor(wx));
+    int cy = static_cast<int>(std::floor(wy));
+    float r2 = radius * radius;
+    std::vector<uint8_t> seen(bodies.size(), 0);
+    for (int y = cy - r; y <= cy + r; ++y)
+        for (int x = cx - r; x <= cx + r; ++x) {
+            if (!FluidEngine::inside(x, y)) continue;
+            float dx = (static_cast<float>(x) + 0.5f) - wx;
+            float dy = (static_cast<float>(y) + 0.5f) - wy;
+            if (dx * dx + dy * dy > r2) continue;
+            int bi = occupant[static_cast<size_t>(FluidEngine::ci(x, y))];
+            if (bi < 0 || bi >= static_cast<int>(bodies.size())) continue;
+            if (seen[static_cast<size_t>(bi)]) continue;
+            seen[static_cast<size_t>(bi)] = 1;
+            if (!includeAnchored && bodies[static_cast<size_t>(bi)].anchored) continue;
+            out.push_back(bi);
+        }
+}
+
 float RigidBodyEngine::bodyContactFriction(RigidBody const &b) const {
     return std::max(0.05f, b.cachedFriction);
 }
@@ -1517,7 +1623,7 @@ float RigidBodyEngine::bodyContactRestitution(RigidBody const &b) const {
     return clampf(b.cachedRestitution, 0.0f, 0.6f);
 }
 
-bool RigidBodyEngine::beginGrab(float wx, float wy) {
+bool RigidBodyEngine::beginGrab(float wx, float wy, float strength, bool group, float groupRadius, bool phantom) {
     int gx = static_cast<int>(std::floor(wx));
     int gy = static_cast<int>(std::floor(wy));
     int index = bodyAtCell(gx, gy);
@@ -1530,23 +1636,58 @@ bool RigidBodyEngine::beginGrab(float wx, float wy) {
             if (maskOccupied(bodies[i], ix, iy)) { index = static_cast<int>(i); break; }
         }
     }
-    if (index < 0 || index >= static_cast<int>(bodies.size())) return false;
-    RigidBody &b = bodies[static_cast<size_t>(index)];
-    if (b.anchored) return false;
-    float lx, ly;
-    worldToLocal(b, wx, wy, lx, ly);
+    std::vector<int> nearby;
+    if (group) collectBodiesInRadius(wx, wy, groupRadius, nearby, false);
+    if (index < 0 || index >= static_cast<int>(bodies.size())) {
+        if (!group || nearby.empty()) return false;
+        index = nearby[0];
+    }
+    if (bodies[static_cast<size_t>(index)].anchored) return false;
+
+    grab = GrabState{};
     grab.active = true;
-    grab.bodyId = b.id;
-    grab.localX = lx;
-    grab.localY = ly;
+    grab.strength = std::clamp(strength, 0.25f, 2.0f);
+    grab.phantom = phantom;
     grab.targetX = wx;
     grab.targetY = wy;
     grab.worldX = wx;
     grab.worldY = wy;
-    grab.lastFx = grab.lastFy = 0.0f;
-    wakeDormant(b);
-    b.sleeping = false;
-    b.quietTicks = 0;
+
+    auto addMember = [&](int i, bool primary) {
+        if (i < 0 || i >= static_cast<int>(bodies.size())) return;
+        RigidBody &b = bodies[static_cast<size_t>(i)];
+        if (b.anchored) return;
+        for (GrabMember const &m : grab.members)
+            if (m.bodyId == b.id) return;
+        GrabMember m;
+        m.bodyId = b.id;
+        if (primary) {
+            worldToLocal(b, wx, wy, m.localX, m.localY);
+            m.relX = 0.0f;
+            m.relY = 0.0f;
+        } else {
+            m.localX = b.comLocalX;
+            m.localY = b.comLocalY;
+            m.relX = b.x - wx;
+            m.relY = b.y - wy;
+        }
+        grab.members.push_back(m);
+        wakeDormant(b);
+        b.sleeping = false;
+        b.quietTicks = 0;
+    };
+
+    addMember(index, true);
+    if (grab.members.empty()) {
+        grab = GrabState{};
+        return false;
+    }
+    grab.bodyId = grab.members[0].bodyId;
+    grab.localX = grab.members[0].localX;
+    grab.localY = grab.members[0].localY;
+    if (group) {
+        for (int i : nearby) addMember(i, false);
+    }
     return true;
 }
 
@@ -1563,38 +1704,93 @@ void RigidBodyEngine::endGrab() {
 
 void RigidBodyEngine::applyGrabForces(float gravity) {
     if (!grab.active) return;
-    int index = indexOfId(grab.bodyId);
-    if (index < 0) { grab = GrabState{}; return; }
-    RigidBody &b = bodies[static_cast<size_t>(index)];
-    if (b.anchored) { grab = GrabState{}; return; }
-    wakeDormant(b);
-    b.sleeping = false;
-    b.quietTicks = 0;
-    float wx, wy;
-    localToWorld(b, grab.localX, grab.localY, wx, wy);
-    grab.worldX = wx;
-    grab.worldY = wy;
-    float rx = wx - b.x, ry = wy - b.y;
-    float pvx = b.vx - b.omega * ry;
-    float pvy = b.vy + b.omega * rx;
-    float ex = grab.targetX - wx;
-    float ey = grab.targetY - wy;
-    float stiff = (grab.strong ? 210.0f : 90.0f) * b.mass;
-    float damp = (grab.strong ? 26.0f : 13.0f) * b.mass;
-    float fx = ex * stiff - pvx * damp;
-    float fy = ey * stiff - pvy * damp;
+    pruneGrab();
+    if (!grab.active) return;
+    float str = std::clamp(grab.strength, 0.25f, 2.0f);
     float g = std::max(gravity, 8.0f);
-    float fmax = (grab.strong ? 36.0f : 16.0f) * b.mass * g;
-    float mag = std::sqrt(fx * fx + fy * fy);
-    if (mag > fmax && mag > 1.0e-5f) {
-        float s = fmax / mag;
-        fx *= s; fy *= s;
+    grab.lastFx = grab.lastFy = 0.0f;
+    for (GrabMember const &m : grab.members) {
+        int index = indexOfId(m.bodyId);
+        if (index < 0) continue;
+        RigidBody &b = bodies[static_cast<size_t>(index)];
+        if (b.anchored) continue;
+        wakeDormant(b);
+        b.sleeping = false;
+        b.quietTicks = 0;
+        float wx, wy;
+        localToWorld(b, m.localX, m.localY, wx, wy);
+        if (m.bodyId == grab.bodyId) {
+            grab.worldX = wx;
+            grab.worldY = wy;
+        }
+        float rx = wx - b.x, ry = wy - b.y;
+        float pvx = b.vx - b.omega * ry;
+        float pvy = b.vy + b.omega * rx;
+        float tx = grab.targetX + m.relX;
+        float ty = grab.targetY + m.relY;
+        float ex = tx - wx;
+        float ey = ty - wy;
+        float stiff = (grab.strong ? 210.0f : 90.0f) * b.mass * str;
+        float damp = (grab.strong ? 26.0f : 13.0f) * b.mass * str;
+        float fx = ex * stiff - pvx * damp;
+        float fy = ey * stiff - pvy * damp;
+        float fmax = (grab.strong ? 36.0f : 16.0f) * b.mass * g * str;
+        float mag = std::sqrt(fx * fx + fy * fy);
+        if (mag > fmax && mag > 1.0e-5f) {
+            float s = fmax / mag;
+            fx *= s; fy *= s;
+        }
+        b.fx += fx;
+        b.fy += fy;
+        b.torque += rx * fy - ry * fx;
+        if (m.bodyId == grab.bodyId) {
+            grab.lastFx = fx;
+            grab.lastFy = fy;
+        }
     }
-    b.fx += fx;
-    b.fy += fy;
-    b.torque += rx * fy - ry * fx;
-    grab.lastFx = fx;
-    grab.lastFy = fy;
+}
+
+void RigidBodyEngine::applyTouch(float wx, float wy, bool group, float groupRadius, bool toggleAnchor) {
+    if (!toggleAnchor) return;
+    std::vector<int> indices;
+    if (group) collectBodiesInRadius(wx, wy, groupRadius, indices, true);
+    else {
+        int gx = static_cast<int>(std::floor(wx));
+        int gy = static_cast<int>(std::floor(wy));
+        int index = bodyAtCell(gx, gy);
+        if (index < 0) {
+            for (size_t i = 0; i < bodies.size(); ++i) {
+                float lx, ly;
+                worldToLocal(bodies[i], wx, wy, lx, ly);
+                int ix = static_cast<int>(std::floor(lx));
+                int iy = static_cast<int>(std::floor(ly));
+                if (maskOccupied(bodies[i], ix, iy)) { index = static_cast<int>(i); break; }
+            }
+        }
+        if (index >= 0) indices.push_back(index);
+    }
+    std::vector<uint32_t> seen;
+    seen.reserve(indices.size());
+    for (int i : indices) {
+        if (i < 0 || i >= static_cast<int>(bodies.size())) continue;
+        uint32_t id = bodies[static_cast<size_t>(i)].id;
+        bool dup = false;
+        for (uint32_t s : seen) if (s == id) { dup = true; break; }
+        if (dup) continue;
+        seen.push_back(id);
+        RigidBody &b = bodies[static_cast<size_t>(i)];
+        b.anchored = !b.anchored;
+        if (b.anchored) {
+            b.vx = b.vy = b.omega = 0.0f;
+            b.sleeping = true;
+            b.quietTicks = kSleepTicks;
+            b.fx = b.fy = b.torque = 0.0f;
+        } else {
+            b.sleeping = false;
+            b.quietTicks = 0;
+            if (b.dormant) wakeDormant(b);
+        }
+    }
 }
 
 void RigidBodyEngine::setFragmentVelocity(RigidBody &child, float px, float py, float pvx, float pvy, float pomega) {
@@ -2089,14 +2285,25 @@ void RigidBodyEngine::splitDirtyBodies() {
         ++write;
     }
     bodies.resize(write);
+    pruneGrab();
     if (grab.active) {
-        int gi = indexOfId(grab.bodyId);
-        if (gi < 0) grab = GrabState{};
-        else {
+        size_t w = 0;
+        for (size_t i = 0; i < grab.members.size(); ++i) {
+            GrabMember const &m = grab.members[i];
+            int gi = indexOfId(m.bodyId);
+            if (gi < 0) continue;
             RigidBody const &b = bodies[static_cast<size_t>(gi)];
-            int lx = static_cast<int>(std::floor(grab.localX));
-            int ly = static_cast<int>(std::floor(grab.localY));
-            if (!maskOccupied(b, lx, ly)) grab = GrabState{};
+            int lx = static_cast<int>(std::floor(m.localX));
+            int ly = static_cast<int>(std::floor(m.localY));
+            if (!maskOccupied(b, lx, ly)) continue;
+            grab.members[w++] = m;
+        }
+        grab.members.resize(w);
+        if (grab.members.empty()) grab = GrabState{};
+        else if (indexOfId(grab.bodyId) < 0) {
+            grab.bodyId = grab.members[0].bodyId;
+            grab.localX = grab.members[0].localX;
+            grab.localY = grab.members[0].localY;
         }
     }
 }

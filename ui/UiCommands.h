@@ -100,6 +100,8 @@ enum class PaletteId : int {
     Metal,
     Erase,
     Grab,
+    Brush,
+    Touch,
     Wall,
     Heat,
     Cool,

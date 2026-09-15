@@ -37,6 +37,7 @@ size_t speedScaleIndex = 3;
 Tool activeTool = Tool::Water;
 DebugView debugView = DebugView::Normal;
 int brushRadius = 3;
+std::vector<uint32_t> eraseStrokeSeen;
 bool paused = false;
 bool mousePainting = false;
 bool mouseGrabbing = false;
@@ -156,6 +157,27 @@ void applySimQuality(int level);
 void setQualityPreset(QualityPreset preset);
 void adaptAutoQuality(double worldMs);
 void paintEnergyDisc(int cx, int cy);
+
+bool paletteUsesToolBrush() {
+    using ui::PaletteId;
+    return shell.palette == PaletteId::Erase || shell.palette == PaletteId::Brush
+        || shell.palette == PaletteId::Heat;
+}
+
+int strokeRadius() {
+    return paletteUsesToolBrush() ? ui::activeToolBrushSize(shell) : brushRadius;
+}
+
+BrushShape strokeShape() {
+    return ui::activeBrushShape(shell);
+}
+
+void nudgeStrokeRadius(int delta) {
+    if (paletteUsesToolBrush())
+        ui::writeBackActiveBrushSize(shell, ui::activeToolBrushSize(shell) + delta);
+    else
+        brushRadius = std::clamp(brushRadius + delta, 1, 14);
+}
 
 void applySimQuality(int level) {
     applyFluidQualityKnobs(engine.config, level);
@@ -303,8 +325,8 @@ void handleMenuCommand(ui::MenuCmd cmd) {
         case MenuCmd::Threads8: engine.config.workerCount = 8; engine.syncWorkerPool(); break;
         case MenuCmd::PressureMinus: engine.config.maxPressureIterations = std::max(8, engine.config.maxPressureIterations - 2); break;
         case MenuCmd::PressurePlus: engine.config.maxPressureIterations = std::min(30, engine.config.maxPressureIterations + 2); break;
-        case MenuCmd::BrushMinus: brushRadius = std::max(1, brushRadius - 1); break;
-        case MenuCmd::BrushPlus: brushRadius = std::min(14, brushRadius + 1); break;
+        case MenuCmd::BrushMinus: nudgeStrokeRadius(-1); break;
+        case MenuCmd::BrushPlus: nudgeStrokeRadius(1); break;
         case MenuCmd::Speed0: case MenuCmd::Speed1: case MenuCmd::Speed2:
         case MenuCmd::Speed3: case MenuCmd::Speed4: case MenuCmd::Speed5:
             speedScaleIndex = static_cast<size_t>(static_cast<int>(cmd) - static_cast<int>(MenuCmd::Speed0));
@@ -387,8 +409,8 @@ void handleHit(ui::HitId id) {
             shell.applyCategory(static_cast<ui::Category>(slot), activeTool, rigid.drawMaterial);
             break;
         }
-        case HitId::BrushMinus: brushRadius = std::max(1, brushRadius - 1); break;
-        case HitId::BrushPlus: brushRadius = std::min(14, brushRadius + 1); break;
+        case HitId::BrushMinus: nudgeStrokeRadius(-1); break;
+        case HitId::BrushPlus: nudgeStrokeRadius(1); break;
         case HitId::PowerMinus: shell.heatPower = std::max(0.25f, shell.heatPower - 0.25f); break;
         case HitId::PowerPlus: shell.heatPower = std::min(8.0f, shell.heatPower + 0.25f); break;
         case HitId::Anchored:
@@ -510,11 +532,12 @@ uint32_t mixToward(uint32_t dst, int r, int g, int b, float t);
 
 template <typename Fn>
 void forEachBrushCell(int cx, int cy, Fn &&fn) {
-    int r2 = brushRadius * brushRadius;
-    for (int y = cy - brushRadius; y <= cy + brushRadius; ++y)
-        for (int x = cx - brushRadius; x <= cx + brushRadius; ++x) {
+    int r = strokeRadius();
+    BrushShape shape = strokeShape();
+    for (int y = cy - r; y <= cy + r; ++y)
+        for (int x = cx - r; x <= cx + r; ++x) {
             if (!FluidEngine::inside(x, y)) continue;
-            if ((x - cx) * (x - cx) + (y - cy) * (y - cy) > r2) continue;
+            if (!brushContains(shape, cx, cy, x, y, r)) continue;
             fn(x, y);
         }
 }
@@ -550,7 +573,22 @@ void ghostTint(int &r, int &g, int &b) {
     }
     else if (activeTool == Tool::Solid) { r = 92; g = 94; b = 100; }
     else if (activeTool == Tool::Eraser) { r = 196; g = 92; b = 72; }
-    else if (activeTool == Tool::Heat) { r = 210; g = 110; b = 60; }
+    else if (activeTool == Tool::Brush) {
+        r = 70; g = 168; b = 214;
+        if (shell.tools.brush.colorMode) {
+            float dr, dg, db;
+            shell.dyeChannels(dr, dg, db);
+            if (dr + dg + db > 1.0e-6f) {
+                r = static_cast<int>(dr * 255.0f);
+                g = static_cast<int>(dg * 255.0f);
+                b = static_cast<int>(db * 255.0f);
+            }
+        }
+    }
+    else if (activeTool == Tool::Heat) {
+        if (shell.tools.heat.power < 0.0f) { r = 80; g = 130; b = 200; }
+        else { r = 210; g = 110; b = 60; }
+    }
     else if (activeTool == Tool::Cool) { r = 80; g = 130; b = 200; }
     else if (activeTool == Tool::Pressurize) { r = 200; g = 160; b = 70; }
     else if (activeTool == Tool::Depressurize) { r = 110; g = 112; b = 140; }
@@ -600,23 +638,48 @@ void drawRing(HDC dc, int cx, int cy, int rx, int ry) {
 }
 
 void drawBrushOverlay(HDC dc) {
-    if (settingsOpen || activeTool == Tool::Grab) return;
+    if (settingsOpen || activeTool == Tool::Grab || activeTool == Tool::Touch) return;
     if (!shell.hasPlacement() && !linePainting) return;
+    if (ui::toolWindowCoversPoint(shell, shell.mouseX, shell.mouseY) && !linePainting) return;
     bool over = inCanvas(shell.mouseX, shell.mouseY);
     if (!over && !linePainting) return;
     RECT const &c = worldViewRect();
     float cellW = std::max(1.0f, static_cast<float>(c.right - c.left) / static_cast<float>(GW));
     float cellH = std::max(1.0f, static_cast<float>(c.bottom - c.top) / static_cast<float>(GH));
-    int rx = std::max(2, static_cast<int>(std::lround(static_cast<float>(brushRadius) * cellW)));
-    int ry = std::max(2, static_cast<int>(std::lround(static_cast<float>(brushRadius) * cellH)));
+    int r = strokeRadius();
+    int rx = std::max(2, static_cast<int>(std::lround(static_cast<float>(r) * cellW)));
+    int ry = std::max(2, static_cast<int>(std::lround(static_cast<float>(r) * cellH)));
     HRGN clip = CreateRectRgn(c.left, c.top, c.right, c.bottom);
     SelectClipRgn(dc, clip);
-    if (over) drawRing(dc, shell.mouseX, shell.mouseY, rx, ry);
+    auto stampAt = [&](int mx, int my) {
+        BrushShape shape = strokeShape();
+        if (shape == BrushShape::Circle) {
+            drawRing(dc, mx, my, rx, ry);
+            return;
+        }
+        HPEN pen = CreatePen(PS_SOLID, 1, RGB(236, 228, 210));
+        HGDIOBJ oldPen = SelectObject(dc, pen);
+        HGDIOBJ oldBr = SelectObject(dc, GetStockObject(HOLLOW_BRUSH));
+        if (shape == BrushShape::Square) {
+            Rectangle(dc, mx - rx, my - ry, mx + rx + 1, my + ry + 1);
+        } else {
+            POINT pts[3] = {
+                {mx, my - ry},
+                {mx - rx, my + ry},
+                {mx + rx, my + ry}
+            };
+            Polygon(dc, pts, 3);
+        }
+        SelectObject(dc, oldPen);
+        SelectObject(dc, oldBr);
+        DeleteObject(pen);
+    };
+    if (over) stampAt(shell.mouseX, shell.mouseY);
     if (linePainting) {
         int x0 = 0, y0 = 0, x1 = 0, y1 = 0;
         gridToClientCenter(lineStartX, lineStartY, x0, y0);
         gridToClientCenter(lineEndX, lineEndY, x1, y1);
-        drawRing(dc, x0, y0, rx, ry);
+        stampAt(x0, y0);
         HPEN axis = CreatePen(PS_SOLID, 1, RGB(28, 26, 22));
         HGDIOBJ oldPen = SelectObject(dc, axis);
         MoveToEx(dc, x0, y0, nullptr);
@@ -628,7 +691,7 @@ void drawBrushOverlay(HDC dc) {
         SelectObject(dc, oldPen);
         DeleteObject(axis);
         DeleteObject(axisLite);
-        if (!over) drawRing(dc, x1, y1, rx, ry);
+        if (!over) stampAt(x1, y1);
     }
     SelectClipRgn(dc, nullptr);
     DeleteObject(clip);
@@ -917,6 +980,7 @@ void render(HWND hwnd, HDC dc) {
     ui::drawShell(dc, shell, view);
     blitCanvas(dc);
     drawBrushOverlay(dc);
+    ui::drawToolWindow(dc, shell);
     ui::drawSettingsPanel(dc, shell, view, shell.layout.client);
     ui::drawHoverTip(dc, shell, view);
     engine.timingAccum.render += FluidEngine::elapsedMs(renderStart);
@@ -956,11 +1020,52 @@ void cancelLineStroke() {
 
 LiquidPaint liquidPaintFromShell() {
     LiquidPaint p;
+    if (shell.palette == ui::PaletteId::Brush) {
+        p.asHoney = false;
+        p.dyeOnly = shell.tools.brush.colorMode;
+        p.dyeStrength = shell.dyeStrength;
+        shell.dyeChannels(p.dyeR, p.dyeG, p.dyeB);
+        return p;
+    }
     p.asHoney = shell.palette == ui::PaletteId::Honey;
     p.dyeOnly = shell.dyeOnly;
     p.dyeStrength = shell.dyeStrength;
     shell.dyeChannels(p.dyeR, p.dyeG, p.dyeB);
     return p;
+}
+
+Tool paintTool() {
+    return activeTool == Tool::Brush ? Tool::Water : activeTool;
+}
+
+void applyEraseDisc(int cx, int cy) {
+    ui::EraseToolSettings const &s = shell.tools.erase;
+    int r = strokeRadius();
+    engine.paintDisc(cx, cy, Tool::Eraser, r, {}, s.shape, s.deleteSolids, s.deleteLiquids);
+    if (s.deleteSolids)
+        rigid.eraseDisc(cx, cy, r, engine, s.shape, s.strictSolids, &eraseStrokeSeen);
+    if (s.deleteGases)
+        gas.eraseAmountBrush(engine, cx, cy, r, s.shape);
+}
+
+void applyEraseLine(int x0, int y0, int x1, int y1) {
+    ui::EraseToolSettings const &s = shell.tools.erase;
+    int r = strokeRadius();
+    engine.paintLine(x0, y0, x1, y1, Tool::Eraser, r, {}, s.shape, s.deleteSolids, s.deleteLiquids);
+    if (s.deleteSolids)
+        rigid.eraseLine(x0, y0, x1, y1, r, engine, s.shape, s.strictSolids, &eraseStrokeSeen);
+    if (s.deleteGases) {
+        int dx = std::abs(x1 - x0), sx = x0 < x1 ? 1 : -1;
+        int dy = -std::abs(y1 - y0), sy = y0 < y1 ? 1 : -1, error = dx + dy;
+        int x = x0, y = y0;
+        for (;;) {
+            gas.eraseAmountBrush(engine, x, y, r, s.shape);
+            if (x == x1 && y == y1) break;
+            int twice = 2 * error;
+            if (twice >= dy) { error += dy; x += sx; }
+            if (twice <= dx) { error += dx; y += sy; }
+        }
+    }
 }
 
 void commitLineStroke() {
@@ -983,9 +1088,15 @@ void commitLineStroke() {
             if (twice >= dy) { error += dy; x0 += sx; }
             if (twice <= dx) { error += dx; y0 += sy; }
         }
+    } else if (activeTool == Tool::Eraser) {
+        eraseStrokeSeen.clear();
+        applyEraseLine(lineStartX, lineStartY, lineEndX, lineEndY);
+        engine.finalizePaint();
+        engine.flushPaintDirty();
+        gas.handleWorldEdit(engine);
     } else {
-        engine.paintLine(lineStartX, lineStartY, lineEndX, lineEndY, activeTool, brushRadius, liquidPaintFromShell());
-        if (activeTool == Tool::Eraser) rigid.eraseLine(lineStartX, lineStartY, lineEndX, lineEndY, brushRadius, engine);
+        engine.paintLine(lineStartX, lineStartY, lineEndX, lineEndY, paintTool(), strokeRadius(),
+            liquidPaintFromShell(), strokeShape());
         engine.finalizePaint();
         engine.flushPaintDirty();
         gas.handleWorldEdit(engine);
@@ -995,13 +1106,13 @@ void commitLineStroke() {
 
 void paintEnergyDisc(int cx, int cy) {
     if (isThermalEnergyTool(activeTool)) {
-        float sign = activeTool == Tool::Heat ? 1.0f : -1.0f;
-        thermal.applyBrush(engine, rigid, gas, cx, cy, brushRadius, sign * shell.heatPower, PHYSICS_DT);
+        float power = (activeTool == Tool::Heat) ? shell.tools.heat.power : -shell.heatPower;
+        thermal.applyBrush(engine, rigid, gas, cx, cy, strokeRadius(), power, PHYSICS_DT, strokeShape());
         return;
     }
     float sign = activeTool == Tool::Pressurize ? 1.0f : -1.0f;
-    gas.applyPressureBrush(engine, cx, cy, brushRadius,
-        sign * gas.config.brushAtmPerSec * shell.heatPower, PHYSICS_DT);
+    gas.applyPressureBrush(engine, cx, cy, strokeRadius(),
+        sign * gas.config.brushAtmPerSec * shell.heatPower, PHYSICS_DT, strokeShape());
 }
 
 void beginPaintStroke(int x, int y) {
@@ -1012,10 +1123,16 @@ void beginPaintStroke(int x, int y) {
         paintEnergyDisc(lastPaintX, lastPaintY);
         return;
     }
+    if (activeTool == Tool::Eraser) {
+        eraseStrokeSeen.clear();
+        applyEraseDisc(lastPaintX, lastPaintY);
+        engine.finalizePaint();
+        gas.handleWorldEdit(engine);
+        return;
+    }
     if (activeTool == Tool::Rigid) rigid.paintPendingDisc(lastPaintX, lastPaintY, brushRadius);
     else {
-        engine.paintDisc(lastPaintX, lastPaintY, activeTool, brushRadius, liquidPaintFromShell());
-        if (activeTool == Tool::Eraser) rigid.eraseDisc(lastPaintX, lastPaintY, brushRadius, engine);
+        engine.paintDisc(lastPaintX, lastPaintY, paintTool(), strokeRadius(), liquidPaintFromShell(), strokeShape());
         engine.finalizePaint();
         gas.handleWorldEdit(engine);
     }
@@ -1029,10 +1146,16 @@ void continuePaintStroke(int x, int y) {
         lastPaintX = gx; lastPaintY = gy;
         return;
     }
+    if (activeTool == Tool::Eraser) {
+        applyEraseLine(lastPaintX, lastPaintY, gx, gy);
+        engine.finalizePaint();
+        gas.handleWorldEdit(engine);
+        lastPaintX = gx; lastPaintY = gy;
+        return;
+    }
     if (activeTool == Tool::Rigid) rigid.paintPendingLine(lastPaintX, lastPaintY, gx, gy, brushRadius);
     else {
-        engine.paintLine(lastPaintX, lastPaintY, gx, gy, activeTool, brushRadius, liquidPaintFromShell());
-        if (activeTool == Tool::Eraser) rigid.eraseLine(lastPaintX, lastPaintY, gx, gy, brushRadius, engine);
+        engine.paintLine(lastPaintX, lastPaintY, gx, gy, paintTool(), strokeRadius(), liquidPaintFromShell(), strokeShape());
         engine.finalizePaint();
         gas.handleWorldEdit(engine);
     }
@@ -1063,6 +1186,20 @@ LRESULT CALLBACK wndProc(HWND hwnd, UINT message, WPARAM wp, LPARAM lp) {
                 invalidate();
                 return 0;
             }
+            ui::SettingsMouseResult toolHit = ui::handleToolWindowMouseDown(shell, x, y);
+            if (toolHit == ui::SettingsMouseResult::Drag) {
+                mousePainting = false;
+                cancelLineStroke();
+                invalidate();
+                return 0;
+            }
+            if (toolHit != ui::SettingsMouseResult::Miss) {
+                mousePainting = false;
+                cancelLineStroke();
+                ReleaseCapture();
+                invalidate();
+                return 0;
+            }
             ui::HitId hit = ui::hitTest(shell, x, y, settingsOpen);
             shell.hoverId = static_cast<int>(hit);
             if (hit != ui::HitId::None) {
@@ -1082,13 +1219,22 @@ LRESULT CALLBACK wndProc(HWND hwnd, UINT message, WPARAM wp, LPARAM lp) {
             if (inCanvas(x, y) && activeTool == Tool::Grab) {
                 float gx, gy;
                 clientToGridF(x, y, gx, gy);
-                mouseGrabbing = rigid.beginGrab(gx, gy);
+                mouseGrabbing = rigid.beginGrab(gx, gy, shell.tools.grab.strength,
+                    shell.tools.grab.groupGrab, shell.tools.grab.groupRadius, shell.tools.grab.phantom);
                 mousePainting = false;
                 cancelLineStroke();
                 if (mouseGrabbing) {
                     rigid.updateGrabTarget(gx, gy, (wp & MK_SHIFT) != 0);
                     shell.log(ui::tr("log_grab"));
                 }
+            } else if (inCanvas(x, y) && activeTool == Tool::Touch) {
+                float gx, gy;
+                clientToGridF(x, y, gx, gy);
+                rigid.applyTouch(gx, gy, shell.tools.touch.groupTouch,
+                    shell.tools.touch.groupRadius, shell.tools.touch.toggleAnchor);
+                mousePainting = false;
+                cancelLineStroke();
+                ReleaseCapture();
             } else if (inCanvas(x, y) && shell.hasPlacement()) {
                 if (wp & MK_SHIFT) {
                     mousePainting = false;
@@ -1113,7 +1259,10 @@ LRESULT CALLBACK wndProc(HWND hwnd, UINT message, WPARAM wp, LPARAM lp) {
             int x = GET_X_LPARAM(lp), y = GET_Y_LPARAM(lp);
             refreshLayout(hwnd);
             shell.mouseX = x; shell.mouseY = y;
-            shell.hoverId = static_cast<int>(ui::hitTest(shell, x, y, settingsOpen));
+            if (ui::toolWindowCoversPoint(shell, x, y) || (settingsOpen && ui::settingsCoversPoint(shell, x, y)))
+                shell.hoverId = 0;
+            else
+                shell.hoverId = static_cast<int>(ui::hitTest(shell, x, y, settingsOpen));
             TRACKMOUSEEVENT tme{};
             tme.cbSize = sizeof(tme);
             tme.dwFlags = TME_LEAVE;
@@ -1129,7 +1278,14 @@ LRESULT CALLBACK wndProc(HWND hwnd, UINT message, WPARAM wp, LPARAM lp) {
                 invalidate();
                 return 0;
             }
-            if (inCanvas(x, y)) clientToGrid(x, y, hoverX, hoverY);
+            if (shell.toolWin.dragging && (wp & MK_LBUTTON)) {
+                ui::dragToolWindow(shell, x, y);
+                invalidate();
+                return 0;
+            }
+            if (inCanvas(x, y) && !ui::toolWindowCoversPoint(shell, x, y)
+                && !(settingsOpen && ui::settingsCoversPoint(shell, x, y)))
+                clientToGrid(x, y, hoverX, hoverY);
             else hoverX = hoverY = -1;
             if (mouseGrabbing && (wp & MK_LBUTTON) && inCanvas(x, y)) {
                 float gx, gy;
@@ -1137,7 +1293,9 @@ LRESULT CALLBACK wndProc(HWND hwnd, UINT message, WPARAM wp, LPARAM lp) {
                 rigid.updateGrabTarget(gx, gy, (wp & MK_SHIFT) != 0);
             } else if (linePainting && (wp & MK_LBUTTON)) {
                 clientToGrid(x, y, lineEndX, lineEndY);
-            } else if (!shell.settingsDragging && !shell.settingsScrollDragging && mousePainting && (wp & MK_LBUTTON) && inCanvas(x, y))
+            } else if (!shell.settingsDragging && !shell.settingsScrollDragging && !shell.toolWin.dragging
+                && mousePainting && (wp & MK_LBUTTON) && inCanvas(x, y)
+                && !ui::toolWindowCoversPoint(shell, x, y))
                 continuePaintStroke(x, y);
             invalidate();
             return 0;
@@ -1152,6 +1310,7 @@ LRESULT CALLBACK wndProc(HWND hwnd, UINT message, WPARAM wp, LPARAM lp) {
             shell.mouseDown = false;
             shell.settingsDragging = false;
             shell.settingsScrollDragging = false;
+            shell.toolWin.dragging = false;
             if (mouseGrabbing) {
                 rigid.endGrab();
                 mouseGrabbing = false;
@@ -1171,6 +1330,7 @@ LRESULT CALLBACK wndProc(HWND hwnd, UINT message, WPARAM wp, LPARAM lp) {
             refreshLayout(hwnd);
             int x = GET_X_LPARAM(lp), y = GET_Y_LPARAM(lp);
             if (settingsOpen && ui::settingsCoversPoint(shell, x, y)) return 0;
+            if (ui::toolWindowCoversPoint(shell, x, y)) return 0;
             if (!inCanvas(x, y)) return 0;
             int gx, gy; clientToGrid(x, y, gx, gy);
             int body = rigid.bodyAtCell(gx, gy);
@@ -1188,7 +1348,11 @@ LRESULT CALLBACK wndProc(HWND hwnd, UINT message, WPARAM wp, LPARAM lp) {
                 invalidate();
                 return 0;
             }
-            brushRadius = std::clamp(brushRadius + (GET_WHEEL_DELTA_WPARAM(wp) > 0 ? 1 : -1), 1, 14);
+            if (ui::handleToolWindowWheel(shell, p.x, p.y, GET_WHEEL_DELTA_WPARAM(wp))) {
+                invalidate();
+                return 0;
+            }
+            nudgeStrokeRadius(GET_WHEEL_DELTA_WPARAM(wp) > 0 ? 1 : -1);
             invalidate(); return 0;
         }
         case WM_CHAR:
@@ -1238,7 +1402,7 @@ LRESULT CALLBACK wndProc(HWND hwnd, UINT message, WPARAM wp, LPARAM lp) {
             else if (wp == '4') shell.applyCategory(ui::Category::Misc, activeTool, rigid.drawMaterial);
             else if (wp == VK_SPACE) paused = !paused; else if (wp == 'S' && paused) worldTick();
             else if (wp == 'A') engine.config.velocityAdvection = nextVelocityAdvection(engine.config.velocityAdvection);
-            else if (wp == VK_OEM_4) brushRadius = std::max(1, brushRadius - 1); else if (wp == VK_OEM_6) brushRadius = std::min(14, brushRadius + 1);
+            else if (wp == VK_OEM_4) nudgeStrokeRadius(-1); else if (wp == VK_OEM_6) nudgeStrokeRadius(1);
             else if (wp == VK_OEM_MINUS || wp == VK_SUBTRACT) changeTickRate(-1); else if (wp == VK_OEM_PLUS || wp == VK_ADD) changeTickRate(1);
             invalidate(); return 0;
         case WM_SETCURSOR: {
@@ -1252,8 +1416,17 @@ LRESULT CALLBACK wndProc(HWND hwnd, UINT message, WPARAM wp, LPARAM lp) {
                 SetCursor(LoadCursor(nullptr, IDC_ARROW));
                 return TRUE;
             }
+            if (shell.toolWin.dragging || (shell.toolWin.open && ui::ptIn(shell.toolWin.titleBar, p.x, p.y))) {
+                SetCursor(LoadCursor(nullptr, IDC_SIZEALL));
+                return TRUE;
+            }
+            if (shell.toolWin.open && ui::toolWindowCoversPoint(shell, p.x, p.y)) {
+                SetCursor(LoadCursor(nullptr, IDC_ARROW));
+                return TRUE;
+            }
             if (inCanvas(p.x, p.y) && !(settingsOpen && ui::settingsCoversPoint(shell, p.x, p.y))) {
-                SetCursor(LoadCursor(nullptr, activeTool == Tool::Grab ? IDC_HAND : IDC_CROSS));
+                bool hand = activeTool == Tool::Grab || activeTool == Tool::Touch;
+                SetCursor(LoadCursor(nullptr, hand ? IDC_HAND : IDC_CROSS));
                 return TRUE;
             }
             SetCursor(LoadCursor(nullptr, IDC_ARROW));

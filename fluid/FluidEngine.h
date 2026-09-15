@@ -2,6 +2,7 @@
 
 #include "FluidConfig.h"
 #include "WorkerPool.h"
+#include "BrushGeom.h"
 
 #include <chrono>
 #include <cstdint>
@@ -200,8 +201,10 @@ struct FluidEngine {
     void resetWorld();
     void loadTestScene(int scene);
     void addSloshImpulse();
-    void paintDisc(int cx, int cy, Tool tool, int brushRadius, LiquidPaint paint = {});
-    void paintLine(int x0, int y0, int x1, int y1, Tool tool, int brushRadius, LiquidPaint paint = {});
+    void paintDisc(int cx, int cy, Tool tool, int brushRadius, LiquidPaint paint = {},
+        BrushShape shape = BrushShape::Circle, bool eraseWalls = true, bool eraseLiquids = true);
+    void paintLine(int x0, int y0, int x1, int y1, Tool tool, int brushRadius, LiquidPaint paint = {},
+        BrushShape shape = BrushShape::Circle, bool eraseWalls = true, bool eraseLiquids = true);
     void finalizePaint();
     void runHeadlessBenchmark();
     void runScaleBenchmark();

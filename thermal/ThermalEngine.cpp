@@ -300,15 +300,14 @@ double ThermalEngine::totalThermalEnergy(FluidEngine const &fluid, RigidBodyEngi
 }
 
 void ThermalEngine::applyBrush(FluidEngine &fluid, RigidBodyEngine &rigid, GasEngine &gas,
-    int cx, int cy, int brushRadius, float signedStrength, float dt)
+    int cx, int cy, int brushRadius, float signedStrength, float dt, BrushShape shape)
 {
     float watts = config.heatToolWatts * signedStrength;
     float dQcell = watts * std::max(dt, 1.0f / 30.0f);
-    int r2 = brushRadius * brushRadius;
     for (int y = cy - brushRadius; y <= cy + brushRadius; ++y)
         for (int x = cx - brushRadius; x <= cx + brushRadius; ++x) {
             if (!FluidEngine::inside(x, y)) continue;
-            if ((x - cx) * (x - cx) + (y - cy) * (y - cy) > r2) continue;
+            if (!brushContains(shape, cx, cy, x, y, brushRadius)) continue;
             int i = FluidEngine::ci(x, y);
             bool any = false;
             int body = rigid.occupant[static_cast<size_t>(i)];

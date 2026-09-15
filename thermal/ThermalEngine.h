@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ThermalConfig.h"
+#include "fluid/BrushGeom.h"
 #include "ThermalViz.h"
 
 #include <cstdint>
@@ -58,7 +59,8 @@ struct ThermalEngine {
     void ingestEngineWakes(FluidEngine &fluid, GasEngine &gas);
 
     void applyBrush(FluidEngine &fluid, RigidBodyEngine &rigid, GasEngine &gas,
-        int cx, int cy, int brushRadius, float signedStrength, float dt);
+        int cx, int cy, int brushRadius, float signedStrength, float dt,
+        BrushShape shape = BrushShape::Circle);
 
     void simulationTick(FluidEngine &fluid, RigidBodyEngine &rigid, GasEngine &gas, float dt);
 

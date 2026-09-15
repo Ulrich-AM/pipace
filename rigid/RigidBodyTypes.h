@@ -140,14 +140,23 @@ struct OccupancyConflict {
     int y = 0;
 };
 
+struct GrabMember {
+    uint32_t bodyId = 0;
+    float localX = 0.0f, localY = 0.0f;
+    float relX = 0.0f, relY = 0.0f;
+};
+
 struct GrabState {
     bool active = false;
     bool strong = false;
+    bool phantom = false;
+    float strength = 1.0f;
     uint32_t bodyId = 0;
     float localX = 0.0f, localY = 0.0f;
     float targetX = 0.0f, targetY = 0.0f;
     float worldX = 0.0f, worldY = 0.0f;
     float lastFx = 0.0f, lastFy = 0.0f;
+    std::vector<GrabMember> members;
 };
 
 struct RigidBody {

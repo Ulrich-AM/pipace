@@ -9,6 +9,7 @@ add_executable(pipace WIN32
   ui/UiShell.cpp
   ui/UiLanguage.cpp
   ui/UiAssets.cpp
+  ui/ToolWindow.cpp
   gas/GasEngine.cpp
   thermal/ThermalEngine.cpp
   render/WorldRenderer.cpp

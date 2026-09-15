@@ -546,17 +546,16 @@ void GasEngine::handleWorldEdit(FluidEngine &fluid) {
 }
 
 void GasEngine::applyPressureBrush(FluidEngine &fluid, int cx, int cy, int brushRadius,
-    float signedAtmPerSec, float dt)
+    float signedAtmPerSec, float dt, BrushShape shape)
 {
     float dAtm = signedAtmPerSec * std::max(dt, 1.0f / 30.0f);
     if (std::abs(dAtm) < 1.0e-8f) return;
-    int r2 = brushRadius * brushRadius;
     double net = 0.0;
     float maxAtm = std::max(config.ambientPressureAtm, config.brushMaxAtm);
     for (int y = cy - brushRadius; y <= cy + brushRadius; ++y)
         for (int x = cx - brushRadius; x <= cx + brushRadius; ++x) {
             if (!FluidEngine::inside(x, y)) continue;
-            if ((x - cx) * (x - cx) + (y - cy) * (y - cy) > r2) continue;
+            if (!brushContains(shape, cx, cy, x, y, brushRadius)) continue;
             int i = ci(x, y);
             float vol = availableVolume(fluid, x, y);
             volume[static_cast<size_t>(i)] = vol;
@@ -585,6 +584,29 @@ void GasEngine::applyPressureBrush(FluidEngine &fluid, int cx, int cy, int brush
             }
             pressure[static_cast<size_t>(i)] = na / vol;
             net += static_cast<double>(na - a);
+            wakeChunkAtCell(x, y);
+            wakeThermalAt(x, y);
+        }
+    expectedAmount += net;
+    currentAmount += net;
+    amountError = currentAmount - expectedAmount;
+}
+
+void GasEngine::eraseAmountBrush(FluidEngine &fluid, int cx, int cy, int brushRadius, BrushShape shape)
+{
+    (void)fluid;
+    double net = 0.0;
+    for (int y = cy - brushRadius; y <= cy + brushRadius; ++y)
+        for (int x = cx - brushRadius; x <= cx + brushRadius; ++x) {
+            if (!FluidEngine::inside(x, y)) continue;
+            if (!brushContains(shape, cx, cy, x, y, brushRadius)) continue;
+            int i = ci(x, y);
+            float a = amount[static_cast<size_t>(i)];
+            if (a <= GAS_MIN_AMOUNT) continue;
+            net -= static_cast<double>(a);
+            amount[static_cast<size_t>(i)] = 0.0f;
+            heat[static_cast<size_t>(i)] = 0.0f;
+            pressure[static_cast<size_t>(i)] = 0.0f;
             wakeChunkAtCell(x, y);
             wakeThermalAt(x, y);
         }
