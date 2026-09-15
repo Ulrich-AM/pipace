@@ -15,6 +15,10 @@
 constexpr float AMBIENT_TEMPERATURE_K = 293.15f;
 constexpr float WATER_DENSITY_KG_M3 = 1000.0f;
 constexpr float AIR_DENSITY_KG_M3 = 1.204f;
+// Dry-air molar mass that reproduces AIR_DENSITY_KG_M3 at 1 atm and ambient T
+// via the ideal-gas law (used to scale other vapors, not a second air table).
+constexpr float AIR_MOLAR_MASS_G_MOL = 28.97f;
+constexpr float UNIVERSAL_GAS_R_J_MOL_K = 8.314462618f;
 constexpr float MIN_THERMAL_CAPACITY = 1.0e-6f; // J/K
 constexpr float MIN_THERMAL_MASS_KG = 1.0e-9f;
 constexpr float MIN_SAFE_TEMPERATURE_K = 0.05f;

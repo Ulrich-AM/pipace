@@ -1,0 +1,35 @@
+test	unit_cell_edge_m	PASS	dx=0.25
+test	unit_cell_volume_m3	PASS	V=0.015625
+test	unit_full_water_cell_kg	PASS	mass=15.625 fill=1 densityRel=1
+test	unit_air_amount_matches_thermal	PASS	phase_transfer=0.0188124999404 gasMassKg=0.0188124999404
+test	unit_water_vapor_density	PASS	rho=0.74890509866 kg/m3 at ambient T, reference P, molarMass
+test	unit_water_vapor_not_air_density	PASS	vapor is not treated as air
+test	water_liquid_fill_roundtrip	PASS	fill0=1 fill1=1 mass=15.625
+test	water_gas_amount_roundtrip	PASS	amt0=1 amt1=1 mass=0.0117016421666
+test	liquid_mass_to_vapor_amount	PASS	mass=15.625 vapor_amount=1335.28267038 vapor_cell_mass=0.0117016421666
+test	vapor_amount_to_liquid_mass	PASS	mass=15.625 fill=1
+test	liquid_gas_mass_error	PASS	dmass=1.7763568394e-15
+test	latent_fusion_matches_registry	PASS	J=5218750 L_f=334000
+test	latent_vaporization_matches_registry	PASS	J=35312500 L_v=2260000
+test	latent_not_hardcoded_in_helper	PASS	helpers read PhaseProperties
+test	convert_liquid_gas_latent_sign	PASS	E=35312500
+test	convert_gas_liquid_latent_sign	PASS	E=-35312500
+test	water_liquid_to_gas_supported	PASS	
+test	water_gas_to_liquid_supported	PASS	
+test	water_liquid_to_solid_supported	PASS	metadata only; no ice body
+test	wood_solid_to_liquid_unsupported	PASS	
+test	invalid_id_fails_safe	PASS	
+test	same_phase_not_a_transition	PASS	
+test	plasma_unsupported	PASS	
+test	honey_liquid_to_gas_unsupported	PASS	
+test	water_solid_convert_blocked_without_mechanical	PASS	canTransition=1 convert=0; do not fake stone density
+test	no_ice_substance_id	PASS	
+test	no_steam_substance_id	PASS	
+test	closed_10_cells_mass	PASS	start_mass=156.25 end_mass=156.25 end_fill=10
+test	repeat_1000_liquid_gas_mass_drift	PASS	cycles=1000 start=156.25 end=156.25 drift=0
+test	repeat_1000_liquid_fill_drift	PASS	start=10 end=10 drift=0
+test	float_liquid_fill_roundtrip	PASS	fill=1
+test	float_vapor_amount_roundtrip	PASS	amt0=1335.28271484 amt1=1335.28271484
+test	air_roundtrip_still_air_density	PASS	air helpers unchanged
+test	specific_gas_constant_water	PASS	R_spec=461.529999636
+summary	PASS	34 passed, 0 failed
