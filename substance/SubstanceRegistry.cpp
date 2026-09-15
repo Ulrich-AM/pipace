@@ -106,7 +106,6 @@ SubstanceDefinition makeWater() {
     s.fluid.viscArrheniusK = 1800.0f;
     s.fluid.densityRefTempK = AMBIENT_TEMPERATURE_K;
     s.fluid.densityExpansivity = 2.07e-4f;
-    s.fluid.thermal = s.thermal;
     s.chemical.valid = true;
     s.chemical.molarMass = 18.015f;
     s.chemical.flammable = false;
@@ -135,7 +134,6 @@ SubstanceDefinition makeHoney() {
     s.fluid.viscArrheniusK = 2500.0f;
     s.fluid.densityRefTempK = AMBIENT_TEMPERATURE_K;
     s.fluid.densityExpansivity = 2.07e-4f;
-    s.fluid.thermal = s.thermal;
     // Mixture: no fake molar mass / formula.
     s.chemical.valid = false;
     return s;

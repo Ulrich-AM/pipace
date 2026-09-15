@@ -31,7 +31,7 @@ enum class Tool : uint8_t {
 };
 
 // Brush extras for Tool::Water. Dye never creates fill; honey is composition inside fill.
-// asHoney remains the paint-path flag. Identity is paint.substance().
+// asHoney is a UI/paint transport flag only. Simulation identity is paint.substance().
 struct LiquidPaint {
     bool asHoney = false;
     bool dyeOnly = false;

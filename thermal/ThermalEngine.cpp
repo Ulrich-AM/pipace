@@ -95,15 +95,15 @@ float ThermalEngine::liquidCapacity(FluidEngine const &fluid, int index) {
 float ThermalEngine::wallCapacity(FluidEngine const &fluid, int index) {
     if (index < 0 || index >= GW * GH) return 0.0f;
     if (!fluid.solid[static_cast<size_t>(index)]) return 0.0f;
-    float mass = massKg(materialDef(MATERIAL_STONE).density, 1.0f, fluid.config.cellsPerMeter);
-    return thermalCapacity(mass, kWallThermal().specificHeat);
+    float mass = massKg(mechanicalForSubstance(kStaticWallSubstance).densityRel, 1.0f, fluid.config.cellsPerMeter);
+    return thermalCapacity(mass, thermalForSubstance(kStaticWallSubstance).specificHeat);
 }
 
 float ThermalEngine::gasCapacity(GasEngine const &gas, int index) {
     if (index < 0 || index >= GW * GH) return 0.0f;
     float a = gas.amount[static_cast<size_t>(index)];
     if (a <= GAS_MIN_AMOUNT) return 0.0f;
-    return thermalCapacity(gasMassKg(a), gas.config.thermal.specificHeat);
+    return thermalCapacity(gasMassKg(a), thermalForSubstance(substanceForGasSpecies()).specificHeat);
 }
 
 float ThermalEngine::rigidPixelCapacity(RigidBody const &b, int localIndex) {
@@ -148,15 +148,15 @@ void ThermalEngine::seedAmbient(FluidEngine &fluid, RigidBodyEngine &rigid, GasE
             fluid.clearEmptyLiquidCell(i);
         }
         if (fluid.solid[static_cast<size_t>(i)]) {
-            float cap = thermalCapacity(massKg(materialDef(MATERIAL_STONE).density, 1.0f, cpm),
-                kWallThermal().specificHeat);
+            float cap = thermalCapacity(massKg(mechanicalForSubstance(kStaticWallSubstance).densityRel, 1.0f, cpm),
+                thermalForSubstance(kStaticWallSubstance).specificHeat);
             fluid.solidHeat[static_cast<size_t>(i)] = energyFromTemp(cap, AMBIENT_TEMPERATURE_K);
         } else {
             fluid.solidHeat[static_cast<size_t>(i)] = 0.0f;
         }
         float a = gas.amount[static_cast<size_t>(i)];
         if (a > GAS_MIN_AMOUNT) {
-            float cap = thermalCapacity(gasMassKg(a, cpm), gas.config.thermal.specificHeat);
+            float cap = thermalCapacity(gasMassKg(a, cpm), thermalForSubstance(substanceForGasSpecies()).specificHeat);
             gas.heat[static_cast<size_t>(i)] = energyFromTemp(cap, AMBIENT_TEMPERATURE_K);
         } else {
             gas.heat[static_cast<size_t>(i)] = 0.0f;
@@ -198,7 +198,7 @@ ThermalCellSample ThermalEngine::sampleCell(FluidEngine const &fluid, RigidBodyE
     if (fluid.solid[static_cast<size_t>(i)]) {
         s.kind = ThermalSampleKind::Wall;
         s.hasMatter = true;
-        s.materialId = MATERIAL_STONE;
+        s.materialId = MATERIAL_STONE; // kStaticWallSubstance compatibility mask id
         s.capacityJK = wallCapacity(fluid, i);
         s.energyJ = fluid.solidHeat[static_cast<size_t>(i)];
         s.temperatureK = wallTempK(fluid, i);
@@ -443,19 +443,19 @@ void ThermalEngine::conductActive(FluidEngine &fluid, RigidBodyEngine &rigid, Ga
         if (fluid.solid[static_cast<size_t>(i)]) {
             energy = &fluid.solidHeat[static_cast<size_t>(i)];
             cap = wallCapacity(fluid, i);
-            k = kWallThermal().conductivity;
+            k = thermalForSubstance(kStaticWallSubstance).conductivity;
             return cap > MIN_THERMAL_CAPACITY;
         }
         if (fluid.fill[static_cast<size_t>(i)] > 1.0e-6f) {
             energy = &fluid.liquidHeat[static_cast<size_t>(i)];
             cap = liquidCapacity(fluid, i);
-            k = thermalForSubstance(SUBSTANCE_WATER).conductivity;
+            k = fluid.mixConductivity(i);
             return cap > MIN_THERMAL_CAPACITY;
         }
         if (gas.amount[static_cast<size_t>(i)] > GAS_MIN_AMOUNT) {
             energy = &gas.heat[static_cast<size_t>(i)];
             cap = gasCapacity(gas, i);
-            k = gas.config.thermal.conductivity;
+            k = thermalForSubstance(substanceForGasSpecies()).conductivity;
             isGas = true;
             return cap > MIN_THERMAL_CAPACITY;
         }

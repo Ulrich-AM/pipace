@@ -83,6 +83,7 @@ struct RigidBodyEngine {
 
     bool worldCellOccupied(int x, int y) const;
     MaterialId worldCellMaterial(int x, int y) const;
+    MatterIdentity worldCellIdentity(int x, int y) const;
     void loadTestScene(FluidEngine &fluid, int scene);
     void runConservationBenchmark(FluidEngine &fluid);
     void runContactDiagnostics(FluidEngine &fluid);

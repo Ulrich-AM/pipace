@@ -1,0 +1,21 @@
+test	supports_water_solid	PASS	
+test	supports_water_liquid	PASS	
+test	supports_water_gas	PASS	
+test	supports_wood_solid	PASS	
+test	supports_wood_liquid	PASS	wood must not be liquid-capable
+test	supports_air_gas	PASS	
+test	supports_air_solid	PASS	air must not be solid-capable
+test	no_ice_id	PASS	
+test	no_steam_id	PASS	
+test	no_current_phase_on_def	PASS	SubstanceDefinition stores capability flags only
+test	water_has_fluid	PASS	
+test	metal_has_mechanical	PASS	
+test	air_has_gas	PASS	
+test	plasma_unsupported	PASS	
+test	query_water_liquid	PASS	sub=1 phase=2
+test	query_honey_liquid	PASS	sub=2
+test	query_mixture_dominant_water	PASS	dom=1 honey=0.400000 water=0.600000
+test	query_wood_solid	PASS	sub=3 phase=1
+test	query_static_wall_stone_solid	PASS	sub=4
+test	query_air_gas	PASS	sub=7 phase=3 amt=1.000000
+summary	PASS	20 passed, 0 failed

@@ -1499,6 +1499,10 @@ MaterialId RigidBodyEngine::worldCellMaterial(int x, int y) const {
     return occupantMat[static_cast<size_t>(FluidEngine::ci(x, y))];
 }
 
+MatterIdentity RigidBodyEngine::worldCellIdentity(int x, int y) const {
+    return rigidIdentityForMaterial(worldCellMaterial(x, y));
+}
+
 int RigidBodyEngine::indexOfId(uint32_t id) const {
     for (size_t i = 0; i < bodies.size(); ++i)
         if (bodies[i].id == id) return static_cast<int>(i);

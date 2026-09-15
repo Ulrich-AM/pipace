@@ -34,7 +34,8 @@ struct ThermalProperties {
 };
 
 // Rigid / solid sandbox mechanics. Values are NOT SI; they match the existing
-// MaterialDefinition table (densityRel 1 = water).
+// MaterialDefinition table (densityRel 1 = water). This is SOLID-PHASE density
+// for the rigid solver. Do not reuse it as liquid fill density or gas amount.
 struct MechanicalProperties {
     bool valid = false;
     float densityRel = 0.0f;        // relative to water = 1.0
@@ -51,6 +52,8 @@ struct MechanicalProperties {
 
 // Free-surface liquid sandbox properties. Viscosity/tension are sandbox units,
 // not SI Pa·s or N/m. density is relative to water at densityRefTempK.
+// This is LIQUID-PHASE density for FluidEngine. Do not reuse it as rigid mass
+// densityRel or as gas amount/EoS state.
 struct FluidProperties {
     bool valid = false;
     float density = 1.0f;
@@ -63,8 +66,6 @@ struct FluidProperties {
     float densityRefTempK = AMBIENT_TEMPERATURE_K;
     // Linear expansivity around lab T. Water's density maximum near 4 °C is NOT modeled.
     float densityExpansivity = 2.07e-4f;
-    // Compatibility copy of liquid-phase thermal. Authoritative: SubstanceDefinition.thermal.
-    ThermalProperties thermal{};
 
     float viscosityAtTemperature(float temperatureK) const {
         float T = temperatureK;
@@ -102,6 +103,7 @@ struct PorousProperties {
 };
 
 // Capability + transition metadata. Does not trigger phase changes.
+// Current world phase is NOT stored here — see MatterPhase / MatterIdentity.
 struct PhaseProperties {
     bool valid = false;
     bool solidCapable = false;

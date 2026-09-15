@@ -161,6 +161,22 @@ float FluidEngine::honeyFraction(int index) const {
     return std::clamp(honey[static_cast<size_t>(index)] / f, 0.0f, 1.0f);
 }
 
+float FluidEngine::liquidComponentAmount(int index, SubstanceId id) const {
+    if (index < 0 || index >= GW * GH) return 0.0f;
+    float f = fill[static_cast<size_t>(index)];
+    if (f <= 1.0e-8f) return 0.0f;
+    float h = std::clamp(honey[static_cast<size_t>(index)], 0.0f, f);
+    if (id == SUBSTANCE_HONEY) return h;
+    if (id == SUBSTANCE_WATER) return f - h;
+    return 0.0f;
+}
+
+float FluidEngine::liquidComponentFraction(int index, SubstanceId id) const {
+    float f = (index >= 0 && index < GW * GH) ? fill[static_cast<size_t>(index)] : 0.0f;
+    if (f <= 1.0e-8f) return 0.0f;
+    return std::clamp(liquidComponentAmount(index, id) / f, 0.0f, 1.0f);
+}
+
 SubstanceId FluidEngine::dominantLiquidSubstance(int index) const {
     return substanceForHoneyFraction(honeyFraction(index));
 }
@@ -177,9 +193,15 @@ float FluidEngine::mixSpecificHeat(int index) const {
         + h * thermalForSubstance(SUBSTANCE_HONEY).specificHeat;
 }
 
+float FluidEngine::mixConductivity(int index) const {
+    float h = honeyFraction(index);
+    return (1.0f - h) * thermalForSubstance(SUBSTANCE_WATER).conductivity
+        + h * thermalForSubstance(SUBSTANCE_HONEY).conductivity;
+}
+
 float FluidEngine::mixViscosity(int index) const {
     float f = fill[static_cast<size_t>(index)];
-    FluidProperties const &water = fluidForSubstance(SUBSTANCE_WATER);
+    FluidProperties const &water = sandboxReferenceLiquid();
     if (f < MIN_ACTIVE_FILL) return water.viscosity;
     float h = honeyFraction(index);
     float cap = thermalCapacity(massKg(mixDensity(index), f, config.cellsPerMeter), mixSpecificHeat(index));
@@ -219,14 +241,13 @@ LiquidCarry splitCarry(LiquidCarry &src, float placed, float remaining) {
     return out;
 }
 
-LiquidCarry ambientCarry(FluidEngine const &eng, float placed, bool asHoney) {
+LiquidCarry ambientCarry(FluidEngine const &eng, float placed, SubstanceId sid) {
     LiquidCarry c{};
-    SubstanceId sid = substanceForLiquidPaint(asHoney);
     FluidProperties const &liq = fluidForSubstance(sid);
     ThermalProperties const &th = thermalForSubstance(sid);
     float cap = thermalCapacity(massKg(liq.density, placed, eng.config.cellsPerMeter), th.specificHeat);
     c.heat = energyFromTemp(cap, AMBIENT_TEMPERATURE_K);
-    if (asHoney) c.honey = placed;
+    if (sid == SUBSTANCE_HONEY) c.honey = placed; // composition channel, not a generic liquid flag
     return c;
 }
 } // namespace
@@ -281,8 +302,8 @@ void FluidEngine::seedAmbientHeat() {
             honey[static_cast<size_t>(i)] = 0.0f;
         }
         if (solid[static_cast<size_t>(i)]) {
-            float cap = thermalCapacity(massKg(mechanicalForSubstance(SUBSTANCE_STONE).densityRel, 1.0f, config.cellsPerMeter),
-                thermalForSubstance(SUBSTANCE_STONE).specificHeat);
+            float cap = thermalCapacity(massKg(mechanicalForSubstance(kStaticWallSubstance).densityRel, 1.0f, config.cellsPerMeter),
+                thermalForSubstance(kStaticWallSubstance).specificHeat);
             solidHeat[static_cast<size_t>(i)] = energyFromTemp(cap, AMBIENT_TEMPERATURE_K);
         } else {
             solidHeat[static_cast<size_t>(i)] = 0.0f;
@@ -550,8 +571,9 @@ void FluidEngine::advectVelocity(float dt) {
 // stand-in for slightly thickened water; it must not run on honey or free-fall
 // becomes linear drag. Air is a free surface (no shear against vacuum).
 void FluidEngine::diffuseVelocity(float dt) {
-    float muRef = std::max(1.0e-8f, config.water.viscosity);
-    float muMax = config.water.viscosity;
+    FluidProperties const &refLiq = sandboxReferenceLiquid();
+    float muRef = std::max(1.0e-8f, refLiq.viscosity);
+    float muMax = refLiq.viscosity;
     int y0 = std::max(1, activeY0());
     int y1 = std::min(GH - 1, activeY1());
     int x0 = std::max(1, activeX0());
@@ -587,13 +609,13 @@ void FluidEngine::diffuseVelocity(float dt) {
         float s = 0.0f; int n = 0;
         if (isLiq(x - 1, y)) { s += mixViscosity(ci(x - 1, y)); ++n; }
         if (isLiq(x, y)) { s += mixViscosity(ci(x, y)); ++n; }
-        return n > 0 ? s / static_cast<float>(n) : config.water.viscosity;
+        return n > 0 ? s / static_cast<float>(n) : sandboxReferenceLiquid().viscosity;
     };
     auto faceMuV = [&](int x, int y) {
         float s = 0.0f; int n = 0;
         if (isLiq(x, y - 1)) { s += mixViscosity(ci(x, y - 1)); ++n; }
         if (isLiq(x, y)) { s += mixViscosity(ci(x, y)); ++n; }
-        return n > 0 ? s / static_cast<float>(n) : config.water.viscosity;
+        return n > 0 ? s / static_cast<float>(n) : sandboxReferenceLiquid().viscosity;
     };
     auto uShear = [&](int nx, int ny, float u0) {
         if (nx < 0 || nx > GW || ny < 0 || ny >= GH || !openUFace(nx, ny)) return -u0;
@@ -640,7 +662,7 @@ void FluidEngine::diffuseVelocity(float dt) {
 // honey still sinks through water without falling faster in air.
 void FluidEngine::applyGravity(float dt) {
     float gdt = gridGravity() * dt;
-    float rhoW = std::max(1.0e-6f, config.water.density);
+    float rhoW = std::max(1.0e-6f, sandboxReferenceLiquid().density);
     for (int y = std::max(1, activeY0(1)); y <= std::min(GH - 1, activeY1(1) + 1); ++y)
         for (int x = activeX0(1); x <= activeX1(1); ++x)
         if (openVFace(x, y) && (isFluid(x, y - 1) || isFluid(x, y))) {
@@ -1008,7 +1030,7 @@ void FluidEngine::projectVelocity(float dt) {
         float pRight = rightFluid ? pressure[ci(x, y)] : 0.0f;
         float leftFill = inside(x - 1, y) ? fill[ci(x - 1, y)] : 0.0f, rightFill = inside(x, y) ? fill[ci(x, y)] : 0.0f;
         float theta = leftFluid && rightFluid ? 1.0f : liquidFaceFraction(leftFill, rightFill);
-        u[ui(x, y)] -= dt * (pRight - pLeft) / (config.water.density * theta);
+        u[ui(x, y)] -= dt * (pRight - pLeft) / (sandboxReferenceLiquid().density * theta);
     }
     for (int y = std::max(1, activeY0(1)); y <= std::min(GH - 1, activeY1(1) + 1); ++y)
         for (int x = activeX0(1); x <= activeX1(1); ++x) {
@@ -1019,7 +1041,7 @@ void FluidEngine::projectVelocity(float dt) {
         float pBottom = bottomFluid ? pressure[ci(x, y)] : 0.0f;
         float topFill = inside(x, y - 1) ? fill[ci(x, y - 1)] : 0.0f, bottomFill = inside(x, y) ? fill[ci(x, y)] : 0.0f;
         float theta = topFluid && bottomFluid ? 1.0f : liquidFaceFraction(topFill, bottomFill);
-        v[vi(x, y)] -= dt * (pBottom - pTop) / (config.water.density * theta);
+        v[vi(x, y)] -= dt * (pBottom - pTop) / (sandboxReferenceLiquid().density * theta);
     }
     enforceActiveBoundaries();
 }
@@ -1554,7 +1576,7 @@ float FluidEngine::depositVolume(float x, float y, float amount, float momentumX
     if (room > 1e-5f) {
         float placed = std::min(room, amount);
         bool newCell = fill[index] < MIN_RENDER_FILL;
-        LiquidCarry chunk = carry ? splitCarry(*carry, placed, amount) : ambientCarry(*this, placed, false);
+        LiquidCarry chunk = carry ? splitCarry(*carry, placed, amount) : ambientCarry(*this, placed, SUBSTANCE_WATER);
         fill[index] += placed;
         applyCarry(index, chunk);
         honey[index] = std::min(honey[index], fill[index]);
@@ -1789,7 +1811,7 @@ float FluidEngine::relocateVolumeTopologySafe(int x, int y, float amount, float 
         if (room > 1e-5f) {
             float placed = std::min(room, amount);
             bool newCell = fill[i] < MIN_RENDER_FILL;
-            LiquidCarry chunk = carry ? splitCarry(*carry, placed, amount) : ambientCarry(*this, placed, false);
+            LiquidCarry chunk = carry ? splitCarry(*carry, placed, amount) : ambientCarry(*this, placed, SUBSTANCE_WATER);
             fill[i] += placed;
             applyCarry(i, chunk);
             honey[i] = std::min(honey[i], fill[i]);
@@ -2158,7 +2180,7 @@ void FluidEngine::paintDisc(int cx, int cy, Tool tool, int brushRadius, LiquidPa
                     th.specificHeat);
                 liquidHeat[index] += energyFromTemp(cap, AMBIENT_TEMPERATURE_K);
                 fill[index] = 1.0f;
-                if (paint.asHoney) honey[index] += added;
+                if (paint.substance() == SUBSTANCE_HONEY) honey[index] += added;
                 if (!clearDye) {
                     dyeR[index] += added * paint.dyeR * s;
                     dyeG[index] += added * paint.dyeG * s;
@@ -2174,8 +2196,8 @@ void FluidEngine::paintDisc(int cx, int cy, Tool tool, int brushRadius, LiquidPa
             LiquidCarry carry{};
             if (displaced > 0.0f) carry = extractVolume(index, displaced);
             solid[index] = 1;
-            float cap = thermalCapacity(massKg(mechanicalForSubstance(SUBSTANCE_STONE).densityRel, 1.0f, config.cellsPerMeter),
-                thermalForSubstance(SUBSTANCE_STONE).specificHeat);
+            float cap = thermalCapacity(massKg(mechanicalForSubstance(kStaticWallSubstance).densityRel, 1.0f, config.cellsPerMeter),
+                thermalForSubstance(kStaticWallSubstance).specificHeat);
             solidHeat[index] = energyFromTemp(cap, AMBIENT_TEMPERATURE_K);
             if (displaced > 0.0f) {
                 float remainder = depositVolume(x + 0.5f, y - 0.5f, displaced, 0.0f, -2.0f, &carry);

@@ -20,6 +20,10 @@ inline SubstanceId substanceForGasSpecies(GasSpecies = GasSpecies::Air) {
     return SUBSTANCE_AIR;
 }
 
+inline MatterIdentity identityForGasSpecies(GasSpecies species = GasSpecies::Air) {
+    return makeMatterIdentity(substanceForGasSpecies(species), MatterPhase::Gas);
+}
+
 enum class GasBoundary : uint8_t {
     Sealed = 0,
     OpenAmbient = 1 // infinite 1 atm reservoir; flux is accounted as escaped/entered

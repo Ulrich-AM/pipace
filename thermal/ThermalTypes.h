@@ -37,7 +37,7 @@ inline ThermalProperties const &kWoodThermal() { return thermalForSubstance(SUBS
 inline ThermalProperties const &kStoneThermal() { return thermalForSubstance(SUBSTANCE_STONE); }
 inline ThermalProperties const &kGlassThermal() { return thermalForSubstance(SUBSTANCE_GLASS); }
 inline ThermalProperties const &kMetalThermal() { return thermalForSubstance(SUBSTANCE_METAL); }
-inline ThermalProperties const &kWallThermal() { return thermalForSubstance(SUBSTANCE_STONE); }
+inline ThermalProperties const &kWallThermal() { return thermalForSubstance(kStaticWallSubstance); }
 inline ThermalProperties const &kEmptyThermal() { return thermalForSubstance(SUBSTANCE_NONE); }
 
 inline float cellLengthM(float cellsPerMeter) {

@@ -355,7 +355,7 @@ void GasEngine::applyBoundaryFlux(float dt) {
             float dq = (a > GAS_MIN_AMOUNT) ? heat[static_cast<size_t>(i)] * (flux / a) : 0.0f;
             heat[static_cast<size_t>(i)] -= dq;
         } else if (flux < 0.0f) {
-            float cap = thermalCapacity(gasMassKg(-flux), config.thermal.specificHeat);
+            float cap = thermalCapacity(gasMassKg(-flux), thermalForSubstance(substanceForGasSpecies()).specificHeat);
             heat[static_cast<size_t>(i)] += energyFromTemp(cap, AMBIENT_TEMPERATURE_K);
         }
         amount[static_cast<size_t>(i)] -= flux;
@@ -523,7 +523,7 @@ void GasEngine::resetAmbient(FluidEngine &fluid) {
     for (int i = 0; i < GW * GH; ++i) {
         float vol = volume[static_cast<size_t>(i)];
         amount[static_cast<size_t>(i)] = vol * config.ambientPressureAtm;
-        float cap = thermalCapacity(gasMassKg(amount[static_cast<size_t>(i)]), config.thermal.specificHeat);
+        float cap = thermalCapacity(gasMassKg(amount[static_cast<size_t>(i)]), thermalForSubstance(substanceForGasSpecies()).specificHeat);
         heat[static_cast<size_t>(i)] = energyFromTemp(cap, AMBIENT_TEMPERATURE_K);
     }
     std::fill(u.begin(), u.end(), 0.0f);
@@ -567,12 +567,12 @@ void GasEngine::applyPressureBrush(FluidEngine &fluid, int cx, int cy, int brush
             float na = np * vol;
             float da = na - a;
             if (std::abs(da) <= GAS_MIN_AMOUNT) continue;
-            float capOld = thermalCapacity(gasMassKg(a), config.thermal.specificHeat);
+            float capOld = thermalCapacity(gasMassKg(a), thermalForSubstance(substanceForGasSpecies()).specificHeat);
             float t = (a > GAS_MIN_AMOUNT)
                 ? tempFromEnergy(heat[static_cast<size_t>(i)], capOld)
                 : AMBIENT_TEMPERATURE_K;
             if (da > 0.0f) {
-                float capAdd = thermalCapacity(gasMassKg(da), config.thermal.specificHeat);
+                float capAdd = thermalCapacity(gasMassKg(da), thermalForSubstance(substanceForGasSpecies()).specificHeat);
                 heat[static_cast<size_t>(i)] += energyFromTemp(capAdd, t);
             } else if (a > GAS_MIN_AMOUNT) {
                 heat[static_cast<size_t>(i)] *= (na / a);

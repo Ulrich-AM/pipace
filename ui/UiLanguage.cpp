@@ -233,6 +233,13 @@ void seedEnglish() {
     set("ins_mat_air", L"Air");
     set("ins_mat_none", L"(none)");
     set("ins_substance", L"Substance: {0}");
+    set("ins_phase", L"Phase: {0}");
+    set("ins_phase_none", L"(none)");
+    set("ins_phase_solid", L"Solid");
+    set("ins_phase_liquid", L"Liquid");
+    set("ins_phase_gas", L"Gas");
+    set("ins_phase_plasma", L"Plasma");
+    set("ins_mixture", L"Mixture: water + honey");
     set("ins_substance_id", L"Substance ID: {0}");
     set("ins_density", L"Density: {0}");
     set("ins_viscosity", L"Viscosity: {0}");

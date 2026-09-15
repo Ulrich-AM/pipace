@@ -38,7 +38,9 @@ PIPACE/
     RigidBodyEngine.h/.cpp # Drawable pixel-native rigid bodies + world/fluid coupling
   substance/
     SubstanceProperties.h  # Grouped intrinsic properties (mechanical/fluid/thermal/phase/porous/…)
-    SubstanceTypes.h / SubstanceRegistry.h/.cpp  # SubstanceId + canonical built-in table
+    SubstanceTypes.h / SubstanceRegistry.h/.cpp  # SubstanceId, MatterPhase, registry
+  world/
+    WorldQuery.h/.cpp      # sampleMatterAt (SubstanceId + phase), phase-capability diags
   CMakeLists.txt / build.bat / run.bat
   README.md
   AGENTS.md
@@ -50,7 +52,26 @@ Physical properties are canonical on `SubstanceDefinition` grouped structs
 `FluidConfig.water` / `.honey`, and `k*Thermal()` are compatibility adapters that
 delegate into the substance table. Do not add new duplicate property tables.
 
-Build: `run.bat` or CMake → `build/pipace.exe`. Headless: `--benchmark`, `--scale-benchmark`, `--rigid-benchmark`, `--thread-benchmark`, `--liquid-diag`. Grid size via `PIPACE_GRID_WIDTH` / `PIPACE_GRID_HEIGHT` (default 200×120). SETTINGS → Simulation threads (Auto / 1 / 2 / 4 / 6 / 8). Auto is 1 worker on the default grid; see `misc/THREAD_PASS_NOTES.md`.
+**Identity vs phase vs engine:** `SubstanceDefinition` describes WHAT a material is.
+`MatterPhase` describes WHICH phase a world cell/body currently represents (not stored
+on the definition). Engine storage describes HOW that phase is simulated today.
+These mappings are implementation, not laws:
+
+| Current representation | Engine |
+|---|---|
+| Water + Liquid, Honey + Liquid | FluidEngine (water/honey volume channels) |
+| Wood/Glass/Metal + Solid | RigidBodyEngine (MaterialId masks) |
+| Stone + Solid | rigid body **or** static `solid[]` walls (`kStaticWallSubstance`) |
+| Air + Gas | GasEngine |
+
+`supportsPhase` is capability metadata only. Do **not** implement melting/boiling/freezing
+here. Do **not** add SUBSTANCE_ICE / SUBSTANCE_STEAM. Density stays phase-specific:
+mechanical.densityRel (solid), fluid.density (liquid), gas amount/EoS (gas).
+
+Solver unit liquid is `sandboxReferenceLiquid()` (currently SUBSTANCE_WATER's fluid
+table: relative density 1.0). That is a reference, not “all liquid is water”.
+
+Build: `run.bat` or CMake → `build/pipace.exe`. Headless: `--benchmark`, `--scale-benchmark`, `--rigid-benchmark`, `--thread-benchmark`, `--liquid-diag`, `--substance-phase-diag`. Grid size via `PIPACE_GRID_WIDTH` / `PIPACE_GRID_HEIGHT` (default 200×120). SETTINGS → Simulation threads (Auto / 1 / 2 / 4 / 6 / 8). Auto is 1 worker on the default grid; see `misc/THREAD_PASS_NOTES.md`.
 
 ## Fluid engine (what exists)
 
