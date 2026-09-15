@@ -15,9 +15,11 @@ struct GasEngine {
 
     GasConfig config;
 
-    std::vector<float> amount;     // conserved quantity (Air); 1.0 ≈ one cell of 1 atm air
+    std::vector<float> amount;     // total cell-atmospheres (air + water vapor)
+    std::vector<float> waterVapor; // water-vapor component; 0 <= waterVapor <= amount
     std::vector<float> heat;       // Joules associated with amount
     std::vector<float> heatNext;
+    std::vector<float> waterVaporNext;
     std::vector<float> volume;     // available gas volume in the cell, 0..1
     std::vector<float> pressure;   // derived atmospheres (amount / volume)
     std::vector<float> u;          // MAC horizontal, cells/s
@@ -34,6 +36,9 @@ struct GasEngine {
     double expectedAmount = 0.0;
     double amountError = 0.0;
     double escapedAmount = 0.0; // net leaving through OpenAmbient edges (entered is negative)
+    double currentWaterVapor = 0.0;
+    double expectedWaterVapor = 0.0;
+    double escapedWaterVapor = 0.0;
     int activeGasCells = 0;
     int activeChunks = 0;
     int lastSubsteps = 1;
@@ -65,6 +70,15 @@ struct GasEngine {
     void loadTestScene(FluidEngine &fluid, RigidBodyEngine &rigid, int scene);
     void runDiagnostics(FluidEngine &fluid, RigidBodyEngine &rigid);
 
+    float vaporAmount(int index) const;
+    float airAmount(int index) const;
+    float vaporFraction(int index) const;
+    void clampSpecies(int index);
+    void addWaterVapor(int index, float da);
+    float takeWaterVapor(int index, float da);
+    void wakeAt(int x, int y);
+    double sumWaterVapor() const;
+
 private:
     std::vector<uint32_t> relocateStamp;
     std::vector<int> relocateQueue;
@@ -75,7 +89,8 @@ private:
 
     void rebuildVolumes(FluidEngine const &fluid, bool &volumeChanged, bool fullGrid = true);
     void recomputePressure();
-    float relocateAmount(FluidEngine const &fluid, int x, int y, float leftover, float maxAtm, float leftoverHeatPerAmount = 0.0f);
+    float relocateAmount(FluidEngine const &fluid, int x, int y, float leftover, float maxAtm,
+        float leftoverHeatPerAmount = 0.0f, float leftoverVaporFraction = 0.0f);
     void wakeThermalAt(int x, int y);
     void displaceBlocked(FluidEngine const &fluid);
     void displaceLiquidOverflow(FluidEngine const &fluid);
@@ -93,4 +108,5 @@ private:
     void vacuumAll();
     void commitExpected();
     double sumAmount() const;
+    void transferSpecies(int donor, int receiver, float q);
 };

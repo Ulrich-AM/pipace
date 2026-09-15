@@ -12,12 +12,12 @@ constexpr float GAS_MIN_AMOUNT = 1.0e-8f;
 constexpr float GAS_REFERENCE_PRESSURE_PA = 101325.0f;
 
 // Future mixtures occupy the same cell and are transported together.
-// Do not add per-species engines; extend amount into species amounts later.
-enum class GasSpecies : uint8_t { Air = 0 }; // engine identity: SUBSTANCE_AIR
-constexpr int GAS_SPECIES_COUNT = 1;
+// Amount is total cell-atmospheres. Water vapor is a component of amount.
+enum class GasSpecies : uint8_t { Air = 0, WaterVapor = 1 };
+constexpr int GAS_SPECIES_COUNT = 2;
 
-inline SubstanceId substanceForGasSpecies(GasSpecies = GasSpecies::Air) {
-    return SUBSTANCE_AIR;
+inline SubstanceId substanceForGasSpecies(GasSpecies species = GasSpecies::Air) {
+    return species == GasSpecies::WaterVapor ? SUBSTANCE_WATER : SUBSTANCE_AIR;
 }
 
 inline MatterIdentity identityForGasSpecies(GasSpecies species = GasSpecies::Air) {

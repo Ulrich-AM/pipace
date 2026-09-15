@@ -13,6 +13,7 @@
 #include "ui/UiLanguage.h"
 #include "render/WorldRenderer.h"
 #include "world/WorldQuery.h"
+#include "world/WaterPhaseChange.h"
 #include "substance/SubstanceRegistry.h"
 #include "substance/PhaseTransfer.h"
 
@@ -741,6 +742,22 @@ void fillWorldPixels() {
             look.outlines = false;
         }
         worldRenderer.paintNormal(engine, rigid, look);
+        for (int y = 0; y < GH; ++y) for (int x = 0; x < GW; ++x) {
+            int i = FluidEngine::ci(x, y);
+            if (engine.solid[i] || engine.dynamicSolid[i]) continue;
+            if (engine.fill[static_cast<size_t>(i)] >= MIN_RENDER_FILL) continue;
+            float vap = gas.vaporAmount(i);
+            if (vap < 0.04f) continue;
+            float t = std::clamp(vap / 0.55f, 0.0f, 0.16f);
+            uint32_t dst = engine.pixels[static_cast<size_t>(i)];
+            int r = static_cast<int>((dst >> 16) & 255);
+            int gch = static_cast<int>((dst >> 8) & 255);
+            int b = static_cast<int>(dst & 255);
+            r = static_cast<int>(std::lround(r + (188 - r) * t));
+            gch = static_cast<int>(std::lround(gch + (198 - gch) * t));
+            b = static_cast<int>(std::lround(b + (206 - b) * t));
+            engine.pixels[static_cast<size_t>(i)] = rgb(r, gch, b);
+        }
     } else {
     float pressureScale = 0.0f, divergenceScale = 0.0f;
     bool const needFieldScale = debugView == DebugView::Pressure || debugView == DebugView::Divergence;
@@ -1001,6 +1018,7 @@ void worldTick() {
     rigid.gatherFluidForces(engine);
     gas.applyPressureForces(rigid, engine);
     thermal.simulationTick(engine, rigid, gas, PHYSICS_DT);
+    stepWaterPhaseChange(engine, rigid, gas, thermal, PHYSICS_DT);
     adaptAutoQuality(FluidEngine::elapsedMs(tickStart));
 }
 
@@ -1516,6 +1534,10 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR commandLine, int show)
     if (commandLine && wcsstr(commandLine, L"--moisture-drip-diag")) { rigid.runMoistureDripDiagnostics(engine); return 0; }
     if (commandLine && wcsstr(commandLine, L"--substance-registry-diag")) { runSubstanceRegistryDiagnostics(); return 0; }
     if (commandLine && wcsstr(commandLine, L"--phase-transfer-diag")) { runPhaseTransferDiagnostics(); return 0; }
+    if (commandLine && wcsstr(commandLine, L"--water-phase-diag")) {
+        runWaterPhaseDiagnostics(engine, rigid, gas, thermal);
+        return 0;
+    }
     if (commandLine && wcsstr(commandLine, L"--substance-phase-diag")) { runSubstancePhaseDiagnostics(engine, rigid, gas); return 0; }
     if (commandLine && wcsstr(commandLine, L"--thermal-diag")) { thermal.runDiagnostics(engine, rigid, gas); return 0; }
     if (commandLine && wcsstr(commandLine, L"--gas-diag")) { gas.runDiagnostics(engine, rigid); return 0; }

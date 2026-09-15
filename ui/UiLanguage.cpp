@@ -248,6 +248,7 @@ void seedEnglish() {
     set("ins_kind_wall", L"Kind: static wall");
     set("ins_kind_rigid", L"Kind: rigid body");
     set("ins_kind_liquid", L"Kind: liquid / void");
+    set("ins_kind_gas", L"Kind: gas");
     set("ins_material", L"Material: {0}");
     set("ins_id", L"Id: {0}");
     set("ins_mass", L"Mass: {0}");

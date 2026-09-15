@@ -49,6 +49,7 @@ struct MatterSample {
     float temperatureK = AMBIENT_TEMPERATURE_K;
     float waterFraction = 0.0f;
     float honeyFraction = 0.0f;
+    float vaporFraction = 0.0f;
 };
 
 enum class SubstanceClass : uint8_t {
@@ -120,6 +121,12 @@ inline ChemicalProperties const &chemicalForSubstance(SubstanceId id) {
 }
 inline ElectricalProperties const &electricalForSubstance(SubstanceId id) {
     return substanceDef(id).electrical;
+}
+
+inline float gasPhaseSpecificHeat(SubstanceId id) {
+    ThermalProperties const &t = thermalForSubstance(id);
+    if (t.gasSpecificHeat > 1.0f) return t.gasSpecificHeat;
+    return t.specificHeat;
 }
 
 inline bool supportsPhase(SubstanceId id, MatterPhase phase) {
