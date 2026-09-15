@@ -25,6 +25,7 @@ FluidEngine::FluidEngine()
     , dyeG(GW * GH, 0.0f)
     , dyeB(GW * GH, 0.0f)
     , honey(GW * GH, 0.0f)
+    , frozenPendingKg(GW * GH, 0.0f)
     , nextDyeR(GW * GH, 0.0f)
     , nextDyeG(GW * GH, 0.0f)
     , nextDyeB(GW * GH, 0.0f)
@@ -280,6 +281,10 @@ void FluidEngine::addLiquidFill(int index, float dFill, float dHeat) {
     fill[static_cast<size_t>(index)] += dFill;
     liquidHeat[static_cast<size_t>(index)] += dHeat;
     clearEmptyLiquidCell(index);
+}
+
+LiquidCarry FluidEngine::takeLiquidCarry(int index, float amount) {
+    return extractVolume(index, amount);
 }
 
 float FluidEngine::takeLiquidVolume(int index, float amount) {
@@ -1632,6 +1637,7 @@ void FluidEngine::updateSplashParticles(float dt) {
         bool remove = false;
         auto sink = [&]() {
             expectedVolume = std::max(0.0, expectedVolume - static_cast<double>(p.volume));
+            if (std::isfinite(p.heat) && p.heat > 0.0f) escapedHeat += p.heat;
             p.volume = 0.0f;
             p.heat = 0.0f;
             p.dyeR = p.dyeG = p.dyeB = 0.0f;
@@ -1682,6 +1688,7 @@ void FluidEngine::updateSplashParticles(float dt) {
             if (remainder <= 1e-5f) remove = true;
             else if (!config.walledBorders && (onOpenVoidRim(lastX, lastY) || p.bounceCount >= kMaxSplashBounces)) {
                 expectedVolume = std::max(0.0, expectedVolume - static_cast<double>(remainder));
+                if (std::isfinite(p.heat) && p.heat > 0.0f) escapedHeat += p.heat;
                 remove = true;
             } else {
                 p.volume = remainder;
@@ -1710,6 +1717,8 @@ void FluidEngine::drainWaterIntoVoid() {
         if (solid[index] || dynamicSolid[index] || fill[index] <= 0.0f) return;
         float amount = fill[index];
         fill[index] = 0.0f;
+        if (std::isfinite(liquidHeat[index]) && liquidHeat[index] > 0.0f)
+            escapedHeat += liquidHeat[index];
         liquidHeat[index] = 0.0f;
         dyeR[index] = dyeG[index] = dyeB[index] = 0.0f;
         honey[index] = 0.0f;
@@ -2068,11 +2077,12 @@ void FluidEngine::zeroFluidState() {
     std::fill(liquidHeat.begin(), liquidHeat.end(), 0.0f); std::fill(nextHeat.begin(), nextHeat.end(), 0.0f);
     std::fill(dyeR.begin(), dyeR.end(), 0.0f); std::fill(dyeG.begin(), dyeG.end(), 0.0f); std::fill(dyeB.begin(), dyeB.end(), 0.0f);
     std::fill(honey.begin(), honey.end(), 0.0f);
+    std::fill(frozenPendingKg.begin(), frozenPendingKg.end(), 0.0f);
     std::fill(nextDyeR.begin(), nextDyeR.end(), 0.0f); std::fill(nextDyeG.begin(), nextDyeG.end(), 0.0f); std::fill(nextDyeB.begin(), nextDyeB.end(), 0.0f);
     std::fill(nextHoney.begin(), nextHoney.end(), 0.0f);
     std::fill(pressure.begin(), pressure.end(), 0.0f); std::fill(divergenceField.begin(), divergenceField.end(), 0.0f);
     std::fill(u.begin(), u.end(), 0.0f); std::fill(v.begin(), v.end(), 0.0f);
-    splashes.clear(); expectedVolume = 0.0; tickNo = 1;
+    splashes.clear(); expectedVolume = 0.0; escapedHeat = 0.0; tickNo = 1;
 }
 
 void FluidEngine::clearWorld() {
@@ -2080,7 +2090,7 @@ void FluidEngine::clearWorld() {
     std::fill(solidHeat.begin(), solidHeat.end(), 0.0f);
     clearDynamicOccupancy();
     zeroFluidState();
-    volumeLostRigid = 0.0; volumeDisplacedRigid = 0.0;
+    volumeLostRigid = 0.0; volumeDisplacedRigid = 0.0; escapedHeat = 0.0;
     std::fill(chunkActivity.begin(),chunkActivity.end(),0);std::fill(chunkHasFluid.begin(),chunkHasFluid.end(),0);std::fill(chunkQuietTicks.begin(),chunkQuietTicks.end(),0);
     std::fill(thermalChunkWake.begin(), thermalChunkWake.end(), 0);
     rebuildActivityAndMetrics();

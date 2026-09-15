@@ -44,6 +44,10 @@ struct RigidBodyEngine {
     void paintPendingLine(int x0, int y0, int x1, int y1, int brushRadius);
     void clearPending();
     int commitPending(FluidEngine &fluid);
+    int addSameMaterialWorldCells(FluidEngine &fluid, std::vector<int> const &worldCells,
+        MaterialId material, float temperatureK);
+    void finalizeMaskEdits(FluidEngine &fluid);
+    void refreshMassProperties(int bodyIndex);
     void eraseDisc(int cx, int cy, int brushRadius, FluidEngine &fluid,
         BrushShape shape = BrushShape::Circle, bool strictBodies = false,
         std::vector<uint32_t> *strokeSeen = nullptr);
@@ -130,7 +134,7 @@ private:
     void shrinkMask(RigidBody &b);
     void refreshBodyAfterMaskEdit(int index, std::vector<RigidBody> &spawned);
     void carveWorldCells(std::vector<int> const &cells, FluidEngine &fluid);
-    int attachedBodyForComponent(std::vector<int> const &component) const;
+    int attachedBodyForComponent(std::vector<int> const &component, MaterialId requiredMat = MATERIAL_EMPTY) const;
     RigidBody makeBodyFromCells(std::vector<int> const &cells, MaterialId material);
     void integrate(RigidBody &b, float dt);
     void collectStaticContacts(FluidEngine const &fluid, RigidBody const &b, int index, std::vector<RigidContact> &out) const;

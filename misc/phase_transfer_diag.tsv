@@ -16,13 +16,15 @@ test	convert_liquid_gas_latent_sign	PASS	E=35312500
 test	convert_gas_liquid_latent_sign	PASS	E=-35312500
 test	water_liquid_to_gas_supported	PASS	
 test	water_gas_to_liquid_supported	PASS	
-test	water_liquid_to_solid_supported	PASS	metadata only; no ice body
+test	water_liquid_to_solid_supported	PASS	live freeze uses this metadata
 test	wood_solid_to_liquid_unsupported	PASS	
 test	invalid_id_fails_safe	PASS	
 test	same_phase_not_a_transition	PASS	
 test	plasma_unsupported	PASS	
 test	honey_liquid_to_gas_unsupported	PASS	
-test	water_solid_convert_blocked_without_mechanical	PASS	canTransition=1 convert=0; do not fake stone density
+test	water_solid_convert_uses_ice_density	PASS	mass=15.625 solid_frac=1.090512546 ice_pixel_kg=14.3281249329
+test	convert_liquid_solid_latent_sign	PASS	E=-5218750
+test	water_solid_liquid_roundtrip	PASS	fill=1
 test	no_ice_substance_id	PASS	
 test	no_steam_substance_id	PASS	
 test	closed_10_cells_mass	PASS	start_mass=156.25 end_mass=156.25 end_fill=10
@@ -32,4 +34,4 @@ test	float_liquid_fill_roundtrip	PASS	fill=1
 test	float_vapor_amount_roundtrip	PASS	amt0=1335.28271484 amt1=1335.28271484
 test	air_roundtrip_still_air_density	PASS	air helpers unchanged
 test	specific_gas_constant_water	PASS	R_spec=461.529999636
-summary	PASS	34 passed, 0 failed
+summary	PASS	36 passed, 0 failed

@@ -14,6 +14,7 @@ test	no_ice_id	PASS
 test	no_steam_id	PASS	
 test	no_current_phase_on_def	PASS	SubstanceDefinition stores capability flags only
 test	water_has_fluid	PASS	
+test	water_has_mechanical_ice	PASS	
 test	metal_has_mechanical	PASS	
 test	air_has_gas	PASS	
 test	plasma_unsupported	PASS	
@@ -35,4 +36,4 @@ test	query_air_gas	PASS	sub=7 phase=3 amt=1.000000
 test	query_oob	PASS	
 test	query_oob_far	PASS	
 test	query_empty	PASS	kind empty after zero fill and gas
-summary	PASS	37 passed, 0 failed
+summary	PASS	38 passed, 0 failed

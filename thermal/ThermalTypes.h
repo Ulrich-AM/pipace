@@ -97,3 +97,26 @@ inline float exchangeThermalEnergy(float &energyA, float capacityA, float kA,
     if (energyB < 0.0f) energyB = 0.0f;
     return dQ;
 }
+
+// Infinite ambient reservoir at AMBIENT_TEMPERATURE_K. dQ > 0 leaves the cell.
+inline float exchangeThermalEnergyWithAmbient(float &energy, float capacity,
+    float kCell, float kAmbient, float dt, float areaOverDx, float conductivityScale)
+{
+    if (capacity < MIN_THERMAL_CAPACITY || dt <= 0.0f || areaOverDx <= 0.0f) return 0.0f;
+    float k = harmonicConductivity(kCell, kAmbient) * std::max(0.0f, conductivityScale);
+    if (k <= 0.0f) return 0.0f;
+    float T = tempFromEnergy(energy, capacity);
+    float dT = T - AMBIENT_TEMPERATURE_K;
+    if (std::abs(dT) < 1.0e-6f) return 0.0f;
+    float dQ = k * areaOverDx * dT * dt;
+    float maxQ = dT * capacity;
+    if (dQ > 0.0f) dQ = std::min(dQ, std::max(0.0f, maxQ));
+    else dQ = std::max(dQ, std::min(0.0f, maxQ));
+    energy -= dQ;
+    if (!std::isfinite(energy) || energy < 0.0f) energy = 0.0f;
+    if (capacity > MIN_THERMAL_CAPACITY) {
+        float t = tempFromEnergy(energy, capacity);
+        energy = energyFromTemp(capacity, t);
+    }
+    return dQ;
+}

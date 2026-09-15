@@ -1,7 +1,8 @@
 # Phase changes — design note
 
 This is the next milestone after the Substance / MatterPhase architecture pass.
-Water **liquid ⇄ gas** is implemented. Freezing/melting is not.
+Water **liquid ⇄ gas** and **liquid ⇄ solid** are implemented. Honey mixtures
+do not boil or freeze yet.
 
 Target first: **water** `solid ⇄ liquid ⇄ gas` using the existing `SUBSTANCE_WATER`
 id. There will be no `SUBSTANCE_ICE` or `SUBSTANCE_STEAM`.
@@ -19,7 +20,8 @@ already say it can be solid and gas. Those flags are metadata, not transfer.
 
 Mass/fill/gas-amount conversion helpers live in `substance/PhaseTransfer.h`.
 Live **water liquid ⇄ gas** transfer is in `world/WaterPhaseChange.cpp`.
-Freezing/melting are not implemented. Honey mixtures do not boil yet.
+Live **water liquid ⇄ solid** (rigid `MATERIAL_WATER_SOLID`, still
+`SUBSTANCE_WATER`) is in the same file. Honey mixtures do not boil or freeze yet.
 
 Vapor placement: the occupancy model is one primary medium per cell, and liquid
 with `fill >= MIN_PRESSURE_FILL` has zero gas volume. Boiling therefore deposits
@@ -49,11 +51,10 @@ lab apparatus except where noted.
 
 Water liquid ⇄ gas is live (`world/WaterPhaseChange.cpp`). Remaining:
 
-1. Solid ⇄ liquid after a water solid representation exists (rigid pixel and/or
-   static ice wall). Do not fake ice as stone.
-2. Mixture thermodynamics (honey/water must not boil until then).
-3. Pressure-dependent boiling curve (currently reference pressure / `PhaseProperties`).
-4. Same-cell liquid/gas occupancy if the one-primary-medium model is relaxed.
+1. Mixture thermodynamics (honey/water must not boil/freeze until then).
+2. Pressure-dependent boiling curve (currently reference pressure / `PhaseProperties`).
+3. Same-cell liquid/gas occupancy if the one-primary-medium model is relaxed.
+4. Rigid/fluid buoyancy may not yet make ice float; do not add a special ice force.
 
 ## Invariants
 

@@ -32,9 +32,8 @@
 //   thermal energy         Joules on liquidHeat / gas.heat / rigid pixels
 //   latent heats           PhaseProperties (copied from thermal authoring), J/kg
 //
-// Solid water: SubstanceId stays WATER. There is no mechanical.densityRel for ice.
-// Solid mass helpers return 0 until a water-specific solid table exists.
-// Do not borrow stone.
+// Solid water: SubstanceId stays WATER. mechanical.densityRel is ice (~0.917).
+// Do not borrow stone. There is no SUBSTANCE_ICE.
 
 struct PhaseTransferResult {
     SubstanceId substance = SUBSTANCE_NONE;

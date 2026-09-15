@@ -34,6 +34,7 @@ struct FluidEngine {
     std::vector<float> nextHeat;
     std::vector<float> dyeR, dyeG, dyeB; // dye mass; concentration = dye / fill
     std::vector<float> honey;            // honey volume; 0 ≤ honey ≤ fill
+    std::vector<float> frozenPendingKg;  // sub-pixel frozen water waiting for an ice pixel
     std::vector<float> nextDyeR, nextDyeG, nextDyeB;
     std::vector<float> nextHoney;
     std::vector<float> pressure;
@@ -89,6 +90,7 @@ struct FluidEngine {
     double volumeError = 0.0;
     double volumeLostRigid = 0.0;
     double volumeDisplacedRigid = 0.0;
+    double escapedHeat = 0.0; // Joules carried out with liquid/splash through open rims
     float measuredMaxVelocity = 0.0f;
     int activeFluidCells = 0;
     int activeChunks = 0;
@@ -172,6 +174,7 @@ struct FluidEngine {
     void wakeThermalAt(int x, int y);
     void seedAmbientHeat();
     void addLiquidFill(int index, float dFill, float dHeat);
+    LiquidCarry takeLiquidCarry(int index, float amount);
     float takeLiquidVolume(int index, float amount);
     float honeyFraction(int index) const;
     float liquidComponentAmount(int index, SubstanceId id) const;

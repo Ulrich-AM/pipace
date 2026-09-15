@@ -14,6 +14,8 @@ struct ThermalConfig {
     // seconds. This sandbox scale (~400) makes gas-gas / gas-surface conduction
     // visible in a few seconds while staying far below the solid scale (25000).
     // Bulk hot-air mixing is buoyancy (GasConfig::buoyancyScale), not this number.
+    // Unwalled map edges use this scale plus air conductivity against an infinite
+    // reservoir at AMBIENT_TEMPERATURE_K (FluidConfig::walledBorders == false).
     float gasConductivityScale = 400.0f;
     float heatToolWatts = 2.5e6f;     // sandbox watts at strength 1, per covered cell
     bool coupleGasPressureToTemperature = false; // documented path; keep off

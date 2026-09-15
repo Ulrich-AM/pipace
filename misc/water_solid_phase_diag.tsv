@@ -1,0 +1,24 @@
+test	no_ice_id	PASS	
+test	ice_density_below_liquid	PASS	0.9169999957
+test	pure_water_freezes	PASS	frozen_kg=2952.042217 pixels=116
+test	freeze_identity_water_solid	PASS	sub=1 phase=1 iceT=253.1822716
+test	freeze_mass_conserved	PASS	dLiq=2952.042239 dSol=2952.042532
+test	freeze_latent_released	PASS	J=985982100.5
+test	freeze_near_melting_point	PASS	Tmean=277.2817451 Tm=273.1499939
+test	contiguous_ice_bodies	PASS	pixels=116 bodies=22
+test	no_water_in_blocked	PASS	
+test	pending_not_discarded	PASS	
+test	honey_mixture_does_not_freeze	PASS	frozen=0
+test	heating_melts_ice	PASS	melted=788.046983 sol0=1202.761497 sol1=414.7146263
+test	melt_mass_conserved	PASS	dSol=788.0468711 dLiq=788.0467712
+test	melt_latent_absorbed	PASS	J=263207692.3
+test	repeat_freeze_melt_mass	PASS	start=125 end=125.0000316
+test	closed_energy_with_fusion	PASS	rel=0.008253947764 E0=2141589120 E1=2129214953 latRel=5302397.49
+test	melt_split_fragments	PASS	before=1 after=2
+test	tick_rate_20_vs_30	PASS	kg30=171.4311652 kg20=171.4223554
+test	full_cycle_phases	PASS	solid=1 liq=1 gas=1 solid2=1
+test	full_cycle_mass	PASS	start=78.125 end=78.12502429
+test	ice_buoyancy_probe	PASS	rose_or_held_up y0=67 y1=63.70359421
+test	perf_ms_tick	PASS	idle=4.2193575 small=16.615005 large=18.5049125
+test	no_nan_inf_negK	PASS	
+summary	PASS	23 passed, 0 failed

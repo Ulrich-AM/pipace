@@ -70,15 +70,30 @@ SubstanceDefinition makeWater() {
     s.thermal.expansionCoeff = 2.07e-4f;
     s.thermal.softeningTempK = 0.0f;
     s.thermal.gasSpecificHeat = 2080.0f; // water vapor; liquid Cp stays on specificHeat
+    s.thermal.solidSpecificHeat = 2100.0f; // ice
+    s.thermal.solidConductivity = 2.22f;
 
-    // Phase capability. Solid/gas flags are metadata only — no ice body and no
-    // steam SubstanceId. Water has no MechanicalProperties; do not borrow stone.
+    // Phase capability. Solid water is SUBSTANCE_WATER + MatterPhase::Solid
+    // (rigid MATERIAL_WATER_SOLID). No Ice SubstanceId.
     // Gas-phase mass uses chemical.molarMass (see substance/PhaseTransfer.h).
     s.phase.valid = true;
     s.phase.solidCapable = true;
     s.phase.liquidCapable = true;
     s.phase.gasCapable = true;
     copyPhaseTransitionFromThermal(s);
+
+    // Mechanical — ice, not stone. Density below liquid water so buoyancy can float it.
+    s.mechanical.valid = true;
+    s.mechanical.densityRel = 0.917f;
+    s.mechanical.friction = 0.08f;
+    s.mechanical.restitution = 0.18f;
+    s.mechanical.hardness = 0.28f;
+    s.mechanical.toughness = 0.12f;
+    s.mechanical.brittleness = 0.88f;
+    s.mechanical.tensileStrength = 0.18f;
+    s.mechanical.compressiveStrength = 0.85f;
+    s.mechanical.shearStrength = 0.22f;
+    s.mechanical.fractureToughness = 0.10f;
 
     // Fluid
     s.fluid.valid = true;
@@ -99,6 +114,12 @@ SubstanceDefinition makeWater() {
     s.chemical.oxidizer = false;
     s.chemical.polarity = 1.0f;
     s.chemical.corrosiveness = 0.0f;
+
+    // Solid visual seed (pale ice). Liquid rendering still uses kVisualWater.
+    s.visual.valid = true;
+    s.visual.colorR = 186;
+    s.visual.colorG = 226;
+    s.visual.colorB = 242;
 
     return s;
 }
@@ -580,7 +601,18 @@ void runSubstanceRegistryDiagnostics() {
     SubstanceDefinition const &water = substanceDef(SUBSTANCE_WATER);
     emit("water_fluid_valid", water.fluid.valid, "");
     emit("water_thermal_valid", water.thermal.valid, "");
-    emit("water_mechanical_invalid", !water.mechanical.valid, "");
+    emit("water_mechanical_valid", water.mechanical.valid, "");
+    emit("water_ice_density_below_liquid",
+        water.mechanical.densityRel > 0.80f && water.mechanical.densityRel < 1.0f
+            && water.mechanical.densityRel < water.fluid.density
+            && near(water.mechanical.densityRel, 0.917f, 0.002f),
+        std::to_string(water.mechanical.densityRel));
+    emit("water_ice_not_stone",
+        std::abs(water.mechanical.densityRel - substanceDef(SUBSTANCE_STONE).mechanical.densityRel) > 0.5f, "");
+    emit("water_ice_adapter",
+        near(materialDef(MATERIAL_WATER_SOLID).density, water.mechanical.densityRel)
+            && substanceForMaterialId(MATERIAL_WATER_SOLID) == SUBSTANCE_WATER
+            && rigidMaterialForSubstance(SUBSTANCE_WATER) == MATERIAL_WATER_SOLID, "");
     emit("water_porous_invalid", !water.porous.valid, "");
     emit("water_electrical_inactive", !water.electrical.valid, "");
     emit("water_density", near(water.fluid.density, 1.0f), std::to_string(water.fluid.density));

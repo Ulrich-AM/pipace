@@ -1538,6 +1538,14 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR commandLine, int show)
         runWaterPhaseDiagnostics(engine, rigid, gas, thermal);
         return 0;
     }
+    if (commandLine && wcsstr(commandLine, L"--water-solid-phase-diag")) {
+        runWaterSolidPhaseDiagnostics(engine, rigid, gas, thermal);
+        return 0;
+    }
+    if (commandLine && wcsstr(commandLine, L"--water-phase-validation")) {
+        runWaterPhaseValidation(engine, rigid, gas, thermal);
+        return 0;
+    }
     if (commandLine && wcsstr(commandLine, L"--substance-phase-diag")) { runSubstancePhaseDiagnostics(engine, rigid, gas); return 0; }
     if (commandLine && wcsstr(commandLine, L"--thermal-diag")) { thermal.runDiagnostics(engine, rigid, gas); return 0; }
     if (commandLine && wcsstr(commandLine, L"--thermal-spread-diag")) { thermal.runSpreadDiagnostics(engine, rigid, gas); return 0; }

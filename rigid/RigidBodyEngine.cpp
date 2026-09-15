@@ -270,8 +270,16 @@ void RigidBodyEngine::ensurePixelState(RigidBody &b) {
     fitFloat(b.materialDamage);
     fitFloat(b.moisture);
     fitFloat(b.heat);
+    fitFloat(b.solidRemain);
     fitBond(b.bondsRight);
     fitBond(b.bondsDown);
+    if (b.solidRemain.size() == n) {
+        for (int li : b.occupiedLocal) {
+            if (li < 0 || li >= static_cast<int>(n)) continue;
+            if (b.solidRemain[static_cast<size_t>(li)] <= 1.0e-8f)
+                b.solidRemain[static_cast<size_t>(li)] = 1.0f;
+        }
+    }
 }
 
 float RigidBodyEngine::pixelMass(RigidBody const &b, int localIndex) const {
@@ -281,7 +289,10 @@ float RigidBodyEngine::pixelMass(RigidBody const &b, int localIndex) const {
     MaterialDefinition const &mat = materialDef(id);
     float water = 0.0f;
     if (localIndex < static_cast<int>(b.moisture.size())) water = std::max(0.0f, b.moisture[static_cast<size_t>(localIndex)]);
-    return mat.density + water * (1.0f + mat.wetDensityContribution);
+    float remain = 1.0f;
+    if (localIndex < static_cast<int>(b.solidRemain.size()))
+        remain = std::max(0.0f, b.solidRemain[static_cast<size_t>(localIndex)]);
+    return (mat.density + water * (1.0f + mat.wetDensityContribution)) * remain;
 }
 
 float RigidBodyEngine::pixelWetness(RigidBody const &b, int localIndex) const {
@@ -346,6 +357,14 @@ void RigidBodyEngine::computeMassProperties(RigidBody &b) {
     b.invMass = 1.0f / b.mass;
     b.invInertia = 1.0f / b.inertia;
     refreshMaterialCache(b);
+}
+
+void RigidBodyEngine::refreshMassProperties(int bodyIndex) {
+    if (bodyIndex < 0 || bodyIndex >= static_cast<int>(bodies.size())) return;
+    RigidBody &b = bodies[static_cast<size_t>(bodyIndex)];
+    float oldComX = b.comLocalX, oldComY = b.comLocalY;
+    computeMassProperties(b);
+    applyComShift(b, oldComX, oldComY, 0, 0);
 }
 
 void RigidBodyEngine::refreshMaterialCache(RigidBody &b) {
@@ -415,18 +434,21 @@ RigidBody RigidBodyEngine::makeBodyFromCells(std::vector<int> const &cells, Mate
     b.materialDamage.assign(nMask, 0.0f);
     b.moisture.assign(nMask, 0.0f);
     b.heat.assign(nMask, 0.0f);
+    b.solidRemain.assign(nMask, 0.0f);
     b.bondsRight.assign(nMask, StructuralBond{});
     b.bondsDown.assign(nMask, StructuralBond{});
     for (int index : cells) {
         int x = index % GW, y = index / GW;
         b.mask[static_cast<size_t>((y - minY) * b.maskW + (x - minX))] = material;
+        b.solidRemain[static_cast<size_t>((y - minY) * b.maskW + (x - minX))] = 1.0f;
     }
     rebuildDerived(b);
     computeMassProperties(b);
     if (b.heat.size() != b.mask.size()) b.heat.assign(b.mask.size(), 0.0f);
     for (int li : b.occupiedLocal) {
         MaterialId id = b.mask[static_cast<size_t>(li)];
-        float cap = thermalCapacity(massKg(materialDef(id).density, 1.0f), thermalForMaterial(id).specificHeat);
+        float cap = thermalCapacity(massKg(materialDef(id).density, 1.0f),
+            solidPhaseSpecificHeat(substanceForMaterialId(id)));
         b.heat[static_cast<size_t>(li)] = energyFromTemp(cap, AMBIENT_TEMPERATURE_K);
     }
     b.x = static_cast<float>(minX) + b.comLocalX;
@@ -466,6 +488,7 @@ void RigidBodyEngine::shrinkMask(RigidBody &b) {
     std::vector<float> packedD(static_cast<size_t>(newW * newH), 0.0f);
     std::vector<float> packedM(static_cast<size_t>(newW * newH), 0.0f);
     std::vector<float> packedH(static_cast<size_t>(newW * newH), 0.0f);
+    std::vector<float> packedRmn(static_cast<size_t>(newW * newH), 0.0f);
     std::vector<StructuralBond> packedR(static_cast<size_t>(newW * newH));
     std::vector<StructuralBond> packedDn(static_cast<size_t>(newW * newH));
     ensurePixelState(b);
@@ -476,6 +499,7 @@ void RigidBodyEngine::shrinkMask(RigidBody &b) {
         packedD[dst] = b.materialDamage[src];
         packedM[dst] = b.moisture[src];
         packedH[dst] = (src < b.heat.size()) ? b.heat[src] : 0.0f;
+        packedRmn[dst] = (src < b.solidRemain.size()) ? b.solidRemain[src] : 0.0f;
         if (x < maxX) packedR[dst] = b.bondsRight[src];
         if (y < maxY) packedDn[dst] = b.bondsDown[src];
     }
@@ -484,6 +508,7 @@ void RigidBodyEngine::shrinkMask(RigidBody &b) {
     b.materialDamage.swap(packedD);
     b.moisture.swap(packedM);
     b.heat.swap(packedH);
+    b.solidRemain.swap(packedRmn);
     b.bondsRight.swap(packedR);
     b.bondsDown.swap(packedDn);
     b.maskW = newW;
@@ -526,6 +551,7 @@ void RigidBodyEngine::addWorldCellsToBody(int bodyIndex, std::vector<int> const 
         std::vector<float> grownD(static_cast<size_t>(std::max(1, newW * newH)), 0.0f);
         std::vector<float> grownM(static_cast<size_t>(std::max(1, newW * newH)), 0.0f);
         std::vector<float> grownH(static_cast<size_t>(std::max(1, newW * newH)), 0.0f);
+        std::vector<float> grownRmn(static_cast<size_t>(std::max(1, newW * newH)), 0.0f);
         std::vector<StructuralBond> grownR(static_cast<size_t>(std::max(1, newW * newH)));
         std::vector<StructuralBond> grownDn(static_cast<size_t>(std::max(1, newW * newH)));
         ensurePixelState(b);
@@ -536,6 +562,7 @@ void RigidBodyEngine::addWorldCellsToBody(int bodyIndex, std::vector<int> const 
             grownD[dst] = b.materialDamage[src];
             grownM[dst] = b.moisture[src];
             grownH[dst] = (src < b.heat.size()) ? b.heat[src] : 0.0f;
+            grownRmn[dst] = (src < b.solidRemain.size()) ? b.solidRemain[src] : 0.0f;
             grownR[dst] = b.bondsRight[src];
             grownDn[dst] = b.bondsDown[src];
         }
@@ -543,6 +570,7 @@ void RigidBodyEngine::addWorldCellsToBody(int bodyIndex, std::vector<int> const 
         b.materialDamage.swap(grownD);
         b.moisture.swap(grownM);
         b.heat.swap(grownH);
+        b.solidRemain.swap(grownRmn);
         b.bondsRight.swap(grownR);
         b.bondsDown.swap(grownDn);
         b.maskW = newW;
@@ -552,10 +580,13 @@ void RigidBodyEngine::addWorldCellsToBody(int bodyIndex, std::vector<int> const 
         int x = p.x + padL, y = p.y + padT;
         if (x < 0 || y < 0 || x >= b.maskW || y >= b.maskH) continue;
         size_t i = static_cast<size_t>(y * b.maskW + x);
-        if (b.mask[i] == MATERIAL_EMPTY) b.mask[i] = material;
+        if (b.mask[i] == MATERIAL_EMPTY) {
+            b.mask[i] = material;
+            if (b.solidRemain.size() == b.mask.size()) b.solidRemain[i] = 1.0f;
+        }
         if (b.heat.size() == b.mask.size() && b.heat[i] == 0.0f && b.mask[i] != MATERIAL_EMPTY) {
             float cap = thermalCapacity(massKg(materialDef(b.mask[i]).density, 1.0f),
-                thermalForMaterial(b.mask[i]).specificHeat);
+                solidPhaseSpecificHeat(substanceForMaterialId(b.mask[i])));
             b.heat[i] = energyFromTemp(cap, AMBIENT_TEMPERATURE_K);
         }
     }
@@ -571,7 +602,7 @@ void RigidBodyEngine::addWorldCellsToBody(int bodyIndex, std::vector<int> const 
     updateAabb(b);
 }
 
-int RigidBodyEngine::attachedBodyForComponent(std::vector<int> const &component) const {
+int RigidBodyEngine::attachedBodyForComponent(std::vector<int> const &component, MaterialId requiredMat) const {
     constexpr int dx[4] = {-1, 1, 0, 0};
     constexpr int dy[4] = {0, 0, -1, 1};
     int best = -1, bestCount = 0;
@@ -582,6 +613,7 @@ int RigidBodyEngine::attachedBodyForComponent(std::vector<int> const &component)
             if (!FluidEngine::inside(ox, oy)) return;
             int body = occupant[static_cast<size_t>(FluidEngine::ci(ox, oy))];
             if (body < 0 || body >= static_cast<int>(bodies.size())) return;
+            if (requiredMat != MATERIAL_EMPTY && worldCellMaterial(ox, oy) != requiredMat) return;
             votes[static_cast<size_t>(body)] += 1;
             if (votes[static_cast<size_t>(body)] > bestCount) {
                 bestCount = votes[static_cast<size_t>(body)];
@@ -748,6 +780,124 @@ int RigidBodyEngine::commitPending(FluidEngine &fluid) {
     clearPending();
     if (changed) syncOccupancy(fluid);
     return spawned;
+}
+
+int RigidBodyEngine::addSameMaterialWorldCells(FluidEngine &fluid, std::vector<int> const &worldCells,
+    MaterialId material, float temperatureK)
+{
+    if (worldCells.empty() || material == MATERIAL_EMPTY) return 0;
+    std::vector<int> fresh;
+    fresh.reserve(worldCells.size());
+    for (int index : worldCells) {
+        if (index < 0 || index >= GW * GH) continue;
+        int x = index % GW, y = index / GW;
+        if (!FluidEngine::inside(x, y)) continue;
+        if (fluid.isStaticSolid(x, y)) continue;
+        if (occupant[static_cast<size_t>(index)] >= 0) continue;
+        fresh.push_back(index);
+    }
+    if (fresh.empty()) return 0;
+
+    std::vector<uint8_t> seen(static_cast<size_t>(GW * GH), 0);
+    std::vector<uint8_t> inFresh(static_cast<size_t>(GW * GH), 0);
+    for (int index : fresh) inFresh[static_cast<size_t>(index)] = 1;
+    constexpr int dx[4] = {-1, 1, 0, 0};
+    constexpr int dy[4] = {0, 0, -1, 1};
+    auto seedHeat = [&](int bodyIndex, std::vector<int> const &cells) {
+        if (bodyIndex < 0 || bodyIndex >= static_cast<int>(bodies.size())) return;
+        RigidBody &b = bodies[static_cast<size_t>(bodyIndex)];
+        ensurePixelState(b);
+        for (int index : cells) {
+            int gx = index % GW, gy = index / GW;
+            float lx, ly;
+            worldToLocal(b, gx + 0.5f, gy + 0.5f, lx, ly);
+            int ix = static_cast<int>(std::floor(lx)), iy = static_cast<int>(std::floor(ly));
+            if (!maskOccupied(b, ix, iy)) continue;
+            int li = iy * b.maskW + ix;
+            if (li < 0 || li >= static_cast<int>(b.heat.size())) continue;
+            if (li < static_cast<int>(b.solidRemain.size())) b.solidRemain[static_cast<size_t>(li)] = 1.0f;
+            float cap = thermalCapacity(massKg(materialDef(material).density, 1.0f),
+                solidPhaseSpecificHeat(substanceForMaterialId(material)));
+            float t = std::isfinite(temperatureK) ? temperatureK : AMBIENT_TEMPERATURE_K;
+            b.heat[static_cast<size_t>(li)] = energyFromTemp(cap, t);
+        }
+        computeMassProperties(b);
+        b.sleeping = false;
+        b.quietTicks = 0;
+        if (b.dormant) wakeDormant(b);
+    };
+
+    int spawned = 0;
+    bool changed = false;
+    for (int start : fresh) {
+        if (seen[static_cast<size_t>(start)]) continue;
+        std::vector<int> component;
+        std::vector<int> stack{start};
+        seen[static_cast<size_t>(start)] = 1;
+        while (!stack.empty()) {
+            int i = stack.back(); stack.pop_back();
+            component.push_back(i);
+            int cx = i % GW, cy = i / GW;
+            for (int n = 0; n < 4; ++n) {
+                int nx = cx + dx[n], ny = cy + dy[n];
+                if (!FluidEngine::inside(nx, ny)) continue;
+                int ni = FluidEngine::ci(nx, ny);
+                if (seen[static_cast<size_t>(ni)] || !inFresh[static_cast<size_t>(ni)]) continue;
+                seen[static_cast<size_t>(ni)] = 1;
+                stack.push_back(ni);
+            }
+        }
+        if (component.empty()) continue;
+        int attach = attachedBodyForComponent(component, material);
+        if (attach >= 0) {
+            addWorldCellsToBody(attach, component, material);
+            seedHeat(attach, component);
+            changed = true;
+        } else {
+            bool savedAnchor = placeAnchored;
+            bool savedSleep = placeSleeping;
+            placeAnchored = false;
+            placeSleeping = false;
+            bodies.push_back(makeBodyFromCells(component, material));
+            placeAnchored = savedAnchor;
+            placeSleeping = savedSleep;
+            seedHeat(static_cast<int>(bodies.size()) - 1, component);
+            ++spawned;
+            changed = true;
+        }
+    }
+    if (changed) syncOccupancy(fluid);
+    return spawned;
+}
+
+void RigidBodyEngine::finalizeMaskEdits(FluidEngine &fluid)
+{
+    std::vector<RigidBody> spawned;
+    for (size_t i = 0; i < bodies.size(); ++i) {
+        if (!bodies[i].structureDirty) continue;
+        refreshBodyAfterMaskEdit(static_cast<int>(i), spawned);
+        if (bodies[i].occupiedLocal.empty()) continue;
+        if (bodies[i].anchored) {
+            bodies[i].vx = bodies[i].vy = bodies[i].omega = 0.0f;
+            bodies[i].sleeping = true;
+        } else if (bodies[i].dormant) {
+            wakeDormant(bodies[i]);
+        } else {
+            bodies[i].sleeping = false;
+            bodies[i].quietTicks = 0;
+        }
+    }
+    size_t write = 0;
+    for (size_t i = 0; i < bodies.size(); ++i) {
+        if (bodies[i].occupiedLocal.empty()) continue;
+        if (write != i) bodies[write] = std::move(bodies[i]);
+        ++write;
+    }
+    bodies.resize(write);
+    for (RigidBody &extra : spawned) bodies.push_back(std::move(extra));
+    lastContacts.clear();
+    pruneGrab();
+    syncOccupancy(fluid);
 }
 
 int RigidBodyEngine::bodyAtCell(int x, int y) const {
@@ -1818,6 +1968,7 @@ RigidBody RigidBodyEngine::packFragment(RigidBody const &parent, std::vector<int
     child.materialDamage.assign(n, 0.0f);
     child.moisture.assign(n, 0.0f);
     child.heat.assign(n, 0.0f);
+    child.solidRemain.assign(n, 0.0f);
     child.bondsRight.assign(n, StructuralBond{});
     child.bondsDown.assign(n, StructuralBond{});
     std::vector<uint8_t> keep(static_cast<size_t>(parent.maskW * parent.maskH), 0);
@@ -1829,6 +1980,7 @@ RigidBody RigidBodyEngine::packFragment(RigidBody const &parent, std::vector<int
         if (i < static_cast<int>(parent.materialDamage.size())) child.materialDamage[dst] = parent.materialDamage[static_cast<size_t>(i)];
         if (i < static_cast<int>(parent.moisture.size())) child.moisture[dst] = parent.moisture[static_cast<size_t>(i)];
         if (i < static_cast<int>(parent.heat.size())) child.heat[dst] = parent.heat[static_cast<size_t>(i)];
+        if (i < static_cast<int>(parent.solidRemain.size())) child.solidRemain[dst] = parent.solidRemain[static_cast<size_t>(i)];
         int rx = lx + 1, ry = ly;
         if (rx < parent.maskW && keep[static_cast<size_t>(ry * parent.maskW + rx)])
             child.bondsRight[dst] = parent.bondsRight[static_cast<size_t>(i)];

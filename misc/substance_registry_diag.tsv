@@ -1,6 +1,6 @@
 id	internal_name	classification	composition_kind	solid_capable	liquid_capable	gas_capable	mechanical_valid	fluid_valid	thermal_valid	porous_valid	chemical_valid	electrical_valid
 0	none	unknown	unknown	0	0	0	0	0	0	0	0	0
-1	water	pure	pure_chemical	1	1	1	0	1	1	0	1	0
+1	water	pure	pure_chemical	1	1	1	1	1	1	0	1	0
 2	honey	mixture	mixture	1	1	0	0	1	1	0	0	0
 3	wood	biological	composite	1	0	0	1	0	1	1	1	0
 4	stone	mixture	mixture	1	0	0	1	0	1	1	0	0
@@ -19,7 +19,10 @@ test	invalid_lookup_no_fake_valid	PASS
 test	invalid_lookup_wide	PASS	
 test	water_fluid_valid	PASS	
 test	water_thermal_valid	PASS	
-test	water_mechanical_invalid	PASS	
+test	water_mechanical_valid	PASS	
+test	water_ice_density_below_liquid	PASS	0.917000
+test	water_ice_not_stone	PASS	
+test	water_ice_adapter	PASS	
 test	water_porous_invalid	PASS	
 test	water_electrical_inactive	PASS	
 test	water_density	PASS	1.000000
@@ -56,4 +59,4 @@ test	static_wall_is_stone	PASS
 test	static_wall_thermal_matches_stone	PASS	
 test	all_electrical_inactive	PASS	
 test	no_ice_or_steam_slots	PASS	
-summary	PASS	49 passed, 0 failed
+summary	PASS	52 passed, 0 failed

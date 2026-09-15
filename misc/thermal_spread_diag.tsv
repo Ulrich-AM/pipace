@@ -20,6 +20,17 @@ case	cold_gas_patch	90	271.32944	272.25357	278.64523	2.3839892e+09	293.15054	293
 test	cold_gas_center_warms	PASS	T0=250 T90=271.32944
 test	cold_gas_neighbors_cool	PASS	below0=293.14999 below90=289.87711
 test	cold_gas_sealed_energy	PASS	rel=2.6626196e-12
-test	open_boundary_heat_accounted	PASS	E0=1.3314852e+08 E1=1.3277065e+08 escapedHeat=377874.01 rel=1.444323e-10
+test	open_boundary_heat_accounted	PASS	E0=1.3314852e+08 E1=1.3277007e+08 condEsc=3818.7228 condEnt=0.0017191571 gasEsc=374637.18 fluidEsc=0 rel=3.4690959e-10
+test	open_border_hot_cools	PASS	T0=480 T90=479.82346
+test	open_border_hot_energy_leaves	PASS	condEsc=61096.871 dE=-81070.379
+test	open_border_hot_accounted	PASS	E0=4.3793902e+08 E1=4.3785795e+08 netExt=80867.963 rel=4.6220162e-07
+test	open_border_cold_warms	PASS	T0=250 T90=277.8233
+test	open_border_cold_energy_enters	PASS	condEnt=4651.5356 dE=5940.0562 gasEsc=-1288.5476
+test	open_border_cold_accounted	PASS	E0=1.3300188e+08 E1=1.3300782e+08 netExt=-5940.075 rel=1.419311e-10
+test	walled_border_hot_no_external	PASS	condEsc=0 condEnt=0 gasEsc=0
+test	walled_border_hot_conserved	PASS	rel=4.2979193e-08 T0=480 T90=479.91782
+test	interior_hot_cools_in_map	PASS	T0=480 T90=479.84824
+test	interior_no_direct_edge_dump	PASS	condEsc=0 edgeCondEsc=61096.871
+test	interior_hot_accounted	PASS	rel=5.576324e-08 netExt=0
 test	no_nan_inf_negK	PASS	
-summary	PASS	17 passed, 0 failed
+summary	PASS	28 passed, 0 failed
