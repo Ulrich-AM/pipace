@@ -12,6 +12,8 @@
 #include <chrono>
 #include <cmath>
 #include <fstream>
+#include <iomanip>
+#include <sstream>
 #include <string>
 
 namespace {
@@ -346,6 +348,7 @@ void ThermalEngine::applyBrush(FluidEngine &fluid, RigidBodyEngine &rigid, GasEn
                 any = true;
             }
             if (any) wakeCell(x, y);
+            if (any) gas.wakeAt(x, y);
         }
 }
 
@@ -485,6 +488,10 @@ void ThermalEngine::conductActive(FluidEngine &fluid, RigidBodyEngine &rigid, Ga
             if (std::abs(dQ) > 1.0e-3f) {
                 wakeCell(x0, y0);
                 wakeCell(x1, y1);
+                if (gasA || gasB) {
+                    gas.wakeAt(x0, y0);
+                    gas.wakeAt(x1, y1);
+                }
             }
         }
     };
@@ -522,6 +529,17 @@ void ThermalEngine::sleepChunks(FluidEngine &fluid, RigidBodyEngine &rigid, GasE
             consider(t);
             if (x + 1 <= x1) maxD = std::max(maxD, std::abs(t - sampleTemperatureK(fluid, rigid, gas, x + 1, y)));
             if (y + 1 <= y1) maxD = std::max(maxD, std::abs(t - sampleTemperatureK(fluid, rigid, gas, x, y + 1)));
+            auto halo = [&](int nx, int ny) {
+                if (!FluidEngine::inside(nx, ny)) return;
+                float tn = sampleTemperatureK(fluid, rigid, gas, nx, ny);
+                float d = std::abs(t - tn);
+                maxD = std::max(maxD, d);
+                if (d >= config.sleepTempEps) wakeCell(nx, ny);
+            };
+            if (x == x0) halo(x - 1, y);
+            if (x == x1) halo(x + 1, y);
+            if (y == y0) halo(x, y - 1);
+            if (y == y1) halo(x, y + 1);
         }
         if (maxD < config.sleepTempEps && maxAmb < config.sleepAmbientEps) {
             uint8_t q = chunkQuietTicks[static_cast<size_t>(c)];
@@ -570,6 +588,22 @@ void ThermalEngine::simulationTick(FluidEngine &fluid, RigidBodyEngine &rigid, G
         work = ThermalWorkCounts{};
         publishTiming(fluid);
         return;
+    }
+
+    for (int c = 0; c < CHUNK_W * CHUNK_H; ++c) {
+        if (!chunkActivity[static_cast<size_t>(c)]) continue;
+        int cx = c % CHUNK_W, cy = c / CHUNK_W;
+        int x0 = cx * CHUNK, y0 = cy * CHUNK;
+        int x1 = std::min(GW - 1, x0 + CHUNK - 1);
+        int y1 = std::min(GH - 1, y0 + CHUNK - 1);
+        for (int y = y0; y <= y1; ++y) for (int x = x0; x <= x1; ++x) {
+            int i = FluidEngine::ci(x, y);
+            if (fluid.solid[static_cast<size_t>(i)] || fluid.fill[static_cast<size_t>(i)] > 1.0e-6f) continue;
+            if (gas.amount[static_cast<size_t>(i)] <= GAS_MIN_AMOUNT) continue;
+            float t = gasTempK(gas, i);
+            if (std::abs(t - AMBIENT_TEMPERATURE_K) > config.sleepAmbientEps)
+                gas.wakeAt(x, y);
+        }
     }
 
     int interval = std::max(1, config.intervalTicks);
@@ -926,4 +960,266 @@ void ThermalEngine::runDiagnostics(FluidEngine &fluid, RigidBodyEngine &rigid, G
     }
 
     out.flush();
+}
+
+void ThermalEngine::runSpreadDiagnostics(FluidEngine &fluid, RigidBodyEngine &rigid, GasEngine &gas) {
+    std::ofstream out(miscFile("thermal_spread_diag.tsv"), std::ios::trunc);
+    out << std::setprecision(8);
+    int passed = 0, failed = 0;
+    auto emit = [&](char const *name, bool ok, std::string const &detail) {
+        out << "test\t" << name << '\t' << (ok ? "PASS" : "FAIL") << '\t' << detail << '\n';
+        if (ok) ++passed; else ++failed;
+    };
+    auto f8 = [](double v) {
+        std::ostringstream o;
+        o << std::setprecision(8) << v;
+        return o.str();
+    };
+
+    auto worldTick = [&]() {
+        rigid.step(fluid, PHYSICS_DT);
+        fluid.simulationTick();
+        gas.simulationTick(fluid);
+        rigid.gatherFluidForces(fluid);
+        gas.applyPressureForces(rigid, fluid);
+        simulationTick(fluid, rigid, gas, PHYSICS_DT);
+    };
+
+    auto box = [&](int x0, int y0, int x1, int y1) {
+        for (int x = x0; x <= x1; ++x) {
+            fluid.solid[static_cast<size_t>(FluidEngine::ci(x, y0))] = 1;
+            fluid.solid[static_cast<size_t>(FluidEngine::ci(x, y1))] = 1;
+        }
+        for (int y = y0; y <= y1; ++y) {
+            fluid.solid[static_cast<size_t>(FluidEngine::ci(x0, y))] = 1;
+            fluid.solid[static_cast<size_t>(FluidEngine::ci(x1, y))] = 1;
+        }
+    };
+
+    auto resetSealed = [&]() {
+        rigid.clear();
+        fluid.clearWorld();
+        gas.config.boundary = GasBoundary::Sealed;
+        gas.config.simMode = GasSimMode::Full;
+        config.enabled = true;
+        config.intervalTicks = 1;
+        box(40, 18, 90, 95);
+        gas.resetAmbient(fluid);
+        seedAmbient(fluid, rigid, gas);
+    };
+
+    auto setGasT = [&](int x, int y, float tK) {
+        if (!FluidEngine::inside(x, y)) return;
+        int i = FluidEngine::ci(x, y);
+        if (fluid.solid[static_cast<size_t>(i)]) return;
+        float cap = gasCapacity(gas, i);
+        if (cap > MIN_THERMAL_CAPACITY)
+            gas.heat[static_cast<size_t>(i)] = energyFromTemp(cap, tK);
+        wakeCell(x, y);
+        gas.wakeAt(x, y);
+    };
+    auto setWallT = [&](int x, int y, float tK) {
+        if (!FluidEngine::inside(x, y)) return;
+        int i = FluidEngine::ci(x, y);
+        if (!fluid.solid[static_cast<size_t>(i)]) return;
+        float cap = wallCapacity(fluid, i);
+        fluid.solidHeat[static_cast<size_t>(i)] = energyFromTemp(cap, tK);
+        wakeCell(x, y);
+    };
+    auto setLiqT = [&](int x, int y, float tK, float fillAmt) {
+        if (!FluidEngine::inside(x, y) || fluid.solid[static_cast<size_t>(FluidEngine::ci(x, y))]) return;
+        int i = FluidEngine::ci(x, y);
+        fluid.fill[static_cast<size_t>(i)] = fillAmt;
+        float cap = liquidCapacity(fluid, i);
+        fluid.liquidHeat[static_cast<size_t>(i)] = energyFromTemp(cap, tK);
+        fluid.expectedVolume += fillAmt;
+        wakeCell(x, y);
+        fluid.wakeChunkAtCell(x, y);
+    };
+
+    struct Probe {
+        float center = AMBIENT_TEMPERATURE_K;
+        float ring1 = AMBIENT_TEMPERATURE_K;
+        float ring2 = AMBIENT_TEMPERATURE_K;
+        double energy = 0.0;
+        float tMax = AMBIENT_TEMPERATURE_K;
+        float tMean = AMBIENT_TEMPERATURE_K;
+        int nAway = 0;
+        float comY = 0.0f;
+        int activeChunks = 0;
+        int nRing1 = 0, nRing2 = 0;
+    };
+    auto probeAt = [&](int cx, int cy, int x0, int y0, int x1, int y1) -> Probe {
+        Probe p;
+        p.center = sampleTemperatureK(fluid, rigid, gas, cx, cy);
+        p.energy = totalThermalEnergy(fluid, rigid, gas);
+        p.activeChunks = work.activeChunks;
+        ThermalWorldStats st = collectStats(fluid, rigid, gas);
+        p.tMax = st.tMax;
+        p.tMean = st.tMean;
+        p.nAway = st.nAwayFromAmbient;
+        double r1 = 0.0, r2 = 0.0;
+        int n1 = 0, n2 = 0;
+        double wsum = 0.0, wy = 0.0;
+        for (int y = y0; y <= y1; ++y) for (int x = x0; x <= x1; ++x) {
+            if (!FluidEngine::inside(x, y)) continue;
+            if (fluid.solid[static_cast<size_t>(FluidEngine::ci(x, y))]) continue;
+            float t = sampleTemperatureK(fluid, rigid, gas, x, y);
+            int cheb = std::max(std::abs(x - cx), std::abs(y - cy));
+            if (cheb == 1) { r1 += t; ++n1; }
+            else if (cheb >= 2 && cheb <= 4) { r2 += t; ++n2; }
+            float dT = t - AMBIENT_TEMPERATURE_K;
+            if (dT > TEMP_VIZ_DEADBAND_K) {
+                wsum += dT;
+                wy += dT * static_cast<double>(y);
+            }
+        }
+        p.nRing1 = n1;
+        p.nRing2 = n2;
+        p.ring1 = n1 ? static_cast<float>(r1 / n1) : AMBIENT_TEMPERATURE_K;
+        p.ring2 = n2 ? static_cast<float>(r2 / n2) : AMBIENT_TEMPERATURE_K;
+        p.comY = (wsum > 1.0e-6) ? static_cast<float>(wy / wsum) : static_cast<float>(cy);
+        return p;
+    };
+    auto meanGasBand = [&](int x0, int y0, int x1, int y1) -> float {
+        double s = 0.0;
+        int n = 0;
+        for (int y = y0; y <= y1; ++y) for (int x = x0; x <= x1; ++x) {
+            if (!FluidEngine::inside(x, y)) continue;
+            int i = FluidEngine::ci(x, y);
+            if (fluid.solid[static_cast<size_t>(i)] || fluid.fill[static_cast<size_t>(i)] > 1.0e-6f) continue;
+            if (gas.amount[static_cast<size_t>(i)] <= GAS_MIN_AMOUNT) continue;
+            s += gasTempK(gas, i);
+            ++n;
+        }
+        return n ? static_cast<float>(s / n) : AMBIENT_TEMPERATURE_K;
+    };
+    auto row = [&](char const *name, int tick, Probe const &p) {
+        out << "case\t" << name << '\t' << tick << '\t' << p.center << '\t' << p.ring1 << '\t'
+            << p.ring2 << '\t' << p.energy << '\t' << p.tMax << '\t' << p.tMean << '\t'
+            << p.nAway << '\t' << p.comY << '\t' << p.activeChunks << '\n';
+    };
+
+    out << "case\tname\ttick\tcenter_T\tring1_T\tring2_T\tenergy\tmax_T\tmean_T\tn_away\tcom_y\tactive_chunks\n";
+
+    // 1. Localized hot gas in sealed ambient air
+    resetSealed();
+    int gx = 65, gy = 78;
+    for (int y = gy - 3; y <= gy + 3; ++y) for (int x = gx - 3; x <= gx + 3; ++x) setGasT(x, y, 450.0f);
+    Probe g0 = probeAt(gx, gy, 41, 19, 89, 94);
+    float above0 = meanGasBand(gx - 6, gy - 16, gx + 6, gy - 6);
+    row("hot_gas_patch", 0, g0);
+    Probe g15{}, g30{}, g90{};
+    for (int n = 1; n <= 90; ++n) {
+        worldTick();
+        if (n == 15) { g15 = probeAt(gx, gy, 41, 19, 89, 94); row("hot_gas_patch", 15, g15); }
+        if (n == 30) { g30 = probeAt(gx, gy, 41, 19, 89, 94); row("hot_gas_patch", 30, g30); }
+        if (n == 90) { g90 = probeAt(gx, gy, 41, 19, 89, 94); row("hot_gas_patch", 90, g90); }
+    }
+    float above90 = meanGasBand(gx - 6, gy - 16, gx + 6, gy - 6);
+    double gRel = std::abs(g90.energy - g0.energy) / std::max(1.0, std::abs(g0.energy));
+    emit("hot_gas_center_cools", g90.center + 15.0f < g0.center,
+        "T0=" + f8(g0.center) + " T90=" + f8(g90.center));
+    emit("hot_gas_neighbors_warm", above90 > above0 + 4.0f,
+        "above0=" + f8(above0) + " above90=" + f8(above90));
+    emit("hot_gas_region_expands", g90.nAway > g0.nAway + 8,
+        "n0=" + std::to_string(g0.nAway) + " n90=" + std::to_string(g90.nAway));
+    emit("hot_gas_sealed_energy", gRel < 0.02, "rel=" + f8(gRel));
+    emit("hot_gas_rises", g90.comY + 1.5f < g0.comY,
+        "com0=" + f8(g0.comY) + " com90=" + f8(g90.comY));
+    emit("hot_gas_sleep_does_not_freeze",
+        g15.activeChunks >= 1 && g30.activeChunks >= 2 && g90.nAway > g0.nAway,
+        "c15=" + std::to_string(g15.activeChunks) + " c30=" + std::to_string(g30.activeChunks)
+            + " nAway90=" + std::to_string(g90.nAway));
+
+    // 2. Hot wall next to air
+    resetSealed();
+    int wx = 40, wy = 55;
+    for (int y = wy - 2; y <= wy + 2; ++y) setWallT(wx, y, 480.0f);
+    int ax = wx + 1, ay = wy;
+    float wall0 = wallTempK(fluid, FluidEngine::ci(wx, wy));
+    float air0 = gasTempK(gas, GasEngine::ci(ax, ay));
+    double eWall0 = totalThermalEnergy(fluid, rigid, gas);
+    for (int n = 0; n < 90; ++n) worldTick();
+    float wall1 = wallTempK(fluid, FluidEngine::ci(wx, wy));
+    float air1 = gasTempK(gas, GasEngine::ci(ax, ay));
+    double eWall1 = totalThermalEnergy(fluid, rigid, gas);
+    double wallRel = std::abs(eWall1 - eWall0) / std::max(1.0, std::abs(eWall0));
+    emit("hot_wall_warms_air", air1 > air0 + 8.0f,
+        "air0=" + f8(air0) + " air90=" + f8(air1));
+    emit("hot_wall_cools", wall1 < wall0 - 0.002f,
+        "wall0=" + f8(wall0) + " wall90=" + f8(wall1));
+    emit("hot_wall_sealed_energy", wallRel < 0.02, "rel=" + f8(wallRel));
+
+    // 3. Hot liquid next to air (below boiling). Rest on the sealed floor so it stays put.
+    resetSealed();
+    int lx = 65, ly = 94;
+    for (int x = lx - 6; x <= lx + 6; ++x) setLiqT(x, ly, 340.0f, 1.0f);
+    fluid.rebuildActivityAndMetrics();
+    gas.handleWorldEdit(fluid);
+    int gxL = lx, gyL = ly - 1;
+    float liq0 = liquidTempK(fluid, FluidEngine::ci(lx, ly));
+    float lair0 = gasTempK(gas, GasEngine::ci(gxL, gyL));
+    double eLiq0 = totalThermalEnergy(fluid, rigid, gas);
+    for (int n = 0; n < 90; ++n) worldTick();
+    float liq1 = liquidTempK(fluid, FluidEngine::ci(lx, ly));
+    float lair1 = gasTempK(gas, GasEngine::ci(gxL, gyL));
+    if (!(lair1 > lair0 + 4.0f))
+        lair1 = meanGasBand(lx - 6, ly - 4, lx + 6, ly - 1);
+    double eLiq1 = totalThermalEnergy(fluid, rigid, gas);
+    double liqRel = std::abs(eLiq1 - eLiq0) / std::max(1.0, std::abs(eLiq0));
+    emit("hot_liquid_warms_air", lair1 > lair0 + 4.0f,
+        "air0=" + f8(lair0) + " air90=" + f8(lair1));
+    emit("hot_liquid_cools", liq1 < liq0 - 0.01f,
+        "liq0=" + f8(liq0) + " liq90=" + f8(liq1));
+    emit("hot_liquid_sealed_energy", liqRel < 0.02, "rel=" + f8(liqRel));
+
+    // 4. Cold gas patch
+    resetSealed();
+    int cxC = 65, cyC = 50;
+    for (int y = cyC - 3; y <= cyC + 3; ++y) for (int x = cxC - 3; x <= cxC + 3; ++x)
+        setGasT(x, y, 250.0f);
+    Probe c0 = probeAt(cxC, cyC, 41, 19, 89, 94);
+    float below0 = meanGasBand(cxC - 6, cyC + 6, cxC + 6, cyC + 16);
+    row("cold_gas_patch", 0, c0);
+    for (int n = 0; n < 90; ++n) worldTick();
+    Probe c90 = probeAt(cxC, cyC, 41, 19, 89, 94);
+    float below90 = meanGasBand(cxC - 6, cyC + 6, cxC + 6, cyC + 16);
+    row("cold_gas_patch", 90, c90);
+    double cRel = std::abs(c90.energy - c0.energy) / std::max(1.0, std::abs(c0.energy));
+    emit("cold_gas_center_warms", c90.center > c0.center + 8.0f,
+        "T0=" + f8(c0.center) + " T90=" + f8(c90.center));
+    emit("cold_gas_neighbors_cool", below90 < below0 - 2.0f,
+        "below0=" + f8(below0) + " below90=" + f8(below90));
+    emit("cold_gas_sealed_energy", cRel < 0.02, "rel=" + f8(cRel));
+
+    // 5. Open boundary accounting: hot gas near an open edge
+    rigid.clear();
+    fluid.clearWorld();
+    gas.config.boundary = GasBoundary::OpenAmbient;
+    gas.config.simMode = GasSimMode::Full;
+    config.enabled = true;
+    config.intervalTicks = 1;
+    gas.resetAmbient(fluid);
+    seedAmbient(fluid, rigid, gas);
+    int ox = GW / 2, oy = 2;
+    for (int y = oy; y <= oy + 5; ++y) for (int x = ox - 4; x <= ox + 4; ++x) setGasT(x, y, 420.0f);
+    double eOpen0 = totalThermalEnergy(fluid, rigid, gas);
+    double escaped0 = gas.escapedHeat;
+    for (int n = 0; n < 60; ++n) worldTick();
+    double eOpen1 = totalThermalEnergy(fluid, rigid, gas);
+    double escapedNet = gas.escapedHeat - escaped0;
+    double openAccounted = eOpen1 + escapedNet;
+    double openRel = std::abs(openAccounted - eOpen0) / std::max(1.0, std::abs(eOpen0));
+    emit("open_boundary_heat_accounted",
+        openRel < 0.03,
+        "E0=" + f8(eOpen0) + " E1=" + f8(eOpen1) + " escapedHeat=" + f8(escapedNet)
+            + " rel=" + f8(openRel));
+
+    emit("no_nan_inf_negK", collectStats(fluid, rigid, gas).nNan == 0
+        && collectStats(fluid, rigid, gas).nInf == 0
+        && collectStats(fluid, rigid, gas).nNegK == 0, "");
+
+    out << "summary\t" << (failed == 0 ? "PASS" : "FAIL") << '\t'
+        << passed << " passed, " << failed << " failed\n";
 }

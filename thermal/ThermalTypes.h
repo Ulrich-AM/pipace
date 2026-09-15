@@ -18,8 +18,9 @@
 //
 // Real metal would take thousands of seconds to equalize across 0.25 m. Gameplay uses
 // conductivityScale (~2.5e4) so relative rates stay physical (metal ≫ stone/glass ≫ wood
-// ≫ water ≫ air) while conduction is visible in seconds. Do not treat scaled k as
-// laboratory SI in UI copy.
+// ≫ water ≫ air) while conduction is visible in seconds. Gas uses a separate
+// gasConductivityScale (~400): enough that a hot wall warms adjacent air in seconds,
+// far below the solid scale. Hot-air transport is mainly buoyancy-driven convection.
 //
 // Gas pressure remains isothermal (amount/volume). Path for P∝T/T_amb is documented
 // in ThermalEngine; it is not enabled in this update.
