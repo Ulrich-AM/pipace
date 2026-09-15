@@ -201,6 +201,7 @@
   "ins_kind_wall": "Type: Wall",
   "ins_kind_rigid": "Type: Solid",
   "ins_kind_liquid": "Type: Liquid",
+  "ins_kind_gas": "Type: Gas",
   "ins_material": "Material: {0}",
   "ins_id": "Id: {0}",
   "ins_mass": "Mass: {0}",

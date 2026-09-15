@@ -1,0 +1,17 @@
+test	hot_water_vaporizes	PASS	boiled_kg=24.25006874 vapor_kg=22.62152843
+test	temperature_near_boiling	PASS	Tmin=373.1499939 Tmax=384.9744263 Tb=373.1499939
+test	boil_mass_conserved	PASS	dLiq=22.62151377 dVap=22.62152843 boiled=24.25006874 condensed=1.628538341
+test	no_steam_id	PASS	
+test	vapor_reports_water_gas	PASS	
+test	sealed_pressure_rises	PASS	pmax_atm=8.850594521
+test	vapor_not_inside_solids	PASS	
+test	cooling_condenses	PASS	condensed_kg=22.6194678 vap_after=0.002060676078
+test	condense_mass_cycle	PASS	before=328.1250147 after=328.1250342
+test	latent_released_on_condense	PASS	J=51119997.24
+test	closed_energy_with_latent	PASS	rel=0.02515946579 E0=2189137489 E1=2134059959
+test	no_nan_inf_negK	PASS	
+test	repeat_phase_cycle_mass	PASS	start=15.625 end=15.6250039
+test	honey_mixture_does_not_boil	PASS	boiled=0
+test	open_boundary_vapor_accounted	PASS	start=15.625 remain=15.62499999 escaped_vapor_kg=0
+test	no_ice_id	PASS	
+summary	PASS	16 passed, 0 failed

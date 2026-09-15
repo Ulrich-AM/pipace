@@ -25,8 +25,10 @@ int chunkIndex(int x, int y) {
 
 GasEngine::GasEngine()
     : amount(GW * GH, 0.0f)
+    , waterVapor(GW * GH, 0.0f)
     , heat(GW * GH, 0.0f)
     , heatNext(GW * GH, 0.0f)
+    , waterVaporNext(GW * GH, 0.0f)
     , volume(GW * GH, 0.0f)
     , pressure(GW * GH, 0.0f)
     , u((GW + 1) * GH, 0.0f)
@@ -79,10 +81,89 @@ double GasEngine::sumAmount() const {
     return s;
 }
 
+double GasEngine::sumWaterVapor() const {
+    double s = 0.0;
+    for (float v : waterVapor) s += v;
+    return s;
+}
+
+float GasEngine::vaporAmount(int index) const {
+    if (index < 0 || index >= GW * GH) return 0.0f;
+    float a = amount[static_cast<size_t>(index)];
+    float v = waterVapor[static_cast<size_t>(index)];
+    if (a <= GAS_MIN_AMOUNT || v <= 0.0f) return 0.0f;
+    return std::min(v, a);
+}
+
+float GasEngine::airAmount(int index) const {
+    if (index < 0 || index >= GW * GH) return 0.0f;
+    float a = amount[static_cast<size_t>(index)];
+    if (a <= GAS_MIN_AMOUNT) return 0.0f;
+    return std::max(0.0f, a - vaporAmount(index));
+}
+
+float GasEngine::vaporFraction(int index) const {
+    if (index < 0 || index >= GW * GH) return 0.0f;
+    float a = amount[static_cast<size_t>(index)];
+    if (a <= GAS_MIN_AMOUNT) return 0.0f;
+    return std::clamp(vaporAmount(index) / a, 0.0f, 1.0f);
+}
+
+void GasEngine::clampSpecies(int index) {
+    if (index < 0 || index >= GW * GH) return;
+    size_t i = static_cast<size_t>(index);
+    if (!(amount[i] > GAS_MIN_AMOUNT) || !std::isfinite(amount[i])) {
+        amount[i] = 0.0f;
+        waterVapor[i] = 0.0f;
+        return;
+    }
+    if (!std::isfinite(waterVapor[i]) || waterVapor[i] < 0.0f) waterVapor[i] = 0.0f;
+    if (waterVapor[i] > amount[i]) waterVapor[i] = amount[i];
+}
+
+void GasEngine::addWaterVapor(int index, float da) {
+    if (index < 0 || index >= GW * GH || !(da > 0.0f) || !std::isfinite(da)) return;
+    size_t i = static_cast<size_t>(index);
+    amount[i] += da;
+    waterVapor[i] += da;
+    clampSpecies(index);
+}
+
+float GasEngine::takeWaterVapor(int index, float da) {
+    if (index < 0 || index >= GW * GH || !(da > 0.0f)) return 0.0f;
+    float have = vaporAmount(index);
+    float take = std::min(have, da);
+    if (take <= GAS_MIN_AMOUNT) return 0.0f;
+    size_t i = static_cast<size_t>(index);
+    float a = amount[i];
+    if (a > GAS_MIN_AMOUNT) heat[i] *= std::max(0.0f, (a - take) / a);
+    amount[i] -= take;
+    waterVapor[i] -= take;
+    clampSpecies(index);
+    if (amount[i] <= GAS_MIN_AMOUNT) heat[i] = 0.0f;
+    return take;
+}
+
+void GasEngine::wakeAt(int x, int y) {
+    wakeChunkAtCell(x, y);
+    wakeThermalAt(x, y);
+}
+
+void GasEngine::transferSpecies(int donor, int receiver, float q) {
+    if (q <= GAS_MIN_AMOUNT || donor == receiver) return;
+    float a0 = amount[static_cast<size_t>(donor)];
+    if (a0 <= GAS_MIN_AMOUNT) return;
+    float dv = waterVapor[static_cast<size_t>(donor)] * (q / a0);
+    waterVapor[static_cast<size_t>(donor)] -= dv;
+    waterVapor[static_cast<size_t>(receiver)] += dv;
+}
+
 void GasEngine::commitExpected() {
     currentAmount = sumAmount();
     expectedAmount = currentAmount;
     amountError = 0.0;
+    currentWaterVapor = sumWaterVapor();
+    expectedWaterVapor = currentWaterVapor;
 }
 
 void GasEngine::wakeChunkAtCell(int x, int y, bool resetQuiet) {
@@ -150,7 +231,10 @@ void GasEngine::rebuildVolumes(FluidEngine const &fluid, bool &volumeChanged, bo
     lastOccupancyScan = fluid.dynamicOccupiedCells;
 }
 
-float GasEngine::relocateAmount(FluidEngine const &fluid, int x, int y, float leftover, float maxAtm, float leftoverHeatPerAmount) {
+float GasEngine::relocateAmount(FluidEngine const &fluid, int x, int y, float leftover, float maxAtm,
+    float leftoverHeatPerAmount, float leftoverVaporFraction)
+{
+    leftoverVaporFraction = std::clamp(leftoverVaporFraction, 0.0f, 1.0f);
     if (leftover <= GAS_MIN_AMOUNT) return 0.0f;
     if (++relocateEpoch == 0) {
         std::fill(relocateStamp.begin(), relocateStamp.end(), 0);
@@ -179,6 +263,8 @@ float GasEngine::relocateAmount(FluidEngine const &fluid, int x, int y, float le
             float placed = std::min(leftover, room);
             if (placed > GAS_MIN_AMOUNT) {
                 amount[static_cast<size_t>(i)] += placed;
+                waterVapor[static_cast<size_t>(i)] += placed * leftoverVaporFraction;
+                clampSpecies(i);
                 heat[static_cast<size_t>(i)] += placed * leftoverHeatPerAmount;
                 leftover -= placed;
                 wakeChunkAtCell(cx, cy);
@@ -197,19 +283,24 @@ void GasEngine::displaceBlocked(FluidEngine const &fluid) {
         float a = amount[static_cast<size_t>(i)];
         if (a <= GAS_MIN_AMOUNT) {
             amount[static_cast<size_t>(i)] = 0.0f;
+            waterVapor[static_cast<size_t>(i)] = 0.0f;
             heat[static_cast<size_t>(i)] = 0.0f;
             continue;
         }
         float h = heat[static_cast<size_t>(i)];
+        float vFrac = vaporFraction(i);
         amount[static_cast<size_t>(i)] = 0.0f;
+        waterVapor[static_cast<size_t>(i)] = 0.0f;
         heat[static_cast<size_t>(i)] = 0.0f;
         float maxAtm = 0.0f;
         if (!fluid.solid[static_cast<size_t>(i)] && !fluid.dynamicSolid[static_cast<size_t>(i)]
             && fluid.fill[static_cast<size_t>(i)] >= MIN_PRESSURE_FILL)
             maxAtm = config.ambientPressureAtm * 1.12f;
-        float rem = relocateAmount(fluid, x, y, a, maxAtm, a > GAS_MIN_AMOUNT ? h / a : 0.0f);
+        float rem = relocateAmount(fluid, x, y, a, maxAtm, a > GAS_MIN_AMOUNT ? h / a : 0.0f, vFrac);
         if (rem > GAS_MIN_AMOUNT) {
             amount[static_cast<size_t>(i)] += rem;
+            waterVapor[static_cast<size_t>(i)] += rem * vFrac;
+            clampSpecies(i);
             heat[static_cast<size_t>(i)] += rem * (a > GAS_MIN_AMOUNT ? h / a : 0.0f);
         }
     }
@@ -230,13 +321,18 @@ void GasEngine::displaceLiquidOverflow(FluidEngine const &fluid) {
         float pushed = a - keep;
         if (pushed <= GAS_MIN_AMOUNT) continue;
         float h = heat[static_cast<size_t>(i)];
+        float vFrac = vaporFraction(i);
         float hKeep = a > GAS_MIN_AMOUNT ? h * (keep / a) : 0.0f;
         float hPush = h - hKeep;
         amount[static_cast<size_t>(i)] = keep;
+        waterVapor[static_cast<size_t>(i)] = keep * vFrac;
+        clampSpecies(i);
         heat[static_cast<size_t>(i)] = hKeep;
         float rem = relocateAmount(fluid, x, y, pushed, config.ambientPressureAtm * 1.12f,
-            pushed > GAS_MIN_AMOUNT ? hPush / pushed : 0.0f);
+            pushed > GAS_MIN_AMOUNT ? hPush / pushed : 0.0f, vFrac);
         amount[static_cast<size_t>(i)] += rem;
+        waterVapor[static_cast<size_t>(i)] += rem * vFrac;
+        clampSpecies(i);
         if (rem > GAS_MIN_AMOUNT && pushed > GAS_MIN_AMOUNT)
             heat[static_cast<size_t>(i)] += rem * (hPush / pushed);
         wakeChunkAtCell(x, y);
@@ -353,7 +449,11 @@ void GasEngine::applyBoundaryFlux(float dt) {
         if (flux > 0.0f) {
             float a = amount[static_cast<size_t>(i)];
             float dq = (a > GAS_MIN_AMOUNT) ? heat[static_cast<size_t>(i)] * (flux / a) : 0.0f;
+            float dv = (a > GAS_MIN_AMOUNT) ? waterVapor[static_cast<size_t>(i)] * (flux / a) : 0.0f;
             heat[static_cast<size_t>(i)] -= dq;
+            waterVapor[static_cast<size_t>(i)] -= dv;
+            escapedWaterVapor += dv;
+            expectedWaterVapor -= dv;
         } else if (flux < 0.0f) {
             float cap = thermalCapacity(gasMassKg(-flux), thermalForSubstance(substanceForGasSpecies()).specificHeat);
             heat[static_cast<size_t>(i)] += energyFromTemp(cap, AMBIENT_TEMPERATURE_K);
@@ -363,6 +463,7 @@ void GasEngine::applyBoundaryFlux(float dt) {
             flux += amount[static_cast<size_t>(i)];
             amount[static_cast<size_t>(i)] = 0.0f;
         }
+        clampSpecies(i);
         escapedAmount += flux;
         expectedAmount -= flux;
         if (std::abs(flux) > 1.0e-6f) {
@@ -382,26 +483,32 @@ void GasEngine::applyBoundaryFlux(float dt) {
 
 void GasEngine::applyFluxes() {
     heatNext = heat;
-    auto heatFlux = [&](int donor, int receiver, float q) {
+    waterVaporNext = waterVapor;
+    auto mixFlux = [&](int donor, int receiver, float q) {
         if (q <= 0.0f) return 0.0f;
         float a0 = amount[static_cast<size_t>(donor)];
-        float dq = (a0 > GAS_MIN_AMOUNT) ? heat[static_cast<size_t>(donor)] * (q / a0) : 0.0f;
+        if (a0 <= GAS_MIN_AMOUNT) return 0.0f;
+        float frac = q / a0;
+        float dq = heat[static_cast<size_t>(donor)] * frac;
+        float dv = waterVapor[static_cast<size_t>(donor)] * frac;
         heatNext[static_cast<size_t>(donor)] -= dq;
         heatNext[static_cast<size_t>(receiver)] += dq;
+        waterVaporNext[static_cast<size_t>(donor)] -= dv;
+        waterVaporNext[static_cast<size_t>(receiver)] += dv;
         return dq;
     };
     for (int y = 0; y < GH; ++y) for (int x = 1; x < GW; ++x) {
         float flux = fluxU[static_cast<size_t>(ui(x, y))];
         if (flux == 0.0f) continue;
         int iL = ci(x - 1, y), iR = ci(x, y);
-        float dq = heatFlux(flux > 0.0f ? iL : iR, flux > 0.0f ? iR : iL, std::abs(flux));
+        float dq = mixFlux(flux > 0.0f ? iL : iR, flux > 0.0f ? iR : iL, std::abs(flux));
         if (std::abs(dq) > 1.0e-3f) { wakeThermalAt(x - 1, y); wakeThermalAt(x, y); }
     }
     for (int y = 1; y < GH; ++y) for (int x = 0; x < GW; ++x) {
         float flux = fluxV[static_cast<size_t>(vi(x, y))];
         if (flux == 0.0f) continue;
         int iT = ci(x, y - 1), iB = ci(x, y);
-        float dq = heatFlux(flux > 0.0f ? iT : iB, flux > 0.0f ? iB : iT, std::abs(flux));
+        float dq = mixFlux(flux > 0.0f ? iT : iB, flux > 0.0f ? iB : iT, std::abs(flux));
         if (std::abs(dq) > 1.0e-3f) { wakeThermalAt(x, y - 1); wakeThermalAt(x, y); }
     }
     for (int y = 0; y < GH; ++y) for (int x = 1; x < GW; ++x) {
@@ -428,6 +535,10 @@ void GasEngine::applyFluxes() {
     }
     for (int i = 0; i < GW * GH; ++i) {
         if (amount[static_cast<size_t>(i)] < 0.0f) amount[static_cast<size_t>(i)] = 0.0f;
+        float nv = waterVaporNext[static_cast<size_t>(i)];
+        if (!std::isfinite(nv) || nv < 0.0f) nv = 0.0f;
+        waterVapor[static_cast<size_t>(i)] = nv;
+        clampSpecies(i);
         if (amount[static_cast<size_t>(i)] <= GAS_MIN_AMOUNT) heat[static_cast<size_t>(i)] = 0.0f;
         else {
             heat[static_cast<size_t>(i)] = heatNext[static_cast<size_t>(i)];
@@ -523,12 +634,14 @@ void GasEngine::resetAmbient(FluidEngine &fluid) {
     for (int i = 0; i < GW * GH; ++i) {
         float vol = volume[static_cast<size_t>(i)];
         amount[static_cast<size_t>(i)] = vol * config.ambientPressureAtm;
+        waterVapor[static_cast<size_t>(i)] = 0.0f;
         float cap = thermalCapacity(gasMassKg(amount[static_cast<size_t>(i)]), thermalForSubstance(substanceForGasSpecies()).specificHeat);
         heat[static_cast<size_t>(i)] = energyFromTemp(cap, AMBIENT_TEMPERATURE_K);
     }
     std::fill(u.begin(), u.end(), 0.0f);
     std::fill(v.begin(), v.end(), 0.0f);
     escapedAmount = 0.0;
+    escapedWaterVapor = 0.0;
     recomputePressure();
     commitExpected();
     sleepAll();
@@ -543,6 +656,7 @@ void GasEngine::handleWorldEdit(FluidEngine &fluid) {
     recomputePressure();
     currentAmount = sumAmount();
     amountError = currentAmount - expectedAmount;
+    currentWaterVapor = sumWaterVapor();
 }
 
 void GasEngine::applyPressureBrush(FluidEngine &fluid, int cx, int cy, int brushRadius,
@@ -577,8 +691,14 @@ void GasEngine::applyPressureBrush(FluidEngine &fluid, int cx, int cy, int brush
                 heat[static_cast<size_t>(i)] *= (na / a);
             }
             amount[static_cast<size_t>(i)] = na;
+            if (da < 0.0f && a > GAS_MIN_AMOUNT)
+                waterVapor[static_cast<size_t>(i)] *= (na / a);
+            else if (na <= GAS_MIN_AMOUNT)
+                waterVapor[static_cast<size_t>(i)] = 0.0f;
+            clampSpecies(i);
             if (na <= GAS_MIN_AMOUNT) {
                 amount[static_cast<size_t>(i)] = 0.0f;
+                waterVapor[static_cast<size_t>(i)] = 0.0f;
                 heat[static_cast<size_t>(i)] = 0.0f;
                 na = 0.0f;
             }
@@ -604,7 +724,9 @@ void GasEngine::eraseAmountBrush(FluidEngine &fluid, int cx, int cy, int brushRa
             float a = amount[static_cast<size_t>(i)];
             if (a <= GAS_MIN_AMOUNT) continue;
             net -= static_cast<double>(a);
+            expectedWaterVapor -= waterVapor[static_cast<size_t>(i)];
             amount[static_cast<size_t>(i)] = 0.0f;
+            waterVapor[static_cast<size_t>(i)] = 0.0f;
             heat[static_cast<size_t>(i)] = 0.0f;
             pressure[static_cast<size_t>(i)] = 0.0f;
             wakeChunkAtCell(x, y);
@@ -739,9 +861,11 @@ void GasEngine::wallRect(FluidEngine &fluid, int x0, int y0, int x1, int y1) {
 
 void GasEngine::vacuumAll() {
     std::fill(amount.begin(), amount.end(), 0.0f);
+    std::fill(waterVapor.begin(), waterVapor.end(), 0.0f);
     std::fill(u.begin(), u.end(), 0.0f);
     std::fill(v.begin(), v.end(), 0.0f);
     escapedAmount = 0.0;
+    escapedWaterVapor = 0.0;
 }
 
 void GasEngine::fillRectAmount(FluidEngine const &fluid, int x0, int y0, int x1, int y1, float atm) {
@@ -752,6 +876,7 @@ void GasEngine::fillRectAmount(FluidEngine const &fluid, int x0, int y0, int x1,
         float vol = volume[static_cast<size_t>(i)];
         if (vol < GAS_MIN_VOLUME) continue;
         amount[static_cast<size_t>(i)] = vol * atm;
+        waterVapor[static_cast<size_t>(i)] = 0.0f;
     }
 }
 

@@ -7,6 +7,7 @@
 #include "substance/SubstanceRegistry.h"
 #include "thermal/ThermalEngine.h"
 
+#include <algorithm>
 #include <cmath>
 #include <fstream>
 #include <iomanip>
@@ -44,10 +45,20 @@ MatterSample sampleMatterAt(FluidEngine const &fluid, RigidBodyEngine const &rig
             sample.mixture = waterAmt > 1.0e-6f && honeyAmt > 1.0e-6f;
             break;
         }
-        case ThermalSampleKind::Gas:
-            sample.identity = identityForGasSpecies();
-            sample.amount = gas.amount[static_cast<size_t>(i)];
+        case ThermalSampleKind::Gas: {
+            float tot = gas.amount[static_cast<size_t>(i)];
+            float vap = gas.vaporAmount(i);
+            float air = std::max(0.0f, tot - vap);
+            sample.amount = tot;
+            sample.vaporFraction = (tot > GAS_MIN_AMOUNT) ? std::clamp(vap / tot, 0.0f, 1.0f) : 0.0f;
+            sample.waterFraction = sample.vaporFraction;
+            sample.mixture = vap > 1.0e-6f && air > 1.0e-6f;
+            if (vap > air)
+                sample.identity = makeMatterIdentity(SUBSTANCE_WATER, MatterPhase::Gas);
+            else
+                sample.identity = makeMatterIdentity(SUBSTANCE_AIR, MatterPhase::Gas);
             break;
+        }
         case ThermalSampleKind::Empty:
         default:
             sample.hasMatter = false;

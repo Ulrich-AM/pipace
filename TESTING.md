@@ -30,6 +30,7 @@ Files whose names contain `<grid>` use the resulting dimensions, for example
 | `build\pipace.exe --substance-phase-diag` | `substance_phase_diag.tsv` | Phase capability metadata, identity adapters, world queries, mixture reporting, static-wall identity, gas identity, and empty/out-of-bounds queries. | Final row is `summary PASS`; water remains one ID across supported phases and no Ice/Steam IDs exist. |
 | `build\pipace.exe --substance-registry-diag` | `substance_registry_diag.tsv` | Registry IDs/names/indexing, invalid lookup fallback, canonical grouped properties, compatibility adapters, and selected reference property values. | Final row is `summary PASS`; all built-in definitions and canonical property checks pass. |
 | `build\pipace.exe --phase-transfer-diag` | `phase_transfer_diag.tsv` | Liquid fill ↔ mass ↔ water-vapor amount round trips, latent-heat helpers vs registry, `canTransition` metadata, and 1000-cycle closed conversion drift. No live boiling/freezing. | Final row is `summary PASS`. Water remains one ID (no Ice/Steam). Round-trip mass error and 1000-cycle drift stay within the encoded tolerances. Invalid transitions fail safely. |
+| `build\pipace.exe --water-phase-diag` | `water_phase_diag.tsv` | Live water boiling and condensation: latent plateau, mass transfer, sealed pressure, honey skip, vapor identity, and open-boundary vapor accounting. | Final row is `summary PASS`. No Ice/Steam IDs. Honey mixtures do not boil. Closed liquid+vapor mass stays within the encoded tolerance. |
 | `build\pipace.exe --benchmark` | `benchmark_<grid>.tsv` | Main fluid scene timings, stage timings, work counts, liquid volume error, thin cells, and splash counts. | Observational benchmark: all values are finite, volume error remains negligible, and timings/work counts show no unexplained regression against a comparable baseline. |
 | `build\pipace.exe --advection-benchmark` | `advection_benchmark_<grid>.tsv` | Six velocity-advection modes across four scenes; timing, volume, velocity, momentum, and kinetic energy. | Observational benchmark: 24 case rows, finite metrics, negligible volume error, and no unexplained mode-specific instability or timing regression. |
 | `build\pipace.exe --scale-benchmark` | `scale_benchmark_<grid>.tsv` | Four representative fluid scenes at the compiled grid size. | Observational benchmark: four case rows, finite timings, and negligible volume error. Rebuild at each desired grid size for scaling comparisons. |
@@ -62,8 +63,26 @@ not fixed universal thresholds.
   dominant existing substance; they do not create a fake mixture ID.
 - `SubstanceDefinition` and its grouped property tables are canonical.
   Compatibility adapters must agree with the registry.
-- On the default 200x120 grid, Auto resolves to one worker and pressure remains
-  serial below the 20,000-pressure-cell parallel threshold.
+- Water liquid ⇄ gas is live. Honey/water mixtures do not boil yet. There is
+  no Ice/Steam SubstanceId.
+
+## Manual water boiling / condensation
+
+Use the default map, Heat/Cool from Energy, and the inspector (hover a cell).
+
+1. **Boiling.** Paint a small pure-water pool. Heat it until the inspector
+   temperature sits near the boiling point. Liquid fill should fall gradually;
+   gas cells should show Water (or Air/Water composition) rather than a Steam
+   id. Temperature should stall near boiling while vapor is produced.
+2. **Condensation.** Cool the vapor or nearby walls. Liquid water should
+   reappear nearby; vapor fraction and pressure should drop.
+3. **Sealed chamber.** Draw a closed wall box, put water inside, heat, then
+   cool. Pressure should rise with vapor and fall as it condenses.
+4. **Mixture.** Paint water+honey in one cell and heat it. It should not boil
+   in this pass.
+
+Automated coverage: `build\pipace.exe --water-phase-diag`.
+
 
 ## Pre-phase-change baseline: 2026-09-15
 

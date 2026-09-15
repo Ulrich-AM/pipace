@@ -1,7 +1,7 @@
-# Phase changes — design note (not implemented)
+# Phase changes — design note
 
 This is the next milestone after the Substance / MatterPhase architecture pass.
-**No phase-change solver lives in the code yet.** Do not treat this file as an API.
+Water **liquid ⇄ gas** is implemented. Freezing/melting is not.
 
 Target first: **water** `solid ⇄ liquid ⇄ gas` using the existing `SUBSTANCE_WATER`
 id. There will be no `SUBSTANCE_ICE` or `SUBSTANCE_STEAM`.
@@ -17,8 +17,15 @@ id. There will be no `SUBSTANCE_ICE` or `SUBSTANCE_STEAM`.
 Today water is only simulated as liquid (`FluidEngine` volume). Capability flags
 already say it can be solid and gas. Those flags are metadata, not transfer.
 
-Mass/fill/gas-amount conversion helpers now live in `substance/PhaseTransfer.h`.
-They do **not** move matter between engines. Heating still leaves water as liquid.
+Mass/fill/gas-amount conversion helpers live in `substance/PhaseTransfer.h`.
+Live **water liquid ⇄ gas** transfer is in `world/WaterPhaseChange.cpp`.
+Freezing/melting are not implemented. Honey mixtures do not boil yet.
+
+Vapor placement: the occupancy model is one primary medium per cell, and liquid
+with `fill >= MIN_PRESSURE_FILL` has zero gas volume. Boiling therefore deposits
+vapor into a neighboring accessible gas cell (prefer above, then sides, then BFS
+within 64 cells). Condensate prefers existing nearby water, then cells next to
+solids, then lower neighbors.
 
 ## Current sandbox units
 
@@ -34,25 +41,19 @@ lab apparatus except where noted.
 | Full water cell mass | `1 × 1000 kg/m³ × 0.015625 m³` = **15.625 kg** |
 | Gas `amount` | Conserved cell-atmospheres. **1.0 amount in 1.0 volume = 1 atm** (isothermal `P = amount / volume`). |
 | Air mass | `amount × 1.204 kg/m³ × V` (same as `gasMassKg`) |
-| Water vapor mass | `amount × ρ_vapor × V`, `ρ_vapor` from water `chemical.molarMass` at reference P and ambient T. Still `SUBSTANCE_WATER`. GasEngine still stores only Air. |
+| Water vapor mass | `amount × ρ_vapor × V`, `ρ_vapor` from water `chemical.molarMass` at reference P and ambient T. Still `SUBSTANCE_WATER`. Stored as `gas.waterVapor`; air = total − vapor. |
 | Thermal energy | Joules |
 | Latent heats | `PhaseProperties.latentHeatFusion` / `latentHeatVaporization` (J/kg) |
 
-## Suggested first implementation plan (later)
+## Implementation status
 
-Do **not** implement the live solver in the conversion-foundation pass.
+Water liquid ⇄ gas is live (`world/WaterPhaseChange.cpp`). Remaining:
 
-1. ~~Document mass conversion~~ Conversion helpers exist for liquid fill ↔ mass ↔
-   gas amount. Water still has **no solid mechanical table**. Water vapor mass
-   uses molar mass; GasEngine has **no water-vapor species channel**.
-2. Thermal plateau: while `T` is at the transition point, incoming heat pays
-   latent cost instead of raising temperature.
-3. Transfer liquid → gas in a single cell first (boiling at 1 atm), conserving
-   mass and energy, then update `sampleMatterAt`.
-4. Transfer gas → liquid (condensation) with the same conservation.
-5. Solid ⇄ liquid after a water solid representation exists (rigid pixel and/or
+1. Solid ⇄ liquid after a water solid representation exists (rigid pixel and/or
    static ice wall). Do not fake ice as stone.
-6. Only then consider partial-cell fractions and pressure dependence.
+2. Mixture thermodynamics (honey/water must not boil until then).
+3. Pressure-dependent boiling curve (currently reference pressure / `PhaseProperties`).
+4. Same-cell liquid/gas occupancy if the one-primary-medium model is relaxed.
 
 ## Invariants
 

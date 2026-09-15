@@ -39,11 +39,12 @@ PIPACE/
   substance/
     SubstanceProperties.h  # Grouped intrinsic properties (mechanical/fluid/thermal/phase/porous/…)
     SubstanceTypes.h / SubstanceRegistry.h/.cpp  # SubstanceId, MatterPhase, registry
-    PhaseTransfer.h/.cpp  # fill/mass/gas-amount conversion; no live phase solver
+    PhaseTransfer.h/.cpp  # fill/mass/gas-amount conversion
   world/
     WorldQuery.h/.cpp      # sampleMatterAt (SubstanceId + phase), phase/registry diags
+    WaterPhaseChange.h/.cpp # water liquid ⇄ gas (boiling/condensation)
   docs/
-    PHASE_CHANGES.md       # Phase-change design; conversion helpers exist, no solver yet
+    PHASE_CHANGES.md       # Water liquid ⇄ gas is live; solid water is not
   CMakeLists.txt / build.bat / run.bat
   README.md
   AGENTS.md
@@ -67,11 +68,13 @@ These mappings are **implementation, not laws**:
 | Water + Liquid, Honey + Liquid | FluidEngine (water/honey volume channels) |
 | Wood/Glass/Metal + Solid | RigidBodyEngine (MaterialId masks) |
 | Stone + Solid | rigid body **or** static `solid[]` walls (`kStaticWallSubstance`) |
-| Air + Gas | GasEngine |
+| Air + Gas | GasEngine (air component) |
+| Water + Gas | GasEngine (`waterVapor` component; same SubstanceId) |
 
-`supportsPhase` is capability metadata only. There is **no** melting/boiling/freezing
-solver yet. Do **not** add SUBSTANCE_ICE / SUBSTANCE_STEAM. Density stays phase-specific:
-mechanical.densityRel (solid), fluid.density (liquid), gas amount/EoS (gas).
+`supportsPhase` is capability metadata. Water **liquid ⇄ gas** is live; there is
+**no** melting/freezing solver yet. Do **not** add SUBSTANCE_ICE / SUBSTANCE_STEAM.
+Density stays phase-specific: mechanical.densityRel (solid), fluid.density (liquid),
+gas amount/EoS (gas). Honey/water mixtures do not boil yet.
 
 Water/honey cells that hold both channels are **mixtures**, not a new SubstanceId.
 `MatterSample` reports the dominant component plus fractions. Generalized mixtures
@@ -92,7 +95,7 @@ table: relative density 1.0). That is a reference, not “all liquid is water”
 Removed copies: `FluidConfig.water` / `.honey`, `kHoneyLiquid()`, `k*Thermal()`
 wrappers, `GasConfig.thermal`.
 
-Build: `run.bat` or CMake → `build/pipace.exe`. Headless: `--benchmark`, `--scale-benchmark`, `--rigid-benchmark`, `--thread-benchmark`, `--liquid-diag`, `--substance-phase-diag`, `--substance-registry-diag`, `--phase-transfer-diag`. Grid size via `PIPACE_GRID_WIDTH` / `PIPACE_GRID_HEIGHT` (default 200×120). SETTINGS → Simulation threads (Auto / 1 / 2 / 4 / 6 / 8). Auto is 1 worker on the default grid; see `misc/THREAD_PASS_NOTES.md`.
+Build: `run.bat` or CMake → `build/pipace.exe`. Headless: `--benchmark`, `--scale-benchmark`, `--rigid-benchmark`, `--thread-benchmark`, `--liquid-diag`, `--substance-phase-diag`, `--substance-registry-diag`, `--phase-transfer-diag`, `--water-phase-diag`. Grid size via `PIPACE_GRID_WIDTH` / `PIPACE_GRID_HEIGHT` (default 200×120). SETTINGS → Simulation threads (Auto / 1 / 2 / 4 / 6 / 8). Auto is 1 worker on the default grid; see `misc/THREAD_PASS_NOTES.md`.
 
 ## Fluid engine (what exists)
 
@@ -164,10 +167,10 @@ Do **not** sacrifice conservation or replace the donor/receiver limiter with sca
 Completed architecture: SubstanceId, registry, grouped properties, MatterPhase /
 MatterIdentity, world query, material migration, moisture stabilization.
 
-**Next major milestone: real phase changes** — water `solid ⇄ liquid ⇄ gas`
-without Ice/Steam IDs. Conversion helpers live in `substance/PhaseTransfer.h`
-(mass/fill/gas amount, latent heat, `canTransition`). There is still **no**
-temperature-triggered solver. Design note: `docs/PHASE_CHANGES.md`.
+**Next major milestone: real phase changes** — water `liquid ⇄ gas` boiling and
+condensation are live (`world/WaterPhaseChange.cpp`). Solid water / ice is still
+not implemented. Conversion helpers: `substance/PhaseTransfer.h`. Design note:
+`docs/PHASE_CHANGES.md`.
 
 Longer sequence (historical): liquid correctness → performance → modularization →
 honey composition → rigid coupling → temperature/gas → **phase changes** → SACE.

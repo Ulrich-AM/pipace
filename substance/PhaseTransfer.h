@@ -6,8 +6,8 @@
 
 #include <cmath>
 
-// Phase-transfer accounting. Conversion is mathematical only — no engine writes,
-// no temperature-triggered boiling/melting/freezing/condensation.
+// Phase-transfer accounting helpers (fill ↔ mass ↔ gas amount, latent energy).
+// Live water liquid ⇄ gas is in world/WaterPhaseChange.cpp. No freezing/melting yet.
 //
 // Current sandbox units (do not invent a second system):
 //
@@ -22,12 +22,13 @@
 //   GasEngine amount       conserved "cell-atmospheres". 1.0 amount in 1.0 available
 //                          volume = 1 atm (isothermal P = amount / volume).
 //                          1.0 ≈ one cell of 1 atm of the stored gas species.
-//                          Today the engine stores only Air (GasSpecies::Air).
+//                          Today the engine stores Air + water-vapor components
+//                          (gas.amount total, gas.waterVapor species).
 //   air mass               amount * 1.204 kg/m³ * V  (gasMassKg; ambient-T air)
 //   water vapor mass       amount * ρ_vapor(id) * V
 //                          ρ_vapor from ideal gas at phase.referencePressurePa and
 //                          AMBIENT_TEMPERATURE_K using chemical.molarMass.
-//                          Not a Steam SubstanceId. Not yet a GasEngine species.
+//                          Not a Steam SubstanceId.
 //   thermal energy         Joules on liquidHeat / gas.heat / rigid pixels
 //   latent heats           PhaseProperties (copied from thermal authoring), J/kg
 //

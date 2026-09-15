@@ -69,6 +69,7 @@ SubstanceDefinition makeWater() {
     s.thermal.latentVapor = 2.26e6f;
     s.thermal.expansionCoeff = 2.07e-4f;
     s.thermal.softeningTempK = 0.0f;
+    s.thermal.gasSpecificHeat = 2080.0f; // water vapor; liquid Cp stays on specificHeat
 
     // Phase capability. Solid/gas flags are metadata only — no ice body and no
     // steam SubstanceId. Water has no MechanicalProperties; do not borrow stone.

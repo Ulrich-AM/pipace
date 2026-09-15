@@ -35,6 +35,8 @@ struct ThermalProperties {
     float latentVapor = 0.0f;       // J/kg
     float expansionCoeff = 0.0f;    // 1/K (linear solids, volumetric fluids)
     float softeningTempK = 0.0f;
+    // Gas-phase Cp. 0 = use specificHeat (air). Water liquid Cp is specificHeat.
+    float gasSpecificHeat = 0.0f;   // J/(kg·K)
     bool valid = false;
 };
 

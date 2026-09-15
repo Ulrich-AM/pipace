@@ -5,6 +5,7 @@
 #include "gas/GasEngine.h"
 #include "rigid/RigidBodyEngine.h"
 #include "substance/SubstanceRegistry.h"
+#include "substance/PhaseTransfer.h"
 
 #include <algorithm>
 #include <array>
@@ -102,9 +103,16 @@ float ThermalEngine::wallCapacity(FluidEngine const &fluid, int index) {
 
 float ThermalEngine::gasCapacity(GasEngine const &gas, int index) {
     if (index < 0 || index >= GW * GH) return 0.0f;
-    float a = gas.amount[static_cast<size_t>(index)];
-    if (a <= GAS_MIN_AMOUNT) return 0.0f;
-    return thermalCapacity(gasMassKg(a), thermalForSubstance(substanceForGasSpecies()).specificHeat);
+    float air = gas.airAmount(index);
+    float vap = gas.vaporAmount(index);
+    float cap = 0.0f;
+    if (air > GAS_MIN_AMOUNT)
+        cap += thermalCapacity(gasMassKg(air), thermalForSubstance(SUBSTANCE_AIR).specificHeat);
+    if (vap > GAS_MIN_AMOUNT) {
+        float mass = static_cast<float>(gasAmountToMassKg(SUBSTANCE_WATER, vap, 4.0));
+        cap += thermalCapacity(mass, gasPhaseSpecificHeat(SUBSTANCE_WATER));
+    }
+    return cap;
 }
 
 float ThermalEngine::rigidPixelCapacity(RigidBody const &b, int localIndex) {
@@ -157,7 +165,7 @@ void ThermalEngine::seedAmbient(FluidEngine &fluid, RigidBodyEngine &rigid, GasE
         }
         float a = gas.amount[static_cast<size_t>(i)];
         if (a > GAS_MIN_AMOUNT) {
-            float cap = thermalCapacity(gasMassKg(a, cpm), thermalForSubstance(substanceForGasSpecies()).specificHeat);
+            float cap = gasCapacity(gas, i);
             gas.heat[static_cast<size_t>(i)] = energyFromTemp(cap, AMBIENT_TEMPERATURE_K);
         } else {
             gas.heat[static_cast<size_t>(i)] = 0.0f;

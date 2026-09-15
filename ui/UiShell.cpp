@@ -681,12 +681,16 @@ void drawShell(HDC dc, ShellState &shell, View const &view) {
         float fill = e->fill[static_cast<size_t>(hi)];
         bool hasLiquid = !isWall && !isRigid && fill > 1.0e-8f;
         GasEngine const *g = view.gas;
-        bool hasGas = g && !isWall && !isRigid;
+        bool hasGas = g && !isWall && !isRigid
+            && g->amount[static_cast<size_t>(hi)] > 1.0e-8f
+            && g->volume[static_cast<size_t>(hi)] >= GAS_MIN_VOLUME;
         bool mix = hasLiquid
             && e->liquidComponentAmount(hi, SUBSTANCE_WATER) > 1.0e-6f
             && e->liquidComponentAmount(hi, SUBSTANCE_HONEY) > 1.0e-6f;
         SubstanceId matId = SUBSTANCE_NONE;
         MatterPhase matPhase = MatterPhase::None;
+        float gasVaporFrac = 0.0f;
+        bool mixGas = false;
         if (isRigid) {
             matId = substanceForMaterial(rg->worldCellMaterial(hx, hy));
             matPhase = MatterPhase::Solid;
@@ -697,7 +701,11 @@ void drawShell(HDC dc, ShellState &shell, View const &view) {
             matId = e->dominantLiquidSubstance(hi);
             matPhase = MatterPhase::Liquid;
         } else if (hasGas) {
-            matId = SUBSTANCE_AIR;
+            float tot = g->amount[static_cast<size_t>(hi)];
+            float vap = g->vaporAmount(hi);
+            gasVaporFrac = (tot > 1.0e-8f) ? std::clamp(vap / tot, 0.0f, 1.0f) : 0.0f;
+            mixGas = vap > 1.0e-6f && (tot - vap) > 1.0e-6f;
+            matId = (vap > tot - vap) ? SUBSTANCE_WATER : SUBSTANCE_AIR;
             matPhase = MatterPhase::Gas;
         }
         ThermalCellSample thermal{};
@@ -713,8 +721,9 @@ void drawShell(HDC dc, ShellState &shell, View const &view) {
         if (isWall) insC(tr("ins_kind_wall"), kDimText);
         else if (isRigid) insC(tr("ins_kind_rigid"), kDimText);
         else if (hasLiquid) insC(tr("ins_kind_liquid"), kDimText);
+        else if (hasGas) insC(tr("ins_kind_gas"), kDimText);
         if (matId != SUBSTANCE_NONE) {
-            if (mix) ins(trf("ins_substance_dominant", tr(matDef.displayNameKey)));
+            if (mix || mixGas) ins(trf("ins_substance_dominant", tr(matDef.displayNameKey)));
             else ins(trf("ins_substance", tr(matDef.displayNameKey)));
             insC(trf("ins_phase", tr(matterPhaseKey(matPhase))), inspectorPhaseColor(matPhase));
         }
@@ -734,6 +743,10 @@ void drawShell(HDC dc, ShellState &shell, View const &view) {
             insHead("inspector_section_composition", kInsHeadComposition);
             insSplit(tr("ins_mat_water"), formatPercent(1.0f - honeyFrac), kInsCompWater);
             insSplit(tr("ins_mat_honey"), formatPercent(honeyFrac), kInsCompHoney);
+        } else if (hasGas) {
+            insHead("inspector_section_composition", kInsHeadComposition);
+            insSplit(tr("ins_mat_air"), formatPercent(1.0f - gasVaporFrac), kInsHeadGas);
+            insSplit(tr("ins_mat_water"), formatPercent(gasVaporFrac), kInsCompWater);
         }
 
         insHead("inspector_section_world", kInsHeadWorld);
@@ -753,8 +766,6 @@ void drawShell(HDC dc, ShellState &shell, View const &view) {
 
         if (hasGas) {
             insHead("inspector_section_gas", kInsHeadGas);
-            if (matPhase != MatterPhase::Gas)
-                ins(trf("ins_substance", tr(substanceDef(SUBSTANCE_AIR).displayNameKey)));
             ins(trf("ins_gas_amount", shortFloat(g->amount[static_cast<size_t>(hi)], 3)));
             ins(trf("ins_gas_vol", shortFloat(g->volume[static_cast<size_t>(hi)], 3)));
             ins(trf("ins_gas_pa", shortFloat(g->pressurePa(hi), 0)));
