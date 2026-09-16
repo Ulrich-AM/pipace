@@ -44,7 +44,7 @@ PIPACE/
     WorldQuery.h/.cpp      # sampleMatterAt (SubstanceId + phase), phase/registry diags
     WaterPhaseChange.h/.cpp # water liquid ⇄ gas (boiling/condensation)
   docs/
-    PHASE_CHANGES.md       # Water liquid ⇄ gas is live; solid water is not
+    PHASE_CHANGES.md       # Water solid ⇄ liquid ⇄ gas is live; honey mixtures are not
   CMakeLists.txt / build.bat / run.bat
   README.md
   AGENTS.md
@@ -71,6 +71,10 @@ These mappings are **implementation, not laws**:
 | Stone + Solid | rigid body **or** static `solid[]` walls (`kStaticWallSubstance`) |
 | Air + Gas | GasEngine (air component) |
 | Water + Gas | GasEngine (`waterVapor` component; same SubstanceId) |
+
+Static `solid[]` walls use Stone thermal/mechanical identity but are
+**moisture-inert** (no absorb / drip / wetness). Porous Stone rigid bodies still
+absorb. Condensation may form liquid in adjacent free cells, not inside the wall.
 
 `supportsPhase` is capability metadata. Water **liquid ⇄ gas** and **liquid ⇄ solid**
 are live. Do **not** add SUBSTANCE_ICE / SUBSTANCE_STEAM.

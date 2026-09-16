@@ -30,9 +30,11 @@ Files whose names contain `<grid>` use the resulting dimensions, for example
 | `build\pipace.exe --gas-diag` | `gas_diag.tsv` | Uniform/sealed gas, opening, compression, expansion, rigid displacement, and long sealed conservation. | Every `pass` field is `1`. Conserved cases meet their encoded absolute amount tolerances (0.001 to 0.05 depending on case), and pressure/flow checks pass. |
 | `build\pipace.exe --substance-phase-diag` | `substance_phase_diag.tsv` | Phase capability metadata, identity adapters, world queries, mixture reporting, static-wall identity, gas identity, and empty/out-of-bounds queries. | Final row is `summary PASS`; water remains one ID across supported phases and no Ice/Steam IDs exist. |
 | `build\pipace.exe --substance-registry-diag` | `substance_registry_diag.tsv` | Registry IDs/names/indexing, invalid lookup fallback, canonical grouped properties, compatibility adapters, and selected reference property values. | Final row is `summary PASS`; all built-in definitions and canonical property checks pass. |
-| `build\pipace.exe --phase-transfer-diag` | `phase_transfer_diag.tsv` | Liquid fill ↔ mass ↔ water-vapor amount round trips, latent-heat helpers vs registry, `canTransition` metadata, and 1000-cycle closed conversion drift. No live boiling/freezing. | Final row is `summary PASS`. Water remains one ID (no Ice/Steam). Round-trip mass error and 1000-cycle drift stay within the encoded tolerances. Invalid transitions fail safely. |
-| `build\pipace.exe --water-phase-diag` | `water_phase_diag.tsv` | Live water boiling and condensation: latent plateau, mass transfer, sealed pressure, honey skip, vapor identity, and open-boundary vapor accounting. | Final row is `summary PASS`. No Ice/Steam IDs. Honey mixtures do not boil. Closed liquid+vapor mass stays within the encoded tolerance. |
+| `build\pipace.exe --phase-transfer-diag` | `phase_transfer_diag.tsv` | Liquid fill ↔ mass ↔ water-vapor amount round trips, latent-heat helpers vs registry, Clausius–Clapeyron `P_sat`/`T_sat` helpers, `canTransition` metadata, and 1000-cycle closed conversion drift. No live boiling/freezing. | Final row is `summary PASS`. Water remains one ID (no Ice/Steam). Round-trip mass error and 1000-cycle drift stay within the encoded tolerances. Invalid transitions fail safely. Saturation at the reference boiling point matches `referencePressurePa`. |
+| `build\pipace.exe --water-phase-diag` | `water_phase_diag.tsv` | Live water boiling and condensation: latent plateau, mass transfer, sealed pressure, honey skip, vapor identity, and open-boundary vapor accounting. Temperature plateau is compared to local `T_sat(P)`, not a fixed 373 K. | Final row is `summary PASS`. No Ice/Steam IDs. Honey mixtures do not boil. Closed liquid+vapor mass stays within the encoded tolerance. |
+| `build\pipace.exe --water-phase-validation` | `water_phase_validation.tsv` | Tick-rate (20/30/60 Hz), residual superheated water, closed sensible+latent energy, pressure-aware equilibrium, condensation/saturation, hot-box melt, static-wall dryness, and storage integrity. | Final row of each case is `PASS` (no FAIL rows). 20/30/60 Hz phase-mass difference stays under 2%. Closed unforced energy relative error stays under `1e-4`. |
 | `build\pipace.exe --water-solid-phase-diag` | `water_solid_phase_diag.tsv` | Live water freezing/melting: ice identity, mass/latent accounting, connected rigid ice, melt splits, tick-rate, and a full solid→liquid→gas→liquid→solid cycle. | Final row is `summary PASS`. No Ice SubstanceId. Honey mixtures do not freeze. Solid water is `SUBSTANCE_WATER` + `MatterPhase::Solid` via `MATERIAL_WATER_SOLID`. |
+| `build\pipace.exe --water-phase-stability-diag` | `water_phase_stability_diag.tsv` | Hot-box melt/boil, hot vs cool wall condensation, left/right symmetry, and static-wall moisture exclusion. | Final row is `summary PASS`. Hot walls do not attract condensate. Static `solid[]` walls stay dry; Stone rigid bodies still absorb. |
 | `build\pipace.exe --benchmark` | `benchmark_<grid>.tsv` | Main fluid scene timings, stage timings, work counts, liquid volume error, thin cells, and splash counts. | Observational benchmark: all values are finite, volume error remains negligible, and timings/work counts show no unexplained regression against a comparable baseline. |
 | `build\pipace.exe --advection-benchmark` | `advection_benchmark_<grid>.tsv` | Six velocity-advection modes across four scenes; timing, volume, velocity, momentum, and kinetic energy. | Observational benchmark: 24 case rows, finite metrics, negligible volume error, and no unexplained mode-specific instability or timing regression. |
 | `build\pipace.exe --scale-benchmark` | `scale_benchmark_<grid>.tsv` | Four representative fluid scenes at the compiled grid size. | Observational benchmark: four case rows, finite timings, and negligible volume error. Rebuild at each desired grid size for scaling comparisons. |
@@ -73,13 +75,17 @@ not fixed universal thresholds.
 Use the default map, Heat/Cool from Energy, and the inspector (hover a cell).
 
 1. **Boiling.** Paint a small pure-water pool. Heat it until the inspector
-   temperature sits near the boiling point. Liquid fill should fall gradually;
+   temperature sits near the local saturation temperature (373 K at 1 atm;
+   lower in vacuum, higher under pressure). Liquid fill should fall gradually;
    gas cells should show Water (or Air/Water composition) rather than a Steam
-   id. Temperature should stall near boiling while vapor is produced.
+   id. Temperature should stall near `T_sat(P)` while vapor is produced.
 2. **Condensation.** Cool the vapor or nearby walls. Liquid water should
-   reappear nearby; vapor fraction and pressure should drop.
+   reappear nearby when the water-vapor partial pressure exceeds saturation;
+   undersaturated warm vapor should not rain just because `T < 373 K`.
 3. **Sealed chamber.** Draw a closed wall box, put water inside, heat, then
-   cool. Pressure should rise with vapor and fall as it condenses.
+   cool. Pressure should raise the boiling temperature. Ice in a hot box must
+   melt from incoming heat, then the liquid follows equilibrium. Static walls
+   stay dry.
 4. **Mixture.** Paint water+honey in one cell and heat it. It should not boil
    in this pass.
 

@@ -24,10 +24,37 @@ Live **water liquid ⇄ solid** (rigid `MATERIAL_WATER_SOLID`, still
 `SUBSTANCE_WATER`) is in the same file. Honey mixtures do not boil or freeze yet.
 
 Vapor placement: the occupancy model is one primary medium per cell, and liquid
-with `fill >= MIN_PRESSURE_FILL` has zero gas volume. Boiling therefore deposits
-vapor into a neighboring accessible gas cell (prefer above, then sides, then BFS
-within 64 cells). Condensate prefers existing nearby water, then cells next to
-solids, then lower neighbors.
+with `fill >= MIN_PRESSURE_FILL` has zero gas volume. Boiling deposits vapor
+into a neighboring accessible gas cell (fair spatial tie-break among equal
+room). Destination storage has a solver safety cap (`kSolverSafetyAtm`,
+currently 10000 atm) that is **not** a thermodynamic law; hits are counted as
+`blockedBoilSafetyLimit`. Boiling/condensation follow a Clausius–Clapeyron
+saturation curve from `PhaseProperties` (`saturationVaporPressurePa` /
+`saturationTemperatureK` in `substance/PhaseTransfer.h`): higher total pressure
+raises `T_sat`, lower pressure lowers it. Condensation compares water-vapor
+**partial** pressure to `P_sat(T)`, not total gas temperature vs 373 K.
+Condensate prefers existing nearby water, then cells next to surfaces that are
+actually cooler than the vapor, then lower neighbors. Hot walls do not get a
+near-solid bonus. Equal destinations cycle by a tick-salted spatial hash.
+
+Phase existence uses `kMinFillMove` (1e-6 fill), separate from the fluid-motion
+threshold `MIN_ACTIVE_FILL` (0.01). Residual superheated puddles can still
+vaporize. Liquid/gas rates are `kMaxFillPerSec * dt` (time-based).
+
+Closed unforced transfers conserve `E_thermal + m_vapor * L_v` by moving the
+Cp difference through the energy ledger (liquid Cp ≠ vapor Cp).
+
+Boiling never cools remaining liquid below `T_m + 1 K` to pay latent heat
+(`Tpay = max(T_sat, T_m + 1)`), so leftover liquid is not immediately frozen.
+
+Gas `clampSpecies` keeps water vapor when total amount drops below the wipe
+threshold (raises amount to match vapor) instead of deleting it. Condensation
+latent leftovers go into dest liquid up to `T_sat + 20 K`, then nearby gas/walls,
+never as an uncapped dest-liquid dump.
+
+Static world walls (`fluid.solid[]`, `kStaticWallSubstance`) conduct heat and
+block flow but never store moisture. Adjacent condensation is allowed; porous
+Stone rigid bodies still absorb.
 
 ## Current sandbox units
 
@@ -52,9 +79,10 @@ lab apparatus except where noted.
 Water liquid ⇄ gas is live (`world/WaterPhaseChange.cpp`). Remaining:
 
 1. Mixture thermodynamics (honey/water must not boil/freeze until then).
-2. Pressure-dependent boiling curve (currently reference pressure / `PhaseProperties`).
-3. Same-cell liquid/gas occupancy if the one-primary-medium model is relaxed.
-4. Rigid/fluid buoyancy may not yet make ice float; do not add a special ice force.
+2. Same-cell liquid/gas occupancy if the one-primary-medium model is relaxed.
+3. Rigid/fluid buoyancy may not yet make ice float; do not add a special ice force.
+4. Clausius–Clapeyron is a two-parameter approximation near the reference
+   boiling point, not a steam table / critical-point model.
 
 ## Invariants
 
@@ -72,7 +100,7 @@ Water liquid ⇄ gas is live (`world/WaterPhaseChange.cpp`). Remaining:
 4. **Phase change transfers representation between engines.** Example paths for
    water:
    - liquid (`FluidEngine` fill) → gas (`GasEngine` amount)
-   - liquid → solid (rigid body and/or static `solid[]`, TBD)
+   - liquid → solid (rigid `MATERIAL_WATER_SOLID`, still `SUBSTANCE_WATER`)
    - solid → liquid
    - gas → liquid
    Representation transfer is the hard part; property lookups are already there.
@@ -85,9 +113,10 @@ Water liquid ⇄ gas is live (`world/WaterPhaseChange.cpp`). Remaining:
    partly liquid and partly gas/solid during a transition). The current occupancy
    model is one primary medium per cell; that is a known limit, not a law.
 
-7. **Pressure dependence** may start as reference pressure
-   (`PhaseProperties.referencePressurePa`, 1 atm). Clapeyron / vapor-pressure
-   curves are later work.
+7. **Pressure dependence** uses a Clausius–Clapeyron curve from
+   `PhaseProperties.referencePressurePa`, `boilingPointK`, `latentHeatVaporization`,
+   and `chemical.molarMass`. Condensation is driven by water-vapor partial
+   pressure vs `P_sat(T)`. A destination-array safety cap is not a physical law.
 
 8. **Data-driven from `PhaseProperties`.** Melting/boiling points and latent
    heats already live there (copied from thermal authoring at registry init).

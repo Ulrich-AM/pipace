@@ -4,10 +4,12 @@
 #include "substance/SubstanceTypes.h"
 #include "thermal/ThermalTypes.h"
 
+#include <algorithm>
 #include <cmath>
 
-// Phase-transfer accounting helpers (fill ↔ mass ↔ gas amount, latent energy).
-// Live water liquid ⇄ gas is in world/WaterPhaseChange.cpp. No freezing/melting yet.
+// Phase-transfer accounting helpers (fill ↔ mass ↔ gas amount, latent energy,
+// Clausius–Clapeyron saturation). Live water solid ⇄ liquid ⇄ gas is in
+// world/WaterPhaseChange.cpp.
 //
 // Current sandbox units (do not invent a second system):
 //
@@ -80,6 +82,66 @@ inline double specificGasConstantJPerKgK(SubstanceId id) {
     float M = chemicalForSubstance(id).molarMass;
     if (!(M > 0.0f) || !std::isfinite(M)) return 0.0;
     return static_cast<double>(UNIVERSAL_GAS_R_J_MOL_K) * 1000.0 / static_cast<double>(M);
+}
+
+// Numerical window for the integrated Clausius–Clapeyron curve.
+// This is not a steam table and not substance-specific critical-point data.
+// Low-T clamp keeps 1/T and log finite; high-T clamp keeps exp(Lv/R Δ(1/T)) finite.
+inline double phaseEquilibriumTminK(SubstanceId id) {
+    float Tm = phaseForSubstance(id).meltingPointK;
+    double lo = 180.0;
+    if (Tm > 1.0f) lo = std::min(lo, std::max(50.0, static_cast<double>(Tm) * 0.5));
+    return lo;
+}
+
+inline double phaseEquilibriumTmaxK(SubstanceId id) {
+    float Tb = phaseForSubstance(id).boilingPointK;
+    double hi = (Tb > 1.0f) ? static_cast<double>(Tb) * 2.5 : 2000.0;
+    return std::min(std::max(hi, 400.0), 2000.0);
+}
+
+// P_sat(T) = P0 * exp( -(Lv/R_spec) * (1/T - 1/Tb) )
+// Uses PhaseProperties.referencePressurePa / boilingPointK / latentHeatVaporization
+// and chemical.molarMass. Valid near the reference boiling point.
+inline double saturationVaporPressurePa(SubstanceId id, double temperatureK) {
+    PhaseProperties const &p = phaseForSubstance(id);
+    double Tb = static_cast<double>(p.boilingPointK);
+    double P0 = static_cast<double>(p.referencePressurePa);
+    double Lv = static_cast<double>(p.latentHeatVaporization);
+    double R = specificGasConstantJPerKgK(id);
+    if (!(Tb > 1.0) || !(P0 > 0.0) || !(Lv > 0.0) || !(R > 0.0)) return 0.0;
+    if (!std::isfinite(temperatureK) || temperatureK <= 1.0) return 0.0;
+    double Tmin = phaseEquilibriumTminK(id);
+    double Tmax = phaseEquilibriumTmaxK(id);
+    double T = std::clamp(temperatureK, Tmin, Tmax);
+    double expo = -(Lv / R) * (1.0 / T - 1.0 / Tb);
+    expo = std::clamp(expo, -50.0, 50.0);
+    double P = P0 * std::exp(expo);
+    if (!std::isfinite(P) || P < 0.0) return 0.0;
+    return P;
+}
+
+// Inverse: T_sat(P) from the same integrated Clausius–Clapeyron relation.
+inline double saturationTemperatureK(SubstanceId id, double pressurePa) {
+    PhaseProperties const &p = phaseForSubstance(id);
+    double Tb = static_cast<double>(p.boilingPointK);
+    double P0 = static_cast<double>(p.referencePressurePa);
+    double Lv = static_cast<double>(p.latentHeatVaporization);
+    double R = specificGasConstantJPerKgK(id);
+    if (!(Tb > 1.0) || !(P0 > 0.0) || !(Lv > 0.0) || !(R > 0.0))
+        return Tb > 1.0 ? Tb : 0.0;
+    double Tmin = phaseEquilibriumTminK(id);
+    double Tmax = phaseEquilibriumTmaxK(id);
+    double P = pressurePa;
+    if (!std::isfinite(P) || P < 1.0) P = 1.0;
+    double ln = std::log(P / P0);
+    ln = std::clamp(ln, -50.0, 50.0);
+    double inv = 1.0 / Tb - (R / Lv) * ln;
+    if (!(inv > 1.0 / Tmax)) return Tmax;
+    if (!(inv < 1.0 / Tmin)) return Tmin;
+    double T = 1.0 / inv;
+    if (!std::isfinite(T)) return Tb;
+    return std::clamp(T, Tmin, Tmax);
 }
 
 // Reference gas density at 1 atm-equivalent and ambient T.

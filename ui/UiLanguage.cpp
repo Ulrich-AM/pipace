@@ -275,6 +275,7 @@ void seedEnglish() {
     set("ins_moisture", L"Absorbed (body): {0} ({1})");
     set("ins_local_moisture", L"Moisture: {0}");
     set("ins_moisture_cap", L"Capacity: {0}");
+    set("ins_wall_dry", L"Moisture: none (static wall)");
     set("ins_liquid_total", L"Liquid free/abs/splash/total {0} / {1} / {2} / {3}");
     set("ins_pending_drip", L"Pending drip: {0}");
     set("ins_fill", L"Fill: {0}");

@@ -1,17 +1,17 @@
-test	hot_water_vaporizes	PASS	boiled_kg=24.25993579 vapor_kg=22.27125057
-test	temperature_near_boiling	PASS	Tmin=373.1499634 Tmax=384.9743652 Tb=373.1499939
-test	boil_mass_conserved	PASS	dLiq=22.27124817 dVap=22.27125057 boiled=24.25993579 condensed=1.988681988
+test	hot_water_vaporizes	PASS	boiled_kg=10.84897318 vapor_kg=9.554227993
+test	boil_mass_conserved	PASS	dLiq=9.554206247 dVap=9.554227993 boiled=10.84897318 condensed=1.29474521
 test	no_steam_id	PASS	
 test	vapor_reports_water_gas	PASS	
-test	sealed_pressure_rises	PASS	pmax_atm=13.61738873
+test	temperature_near_boiling	PASS	Tmin=382.071228 Tmax=397.9172363 Tb=373.1499939 TsatP=404.8798218 pmax_atm=2.7966187
+test	sealed_pressure_rises	PASS	pmax_atm=2.7966187
 test	vapor_not_inside_solids	PASS	
-test	cooling_condenses	PASS	condensed_kg=22.26778564 vap_after=0.003464952949
-test	condense_mass_cycle	PASS	before=328.1250024 after=328.1249991
-test	latent_released_on_condense	PASS	J=50325195.55
-test	closed_energy_with_latent	PASS	rel=0.02521125622 E0=2189459599 E1=2134260572
+test	cooling_condenses	PASS	condensed_kg=11.07522731 vap_after=3.002292259
+test	condense_mass_cycle	PASS	before=328.1250217 after=328.1249393
+test	latent_released_on_condense	PASS	J=25030013.71
+test	closed_energy_with_latent	PASS	rel=0.02427836434 E0=2186210726 E1=2133133105
 test	no_nan_inf_negK	PASS	
-test	repeat_phase_cycle_mass	PASS	start=15.625 end=15.62500386
+test	repeat_phase_cycle_mass	PASS	start=15.625 end=15.62497615
 test	honey_mixture_does_not_boil	PASS	boiled=0
-test	open_boundary_vapor_accounted	PASS	start=15.625 remain=15.62500695 escaped_vapor_kg=0
+test	open_boundary_vapor_accounted	PASS	start=15.625 remain=15.62500069 escaped_vapor_kg=0
 test	no_ice_id	PASS	
 summary	PASS	16 passed, 0 failed

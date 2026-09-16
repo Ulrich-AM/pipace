@@ -731,6 +731,8 @@ void drawShell(HDC dc, ShellState &shell, View const &view) {
             ins(trf("ins_temp", shortFloat(thermal.temperatureK, tempDebug ? 2 : 1)));
         if (isWall && matDef.mechanical.valid)
             ins(trf("ins_density", shortFloat(matDef.mechanical.densityRel, 2)));
+        if (isWall)
+            ins(tr("ins_wall_dry"));
 
         if (hasLiquid && matDef.fluid.valid) {
             insHead("inspector_section_fluid", kInsHeadFluid);
@@ -792,13 +794,15 @@ void drawShell(HDC dc, ShellState &shell, View const &view) {
             ins(trf("ins_at_rest", (b.sleeping && !b.anchored && !b.dormant) ? tr("yes") : tr("no")));
             ins(trf("ins_damage", shortFloat(b.maxDamage, 2)));
             ins(trf("ins_bond_body", shortFloat(b.maxBondDamage, 2), std::to_wstring(b.brokenBondCount)));
-            ins(trf("ins_moisture", shortFloat(b.absorbedLiquid, 2), shortFloat(b.cachedWetness, 2)));
-            float localM = 0.0f;
-            if (hi < static_cast<int>(rg->occupantMoisture.size()))
-                localM = rg->occupantMoisture[static_cast<size_t>(hi)];
-            float cap = porousForSubstance(substanceForMaterial(maskMat)).moistureCapacity;
-            ins(trf("ins_local_moisture", shortFloat(localM, 3)));
-            ins(trf("ins_moisture_cap", shortFloat(cap, 3)));
+            if (!isWall) {
+                ins(trf("ins_moisture", shortFloat(b.absorbedLiquid, 2), shortFloat(b.cachedWetness, 2)));
+                float localM = 0.0f;
+                if (hi < static_cast<int>(rg->occupantMoisture.size()))
+                    localM = rg->occupantMoisture[static_cast<size_t>(hi)];
+                float cap = porousForSubstance(substanceForMaterial(maskMat)).moistureCapacity;
+                ins(trf("ins_local_moisture", shortFloat(localM, 3)));
+                ins(trf("ins_moisture_cap", shortFloat(cap, 3)));
+            }
             float matD = 0.0f, bondD = 0.0f, strength = 0.0f, crack = 0.0f, wet = 0.0f;
             int brokenN = 0;
             if (rg->inspectLocalStructure(hx, hy, matD, bondD, brokenN, strength, crack, wet)) {
@@ -807,7 +811,7 @@ void drawShell(HDC dc, ShellState &shell, View const &view) {
                 ins(trf("ins_broken", std::to_wstring(brokenN)));
                 ins(trf("ins_strength", shortFloat(strength, 2)));
                 ins(trf("ins_crack", shortFloat(crack, 2)));
-                ins(trf("ins_saturation", shortFloat(wet, 2)));
+                if (!isWall) ins(trf("ins_saturation", shortFloat(wet, 2)));
                 if (brokenN > 0) ins(tr("ins_bond_broken"));
             }
         }

@@ -232,6 +232,34 @@ void runPhaseTransferDiagnostics() {
             && specificGasConstantJPerKgK(SUBSTANCE_WATER) < 500.0,
         "R_spec=" + f8(specificGasConstantJPerKgK(SUBSTANCE_WATER)));
 
+    double P0 = static_cast<double>(waterPhase.referencePressurePa);
+    double Tb = static_cast<double>(waterPhase.boilingPointK);
+    double PsatTb = saturationVaporPressurePa(SUBSTANCE_WATER, Tb);
+    double TsatP0 = saturationTemperatureK(SUBSTANCE_WATER, P0);
+    emit("sat_pressure_at_tb_is_reference",
+        nearRel(PsatTb, P0, 1.0e-5, 1.0),
+        "Psat(Tb)=" + f8(PsatTb) + " P0=" + f8(P0));
+    emit("sat_temperature_at_pref_is_tb",
+        nearAbs(TsatP0, Tb, 0.05),
+        "Tsat(P0)=" + f8(TsatP0) + " Tb=" + f8(Tb));
+    emit("sat_pressure_rises_with_temperature",
+        saturationVaporPressurePa(SUBSTANCE_WATER, Tb + 25.0)
+            > saturationVaporPressurePa(SUBSTANCE_WATER, Tb),
+        "Psat(Tb+25)=" + f8(saturationVaporPressurePa(SUBSTANCE_WATER, Tb + 25.0)));
+    emit("sat_temperature_rises_with_pressure",
+        saturationTemperatureK(SUBSTANCE_WATER, P0 * 2.0) > Tb + 10.0,
+        "Tsat(2atm)=" + f8(saturationTemperatureK(SUBSTANCE_WATER, P0 * 2.0)));
+    emit("low_pressure_lowers_boiling_temperature",
+        saturationTemperatureK(SUBSTANCE_WATER, P0 * 0.1) < Tb - 20.0,
+        "Tsat(0.1atm)=" + f8(saturationTemperatureK(SUBSTANCE_WATER, P0 * 0.1)));
+    emit("sat_helpers_roundtrip_near_tb",
+        nearRel(saturationVaporPressurePa(SUBSTANCE_WATER,
+                saturationTemperatureK(SUBSTANCE_WATER, P0 * 1.5)), P0 * 1.5, 1.0e-3, 50.0),
+        "P=" + f8(P0 * 1.5)
+            + " Tsat=" + f8(saturationTemperatureK(SUBSTANCE_WATER, P0 * 1.5))
+            + " Psat(Tsat)=" + f8(saturationVaporPressurePa(SUBSTANCE_WATER,
+                saturationTemperatureK(SUBSTANCE_WATER, P0 * 1.5))));
+
     out << "summary\t" << (failed == 0 ? "PASS" : "FAIL") << '\t'
         << passed << " passed, " << failed << " failed\n";
 }
