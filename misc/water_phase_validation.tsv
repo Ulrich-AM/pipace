@@ -1,20 +1,20 @@
 section	case	result	metric_a	metric_b	metric_c	metric_d	detail
-tick_rate	20_hz	MEASURE	156.25	13352.827304	1021.88977051	193.385665894	seconds=1 liquid_T=0 nonfinite=0 neg_water=0 neg_gas=0 vapor_over_total=0 vapor_in_solid=0 negK=0 stranded_heat=0
-tick_rate	30_hz	MEASURE	156.25	13352.8271931	1021.88977051	193.385665894	seconds=1 liquid_T=0 nonfinite=0 neg_water=0 neg_gas=0 vapor_over_total=0 vapor_in_solid=0 negK=0 stranded_heat=0
-tick_rate	60_hz	MEASURE	156.25	13352.827304	1021.88977051	193.385665894	seconds=1 liquid_T=0 nonfinite=0 neg_water=0 neg_gas=0 vapor_over_total=0 vapor_in_solid=0 negK=0 stranded_heat=0
-tick_rate	20_vs_30	PASS	0	8.30270898875e-09	0	0	relative differences; 2% materiality threshold
-tick_rate	30_vs_60	PASS	0	8.30270898875e-09	0	0	relative differences; 2% materiality threshold
+tick_rate	20_hz	MEASURE	156.25	13352.8273182	1021.88995361	193.385665894	seconds=1 liquid_T=0 nonfinite=0 neg_water=0 neg_gas=0 vapor_over_total=0 vapor_in_solid=0 negK=0 stranded_heat=0
+tick_rate	30_hz	MEASURE	156.25	13352.8272084	1021.88995361	193.385665894	seconds=1 liquid_T=0 nonfinite=0 neg_water=0 neg_gas=0 vapor_over_total=0 vapor_in_solid=0 negK=0 stranded_heat=0
+tick_rate	60_hz	MEASURE	156.25	13352.8273182	1021.88995361	193.385665894	seconds=1 liquid_T=0 nonfinite=0 neg_water=0 neg_gas=0 vapor_over_total=0 vapor_in_solid=0 negK=0 stranded_heat=0
+tick_rate	20_vs_30	PASS	0	8.22236018335e-09	0	0	relative differences; 2% materiality threshold
+tick_rate	30_vs_60	PASS	0	8.22236018335e-09	0	0	relative differences; 2% materiality threshold
 tick_rate	20_vs_60	PASS	0	0	0	0	relative differences; 2% materiality threshold
-performance	idle_full_scan	PASS	0.023035	0	0	0	phase-only ms/tick; baseline without phase call=0; nonfinite=0 neg_water=0 neg_gas=0 vapor_over_total=0 vapor_in_solid=0 negK=0 stranded_heat=0
-performance	small_boiling_pool	PASS	0.867306666667	16	0	0	phase-only ms/tick; baseline without phase call=0; nonfinite=0 neg_water=0 neg_gas=0 vapor_over_total=0 vapor_in_solid=0 negK=0 stranded_heat=0
-performance	large_boiling_pool	PASS	8.22035	779.6	0	0	phase-only ms/tick; baseline without phase call=0; nonfinite=0 neg_water=0 neg_gas=0 vapor_over_total=0 vapor_in_solid=0 negK=0 stranded_heat=0
-performance	vapor_condensation_chamber	PASS	1.80524	0	580	1210	phase-only ms/tick; baseline without phase call=0; nonfinite=0 neg_water=0 neg_gas=0 vapor_over_total=0 vapor_in_solid=0 negK=0 stranded_heat=0
+performance	idle_full_scan	PASS	0.0178975	0	0	0	phase-only ms/tick; baseline without phase call=0; nonfinite=0 neg_water=0 neg_gas=0 vapor_over_total=0 vapor_in_solid=0 negK=0 stranded_heat=0
+performance	small_boiling_pool	PASS	0.62441	16	0	0	phase-only ms/tick; baseline without phase call=0; nonfinite=0 neg_water=0 neg_gas=0 vapor_over_total=0 vapor_in_solid=0 negK=0 stranded_heat=0
+performance	large_boiling_pool	PASS	5.47398	779.6	0	0	phase-only ms/tick; baseline without phase call=0; nonfinite=0 neg_water=0 neg_gas=0 vapor_over_total=0 vapor_in_solid=0 negK=0 stranded_heat=0
+performance	vapor_condensation_chamber	PASS	1.19513	0	580	1210	phase-only ms/tick; baseline without phase call=0; nonfinite=0 neg_water=0 neg_gas=0 vapor_over_total=0 vapor_in_solid=0 negK=0 stranded_heat=0
 stress	closed_energy_no_forcing	PASS	3.58296287217e-06	1.2276692564e-07	29624680	29624676.3631	vapor_kg=2.32276492489 predicted_cp_basis_J=1823620.36572 nonfinite=0 neg_water=0 neg_gas=0 vapor_over_total=0 vapor_in_solid=0 negK=0 stranded_heat=0
-stress	sealed_hot_600_ticks	PASS	0.000265516663148	104706.13085	193.385803223	255648	liq=24.7665896609 vap=1225.23367586 ice=0 esc=0 boiled=4071.84241628 condensed=2846.60897516 frozen=0 melted=0 editVapor=0.0208255234393 expectedVapor=104706.110791 nonfinite=0 neg_water=0 neg_gas=0 vapor_over_total=0 vapor_in_solid=0 negK=0 stranded_heat=0
+stress	sealed_hot_600_ticks	PASS	0.000291639893703	105259.297812	193.385803223	265039	liq=18.2936539448 vap=1231.7066377 ice=0 esc=0 boiled=3794.67699481 condensed=2562.97060289 frozen=0 melted=0 editVapor=0.0206844094428 expectedVapor=105259.276808 nonfinite=0 neg_water=0 neg_gas=0 vapor_over_total=0 vapor_in_solid=0 negK=0 stranded_heat=0
 stress	forced_30_phase_cycles	PASS	8.89175715635e-06	4.20182291418	11.4231859776	193.385665894	nonfinite=0 neg_water=0 neg_gas=0 vapor_over_total=0 vapor_in_solid=0 negK=0 stranded_heat=0
-stress	static_ceiling	PASS	2.58929677557e-05	26334.649775	193.385681152	2	nonfinite=0 neg_water=0 neg_gas=0 vapor_over_total=0 vapor_in_solid=0 negK=0 stranded_heat=0
-stress	rigid_ceiling	PASS	1.9761392025e-05	26509.8698356	193.385665894	0	nonfinite=0 neg_water=0 neg_gas=0 vapor_over_total=0 vapor_in_solid=0 negK=0 stranded_heat=0
-stress	open_edge_actual_escape	PASS	1.94937899707e-05	4.67325327392	10.9517662199	3.21039509773	nonfinite=0 neg_water=0 neg_gas=0 vapor_over_total=0 vapor_in_solid=0 negK=0 stranded_heat=0
+stress	static_ceiling	PASS	2.40648018917e-05	26334.6499372	193.385665894	2	nonfinite=0 neg_water=0 neg_gas=0 vapor_over_total=0 vapor_in_solid=0 negK=0 stranded_heat=0
+stress	rigid_ceiling	PASS	2.10786708408e-05	26509.8749573	193.385665894	0	nonfinite=0 neg_water=0 neg_gas=0 vapor_over_total=0 vapor_in_solid=0 negK=0 stranded_heat=0
+stress	open_edge_actual_escape	PASS	1.96735382261e-05	4.67325337473	10.9517662988	3.21039485931	nonfinite=0 neg_water=0 neg_gas=0 vapor_over_total=0 vapor_in_solid=0 negK=0 stranded_heat=0
 stress	water_honey_mixture	PASS	0	1	0.40000000596	623.150024414	nonfinite=0 neg_water=0 neg_gas=0 vapor_over_total=0 vapor_in_solid=0 negK=0 stranded_heat=0
 stress	subactive_residual_water	PASS	0.00499999988824	0	5.97694666783	293.149993896	phase response expected for superheated residual; nonfinite=0 neg_water=0 neg_gas=0 vapor_over_total=0 vapor_in_solid=0 negK=0 stranded_heat=0
 stress	high_vapor_concentration	PASS	-2.09259617634e-07	1382.2826525	193.385665894	623.150085449	nonfinite=0 neg_water=0 neg_gas=0 vapor_over_total=0 vapor_in_solid=0 negK=0 stranded_heat=0
@@ -23,12 +23,12 @@ pressure	one_atm_below_tb_stable	PASS	0	3	368.149993896	373.149993896	nonfinite=
 pressure	one_atm_above_tb_boils	PASS	0.232624498871	3	421.446044922	373.149993896	nonfinite=0 neg_water=0 neg_gas=0 vapor_over_total=0 vapor_in_solid=0 negK=0 stranded_heat=0
 pressure	elevated_400K_stable	PASS	0	10	443.413643305	400	nonfinite=0 neg_water=0 neg_gas=0 vapor_over_total=0 vapor_in_solid=0 negK=0 stranded_heat=0
 pressure	elevated_520K_boils	PASS	3.22458387314	40.6873397827	443.413643305	520	nonfinite=0 neg_water=0 neg_gas=0 vapor_over_total=0 vapor_in_solid=0 negK=0 stranded_heat=0
-condensation	supersaturated_cool_vapor	PASS	5.17381669675	1.26871889113	2.11071545255	4131.20041061	nonfinite=0 neg_water=0 neg_gas=0 vapor_over_total=0 vapor_in_solid=0 negK=0 stranded_heat=0
+condensation	supersaturated_cool_vapor	PASS	5.15667524277	1.2717833676	2.10765096082	4131.20041061	nonfinite=0 neg_water=0 neg_gas=0 vapor_over_total=0 vapor_in_solid=0 negK=0 stranded_heat=0
 condensation	undersaturated_no_false_condense	PASS	0	0	0.00422429302277	42536.2564038	nonfinite=0 neg_water=0 neg_gas=0 vapor_over_total=0 vapor_in_solid=0 negK=0 stranded_heat=0
-condensation	hot_wall_does_not_attract	PASS	0.00778534693018	0.0275060410495	0	0	nonfinite=0 neg_water=0 neg_gas=0 vapor_over_total=0 vapor_in_solid=0 negK=0 stranded_heat=0
-condensation	cool_wall_can_collect	PASS	0.0275060410495	0.00778534693018	0	0	nonfinite=0 neg_water=0 neg_gas=0 vapor_over_total=0 vapor_in_solid=0 negK=0 stranded_heat=0
-condensation	symmetric_no_side_bias	PASS	0.134827039423	0.128210824931	0	0	nonfinite=0 neg_water=0 neg_gas=0 vapor_over_total=0 vapor_in_solid=0 negK=0 stranded_heat=0
-hotbox	ice_melts	PASS	286.562498659	2.08594241383	286.562527632	0	blockMelt via heat, not deletion
-hotbox	liquid_follows_equilibrium	PASS	588.954628564	54.8967975117	12.5445394516	462.242889404	liqT=400.399841309 eq=14870 space=0 energy=0 safety=0 nonfinite=0 neg_water=0 neg_gas=0 vapor_over_total=0 vapor_in_solid=0 negK=0 stranded_heat=0
-hotbox	mass_conserved	PASS	645.937498659	645.93736849	0	0	
+condensation	hot_wall_does_not_attract	PASS	0.007830411123	0.0282219463479	0	0	nonfinite=0 neg_water=0 neg_gas=0 vapor_over_total=0 vapor_in_solid=0 negK=0 stranded_heat=0
+condensation	cool_wall_can_collect	PASS	0.0282219463479	0.007830411123	0	0	nonfinite=0 neg_water=0 neg_gas=0 vapor_over_total=0 vapor_in_solid=0 negK=0 stranded_heat=0
+condensation	symmetric_no_side_bias	PASS	0.135204682378	0.128673117358	0	0	nonfinite=0 neg_water=0 neg_gas=0 vapor_over_total=0 vapor_in_solid=0 negK=0 stranded_heat=0
+hotbox	ice_melts	PASS	286.562498659	2.20436537153	286.519590004	0	blockMelt via heat, not deletion
+hotbox	liquid_follows_equilibrium	PASS	588.784695633	54.9480402598	12.3294343948	461.4894104	liqT=394.593811035 eq=14708 space=0 energy=0 safety=0 nonfinite=0 neg_water=0 neg_gas=0 vapor_over_total=0 vapor_in_solid=0 negK=0 stranded_heat=0
+hotbox	mass_conserved	PASS	645.937498659	645.937101264	0	0	
 static_wall	moisture_zero	PASS	0	0.0528873391449	3.11702206091e-05	0	stone_rigid_may_still_absorb

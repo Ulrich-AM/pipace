@@ -41,17 +41,10 @@ struct LiquidPaint {
     SubstanceId substance() const { return substanceForLiquidPaint(asHoney); }
 };
 
-// Conserved extras that ride with a volume parcel (heat, dye mass, honey volume).
-// `honey` here is the two-channel transport field, not a public composition API.
-struct LiquidCarry {
-    float heat = 0.0f;
-    float dyeR = 0.0f, dyeG = 0.0f, dyeB = 0.0f;
-    float honey = 0.0f;
-};
-
-// Allocation-free view of liquid components in one cell. Count is how many
-// entries are present. Backed by fill+honey today; callers must not assume that.
-constexpr int kMaxLiquidComponents = 2;
+// Fixed-capacity liquid composition. fill[] is occupancy; these slots say what
+// that occupancy is. 4 covers water+honey plus two near-term extra liquids
+// without per-cell heap objects.
+constexpr int kMaxLiquidComponents = 4;
 constexpr float kMinLiquidComponent = 1.0e-8f;
 
 struct LiquidComponent {
@@ -62,6 +55,70 @@ struct LiquidComponent {
 struct LiquidComponentView {
     LiquidComponent items[kMaxLiquidComponents]{};
     int count = 0;
+};
+
+inline bool validLiquidComponentId(SubstanceId id) {
+    return id != SUBSTANCE_NONE && id < SUBSTANCE_COUNT;
+}
+
+inline int findLiquidComponent(LiquidComponent const *items, int count, SubstanceId id) {
+    for (int n = 0; n < count; ++n)
+        if (items[n].id == id) return n;
+    return -1;
+}
+
+inline float liquidPayloadAmount(LiquidComponent const *items, int count, SubstanceId id) {
+    int n = findLiquidComponent(items, count, id);
+    return n >= 0 ? items[n].amount : 0.0f;
+}
+
+inline float liquidPayloadSum(LiquidComponent const *items, int count) {
+    float s = 0.0f;
+    for (int n = 0; n < count; ++n) s += items[n].amount;
+    return s;
+}
+
+// Merge id into a fixed payload. Returns the amount that did not fit (overflow).
+inline float addLiquidPayload(LiquidComponent *items, int &count, SubstanceId id, float amount) {
+    if (!validLiquidComponentId(id) || !(amount > kMinLiquidComponent)) return 0.0f;
+    int n = findLiquidComponent(items, count, id);
+    if (n >= 0) {
+        items[n].amount += amount;
+        return 0.0f;
+    }
+    if (count >= kMaxLiquidComponents) return amount;
+    items[count++] = {id, amount};
+    return 0.0f;
+}
+
+inline void compactLiquidPayload(LiquidComponent *items, int &count) {
+    int w = 0;
+    for (int n = 0; n < count; ++n) {
+        if (items[n].amount > kMinLiquidComponent && validLiquidComponentId(items[n].id))
+            items[w++] = items[n];
+    }
+    for (int n = w; n < count; ++n) items[n] = {};
+    count = w;
+}
+
+inline void scaleLiquidPayload(LiquidComponent *items, int count, float frac) {
+    for (int n = 0; n < count; ++n) items[n].amount *= frac;
+}
+
+inline void copyLiquidPayload(LiquidComponent *dst, int &dstCount,
+    LiquidComponent const *src, int srcCount)
+{
+    dstCount = srcCount;
+    for (int n = 0; n < srcCount; ++n) dst[n] = src[n];
+    for (int n = srcCount; n < kMaxLiquidComponents; ++n) dst[n] = {};
+}
+
+// Conserved extras that ride with a volume parcel.
+struct LiquidCarry {
+    float heat = 0.0f;
+    float dyeR = 0.0f, dyeG = 0.0f, dyeB = 0.0f;
+    LiquidComponent comps[kMaxLiquidComponents]{};
+    int compCount = 0;
 };
 
 inline bool isEnergyTool(Tool t) {
@@ -136,7 +193,8 @@ struct SplashParticle {
     float heat = 0.0f; // Joules carried with this droplet
     uint8_t bounceCount = 0;
     float dyeR = 0.0f, dyeG = 0.0f, dyeB = 0.0f;
-    float honey = 0.0f;
+    LiquidComponent comps[kMaxLiquidComponents]{};
+    int compCount = 0;
 };
 
 struct TimingAverages {

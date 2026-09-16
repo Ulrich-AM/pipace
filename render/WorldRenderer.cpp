@@ -93,7 +93,7 @@ MaterialVisual sampleLiquidCell(FluidEngine const &fluid, int index) {
 MaterialVisual sampleSplash(SplashParticle const &p) {
     MaterialVisual vis = visualForSubstance(SUBSTANCE_WATER);
     float vol = std::max(p.volume, 1.0e-8f);
-    float h = std::clamp(p.honey / vol, 0.0f, 1.0f);
+    float h = std::clamp(liquidPayloadAmount(p.comps, p.compCount, SUBSTANCE_HONEY) / vol, 0.0f, 1.0f);
     if (h > 0.001f) lerpVisual(vis, visualForSubstance(SUBSTANCE_HONEY), h);
     applyDye(vis,
         std::clamp(p.dyeR / vol, 0.0f, 1.0f),

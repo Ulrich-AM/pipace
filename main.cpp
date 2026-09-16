@@ -807,7 +807,7 @@ void fillWorldPixels() {
         }
         int lr = kWaterRimR, lg = kWaterRimG, lb = kWaterRimB;
         float vol = std::max(p.volume, 1.0e-8f);
-        float h = std::clamp(p.honey / vol, 0.0f, 1.0f);
+        float h = std::clamp(liquidPayloadAmount(p.comps, p.compCount, SUBSTANCE_HONEY) / vol, 0.0f, 1.0f);
         if (h > 0.001f) tintChannels(lr, lg, lb, kHoneyRimR, kHoneyRimG, kHoneyRimB, h);
         float ir = std::clamp(p.dyeR / vol, 0.0f, 1.0f);
         float ig = std::clamp(p.dyeG / vol, 0.0f, 1.0f);

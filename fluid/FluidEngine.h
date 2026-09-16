@@ -33,10 +33,14 @@ struct FluidEngine {
     std::vector<float> liquidHeat;
     std::vector<float> nextHeat;
     std::vector<float> dyeR, dyeG, dyeB; // dye mass; concentration = dye / fill
-    std::vector<float> honey;            // backend: honey volume inside fill; prefer composition API
+    std::vector<SubstanceId> liquidCompId; // SoA: cell * kMaxLiquidComponents + slot
+    std::vector<float> liquidCompAmt;
+    std::vector<uint8_t> liquidCompCount;
     std::vector<float> frozenPendingKg;  // sub-pixel frozen water waiting for an ice pixel
     std::vector<float> nextDyeR, nextDyeG, nextDyeB;
-    std::vector<float> nextHoney;
+    std::vector<SubstanceId> nextCompId;
+    std::vector<float> nextCompAmt;
+    std::vector<uint8_t> nextCompCount;
     std::vector<float> pressure;
     std::vector<float> divergenceField;
     std::vector<float> outgoing;
@@ -252,4 +256,12 @@ private:
     float mixSurfaceTension(int index) const;
     void applyCarry(int index, LiquidCarry const &c);
     LiquidCarry extractVolume(int index, float amount);
+    static int compositionSlot(int cell, int slot);
+    void clearComposition(int index);
+    void compactComposition(int index);
+    void copyCompositionToNext(int index);
+    void commitNextComposition(int index);
+    float addComponentUntracked(int index, SubstanceId id, float amount);
+    float addNextComponentUntracked(int index, SubstanceId id, float amount);
+    bool cellHasDuplicateComponents(int index) const;
 };

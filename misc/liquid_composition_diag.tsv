@@ -1,11 +1,18 @@
-test	pure_water_fraction	PASS	w=1.000000 h=0.000000
+test	pure_water_storage	PASS	w=1.000000
 test	pure_water_sum	PASS	sum=1.000000 fill=1.000000
-test	pure_honey_fraction	PASS	w=0.000000 h=1.000000
+test	pure_honey_storage	PASS	w=0.000000 h=1.000000
 test	mix_50_50	PASS	w=0.500000 h=0.500000 fill=1.000000
 test	partial_fill_sum	PASS	sum=0.500000 fill=0.500000
 test	empty_cell_safe	PASS	w=0.000000 frac=0.000000
 test	invalid_substance	PASS	
-test	add_honey_invariants	PASS	w=0.750000 h=0.250000 fill=1.000000
-test	remove_honey_invariants	PASS	w=1.000000 fill=1.000000
-test	backend_agrees_with_api	PASS	api_h=0.300000 backend_h=0.300000
-summary	PASS	10 passed, 0 failed
+test	add_component	PASS	w=0.750000 h=0.250000
+test	remove_component	PASS	count=1
+test	slot_deletion_near_zero	PASS	count=1
+test	no_duplicate_ids	PASS	count=1
+test	fixed_capacity_overflow	PASS	count=4 fill=1.000000
+test	water_honey_roundtrip	PASS	w=0.500000 h=0.300000
+test	transport_take_deposit	PASS	Aw=0.450000 Bw=0.300000
+test	splash_roundtrip	PASS	w=0.750000 h=0.250000
+test	transport_advection	PASS	w=0.750000 h=0.250000 fill=1.000000
+test	no_honey_array	PASS	honey[]/nextHoney[] removed; slots are authoritative
+summary	PASS	17 passed, 0 failed

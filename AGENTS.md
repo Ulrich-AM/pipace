@@ -84,9 +84,9 @@ gas amount/EoS (gas). Honey/water mixtures do not boil or freeze yet.
 Water/honey cells that hold both channels are **mixtures**, not a new SubstanceId.
 High-level composition queries use `FluidEngine` SubstanceId APIs
 (`liquidComponentAmount` / `liquidComponentFraction` / `dominantLiquidSubstance` /
-`liquidComponents`). Storage is still the two-channel `fill` + `honey` backend.
-`MatterSample` reports the dominant component plus fractions. Generalized mixture
-storage and SACE are future work.
+`liquidComponents`). Storage is a fixed-capacity SoA of up to 4 components per
+cell (`liquidCompId` / `liquidCompAmt` / `liquidCompCount`); `fill[]` remains
+total occupancy. `MatterSample` reports the dominant component plus fractions.
 
 Solver unit liquid is `sandboxReferenceLiquid()` (currently SUBSTANCE_WATER's fluid
 table: relative density 1.0). That is a reference, not “all liquid is water”.
