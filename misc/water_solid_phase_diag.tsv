@@ -1,24 +1,24 @@
 test	no_ice_id	PASS	
 test	ice_density_below_liquid	PASS	0.9169999957
-test	pure_water_freezes	PASS	frozen_kg=2952.51939 pixels=116
-test	freeze_identity_water_solid	PASS	sub=1 phase=1 iceT=253.1978369
-test	freeze_mass_conserved	PASS	dLiq=2952.521452 dSol=2952.519703
-test	freeze_latent_released	PASS	J=986141476.2
+test	pure_water_freezes	PASS	frozen_kg=2952.519364 pixels=116
+test	freeze_identity_water_solid	PASS	sub=1 phase=1 iceT=253.2010482
+test	freeze_mass_conserved	PASS	dLiq=2952.521453 dSol=2952.51968
+test	freeze_latent_released	PASS	J=986141467.6
 test	freeze_near_melting_point	PASS	Tmean=278.3158407 Tm=273.1499939 remaining liquid at freeze plateau
 test	contiguous_ice_bodies	PASS	pixels=116 bodies=35
 test	no_water_in_blocked	PASS	
 test	pending_not_discarded	PASS	
 test	honey_mixture_does_not_freeze	PASS	frozen=0
-test	heating_melts_ice	PASS	melted=801.8563496 sol0=1203.124297 sol1=401.2685998
-test	melt_mass_conserved	PASS	dSol=801.8556971 dLiq=796.8137719
-test	melt_latent_absorbed	PASS	J=267820020.8
-test	repeat_freeze_melt_mass	PASS	start=125 end=124.9998907
-test	closed_energy_with_fusion	PASS	rel=0.008291453584 E0=2141589120 E1=2129140833 latRel=5308599.754
+test	heating_melts_ice	PASS	melted=802.1604172 sol0=1203.12429 sol1=400.9639821
+test	melt_mass_conserved	PASS	dSol=802.1603079 dLiq=798.8741954
+test	melt_latent_absorbed	PASS	J=267921579.3
+test	repeat_freeze_melt_mass	PASS	start=125 end=124.9998962
+test	closed_energy_with_fusion	PASS	rel=0.008291600907 E0=2141589120 E1=2129140523 latRel=5308605.305
 test	melt_split_fragments	PASS	before=1 after=2
-test	tick_rate_20_vs_30	PASS	kg30=171.1928491 kg20=171.4443723
+test	tick_rate_20_vs_30	PASS	kg30=171.1928486 kg20=171.4443674
 test	full_cycle_phases	PASS	solid=1 liq=1 gas=1 solid2=1
-test	full_cycle_mass	PASS	start=78.125 end=78.12500829
-test	ice_buoyancy_probe	PASS	no_net_rise_coupling_limit y0=67 y1=69.97397614
-test	perf_ms_tick	PASS	idle=0.75217 small=6.0112925 large=15.458845
+test	full_cycle_mass	PASS	start=78.125 end=78.12501234
+test	ice_buoyancy_probe	PASS	no_net_rise_coupling_limit y0=67 y1=70.21297455
+test	perf_ms_tick	PASS	idle=0.43608 small=4.329435 large=9.1305475
 test	no_nan_inf_negK	PASS	
 summary	PASS	23 passed, 0 failed

@@ -486,7 +486,7 @@ void tintChannels(int &r, int &g, int &b, int r1, int g1, int b1, float t) {
 void liquidAppearance(FluidEngine const &eng, int index, int wr, int wg, int wb, int &r, int &g, int &b) {
     r = wr; g = wg; b = wb;
     float f = std::max(eng.fill[static_cast<size_t>(index)], 1.0e-8f);
-    float h = eng.honeyFraction(index);
+    float h = eng.liquidComponentFraction(index, SUBSTANCE_HONEY);
     if (h > 0.001f) {
         int hr = kHoneyR, hg = kHoneyG, hb = kHoneyB;
         if (wr == kWaterRimR) { hr = kHoneyRimR; hg = kHoneyRimG; hb = kHoneyRimB; }
@@ -807,7 +807,7 @@ void fillWorldPixels() {
         }
         int lr = kWaterRimR, lg = kWaterRimG, lb = kWaterRimB;
         float vol = std::max(p.volume, 1.0e-8f);
-        float h = std::clamp(p.honey / vol, 0.0f, 1.0f);
+        float h = std::clamp(liquidPayloadAmount(p.comps, p.compCount, SUBSTANCE_HONEY) / vol, 0.0f, 1.0f);
         if (h > 0.001f) tintChannels(lr, lg, lb, kHoneyRimR, kHoneyRimG, kHoneyRimB, h);
         float ir = std::clamp(p.dyeR / vol, 0.0f, 1.0f);
         float ig = std::clamp(p.dyeG / vol, 0.0f, 1.0f);
@@ -1564,6 +1564,10 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR commandLine, int show)
     }
     if (commandLine && wcsstr(commandLine, L"--benchmark")) { engine.runHeadlessBenchmark(); return 0; }
     if (commandLine && wcsstr(commandLine, L"--advection-benchmark")) { engine.runAdvectionBenchmark(); return 0; }
+    if (commandLine && wcsstr(commandLine, L"--liquid-composition-diag")) {
+        engine.runLiquidCompositionDiagnostics();
+        return 0;
+    }
     if (commandLine && wcsstr(commandLine, L"--liquid-diag")) { engine.runLiquidBugDiagnostics(); return 0; }
     if (commandLine && wcsstr(commandLine, L"--rigid-benchmark")) { rigid.runConservationBenchmark(engine); return 0; }
     if (commandLine && wcsstr(commandLine, L"--rigid-contact-diag")) { rigid.runContactDiagnostics(engine); return 0; }
