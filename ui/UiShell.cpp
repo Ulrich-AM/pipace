@@ -684,9 +684,7 @@ void drawShell(HDC dc, ShellState &shell, View const &view) {
         bool hasGas = g && !isWall && !isRigid
             && g->amount[static_cast<size_t>(hi)] > 1.0e-8f
             && g->volume[static_cast<size_t>(hi)] >= GAS_MIN_VOLUME;
-        bool mix = hasLiquid
-            && e->liquidComponentAmount(hi, SUBSTANCE_WATER) > 1.0e-6f
-            && e->liquidComponentAmount(hi, SUBSTANCE_HONEY) > 1.0e-6f;
+        bool mix = hasLiquid && e->liquidComponents(hi).count >= 2;
         SubstanceId matId = SUBSTANCE_NONE;
         MatterPhase matPhase = MatterPhase::None;
         float gasVaporFrac = 0.0f;
@@ -741,9 +739,9 @@ void drawShell(HDC dc, ShellState &shell, View const &view) {
         }
 
         if (hasLiquid) {
-            float honeyFrac = e->honeyFraction(hi);
+            float honeyFrac = e->liquidComponentFraction(hi, SUBSTANCE_HONEY);
             insHead("inspector_section_composition", kInsHeadComposition);
-            insSplit(tr("ins_mat_water"), formatPercent(1.0f - honeyFrac), kInsCompWater);
+            insSplit(tr("ins_mat_water"), formatPercent(e->liquidComponentFraction(hi, SUBSTANCE_WATER)), kInsCompWater);
             insSplit(tr("ins_mat_honey"), formatPercent(honeyFrac), kInsCompHoney);
         } else if (hasGas) {
             insHead("inspector_section_composition", kInsHeadComposition);

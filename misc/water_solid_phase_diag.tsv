@@ -19,6 +19,6 @@ test	tick_rate_20_vs_30	PASS	kg30=171.1928491 kg20=171.4443723
 test	full_cycle_phases	PASS	solid=1 liq=1 gas=1 solid2=1
 test	full_cycle_mass	PASS	start=78.125 end=78.12500829
 test	ice_buoyancy_probe	PASS	no_net_rise_coupling_limit y0=67 y1=69.97397614
-test	perf_ms_tick	PASS	idle=0.75217 small=6.0112925 large=15.458845
+test	perf_ms_tick	PASS	idle=1.2507425 small=8.35689 large=20.2215375
 test	no_nan_inf_negK	PASS	
 summary	PASS	23 passed, 0 failed

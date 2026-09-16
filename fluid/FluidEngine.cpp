@@ -7,6 +7,7 @@
 #include <chrono>
 #include <cmath>
 #include <fstream>
+#include <iomanip>
 #include <string>
 #include <thread>
 #include <vector>
@@ -156,68 +157,156 @@ void FluidEngine::clearEmptyLiquidCell(int index) {
 }
 
 float FluidEngine::honeyFraction(int index) const {
-    if (index < 0 || index >= GW * GH) return 0.0f;
-    float f = fill[static_cast<size_t>(index)];
-    if (f <= 1.0e-8f) return 0.0f;
-    return std::clamp(honey[static_cast<size_t>(index)] / f, 0.0f, 1.0f);
+    return liquidComponentFraction(index, SUBSTANCE_HONEY);
 }
 
 float FluidEngine::liquidComponentAmount(int index, SubstanceId id) const {
     if (index < 0 || index >= GW * GH) return 0.0f;
+    if (id != SUBSTANCE_WATER && id != SUBSTANCE_HONEY) return 0.0f;
     float f = fill[static_cast<size_t>(index)];
-    if (f <= 1.0e-8f) return 0.0f;
-    float h = std::clamp(honey[static_cast<size_t>(index)], 0.0f, f);
+    if (f <= kMinLiquidComponent) return 0.0f;
+    float h = honey[static_cast<size_t>(index)];
+    if (!(h > 0.0f)) h = 0.0f;
+    if (h > f) h = f;
     if (id == SUBSTANCE_HONEY) return h;
-    if (id == SUBSTANCE_WATER) return f - h;
-    return 0.0f;
+    return f - h;
 }
 
 float FluidEngine::liquidComponentFraction(int index, SubstanceId id) const {
-    float f = (index >= 0 && index < GW * GH) ? fill[static_cast<size_t>(index)] : 0.0f;
-    if (f <= 1.0e-8f) return 0.0f;
-    return std::clamp(liquidComponentAmount(index, id) / f, 0.0f, 1.0f);
+    if (index < 0 || index >= GW * GH) return 0.0f;
+    float f = fill[static_cast<size_t>(index)];
+    if (f <= kMinLiquidComponent) return 0.0f;
+    float amt = liquidComponentAmount(index, id);
+    if (!(amt > 0.0f)) return 0.0f;
+    return std::clamp(amt / f, 0.0f, 1.0f);
+}
+
+void FluidEngine::setLiquidComponentAmount(int index, SubstanceId id, float amount) {
+    if (index < 0 || index >= GW * GH) return;
+    if (id != SUBSTANCE_WATER && id != SUBSTANCE_HONEY) return;
+    if (!std::isfinite(amount) || amount < 0.0f) amount = 0.0f;
+    size_t i = static_cast<size_t>(index);
+    float oldFill = std::max(0.0f, fill[i]);
+    float h = std::clamp(honey[i], 0.0f, oldFill);
+    float w = std::max(0.0f, oldFill - h);
+    float f = oldFill;
+    if (id == SUBSTANCE_HONEY) {
+        h = amount;
+        if (h > f) f = h;
+        w = std::max(0.0f, f - h);
+        f = w + h;
+    } else {
+        w = amount;
+        f = w + h;
+    }
+    if (oldFill > kMinLiquidComponent && f < oldFill) {
+        float keep = f / oldFill;
+        liquidHeat[i] *= keep;
+        dyeR[i] *= keep;
+        dyeG[i] *= keep;
+        dyeB[i] *= keep;
+    }
+    fill[i] = f;
+    honey[i] = h;
+    clearEmptyLiquidCell(index);
+}
+
+void FluidEngine::addLiquidComponentAmount(int index, SubstanceId id, float delta) {
+    setLiquidComponentAmount(index, id, liquidComponentAmount(index, id) + delta);
+}
+
+LiquidComponentView FluidEngine::liquidComponents(int index) const {
+    LiquidComponentView view;
+    float w = liquidComponentAmount(index, SUBSTANCE_WATER);
+    float h = liquidComponentAmount(index, SUBSTANCE_HONEY);
+    if (w > kMinLiquidComponent && view.count < kMaxLiquidComponents) {
+        view.items[view.count++] = {SUBSTANCE_WATER, w};
+    }
+    if (h > kMinLiquidComponent && view.count < kMaxLiquidComponents) {
+        view.items[view.count++] = {SUBSTANCE_HONEY, h};
+    }
+    return view;
 }
 
 SubstanceId FluidEngine::dominantLiquidSubstance(int index) const {
-    return substanceForHoneyFraction(honeyFraction(index));
+    SubstanceId best = SUBSTANCE_WATER;
+    float bestAmt = -1.0f;
+    forEachLiquidComponent(index, [&](SubstanceId id, float amt) {
+        if (amt > bestAmt) {
+            bestAmt = amt;
+            best = id;
+        }
+    });
+    return best;
 }
 
 float FluidEngine::mixDensity(int index) const {
-    float h = honeyFraction(index);
-    return (1.0f - h) * fluidForSubstance(SUBSTANCE_WATER).density
-        + h * fluidForSubstance(SUBSTANCE_HONEY).density;
+    float f = (index >= 0 && index < GW * GH) ? fill[static_cast<size_t>(index)] : 0.0f;
+    if (f <= kMinLiquidComponent) return sandboxReferenceLiquid().density;
+    float acc = 0.0f;
+    int n = 0;
+    forEachLiquidComponent(index, [&](SubstanceId id, float amt) {
+        acc += (amt / f) * fluidForSubstance(id).density;
+        ++n;
+    });
+    if (n == 0) return sandboxReferenceLiquid().density;
+    return acc;
 }
 
 float FluidEngine::mixSpecificHeat(int index) const {
-    float h = honeyFraction(index);
-    return (1.0f - h) * thermalForSubstance(SUBSTANCE_WATER).specificHeat
-        + h * thermalForSubstance(SUBSTANCE_HONEY).specificHeat;
+    float f = (index >= 0 && index < GW * GH) ? fill[static_cast<size_t>(index)] : 0.0f;
+    if (f <= kMinLiquidComponent) return thermalForSubstance(SUBSTANCE_WATER).specificHeat;
+    float acc = 0.0f;
+    int n = 0;
+    forEachLiquidComponent(index, [&](SubstanceId id, float amt) {
+        acc += (amt / f) * thermalForSubstance(id).specificHeat;
+        ++n;
+    });
+    if (n == 0) return thermalForSubstance(SUBSTANCE_WATER).specificHeat;
+    return acc;
 }
 
 float FluidEngine::mixConductivity(int index) const {
-    float h = honeyFraction(index);
-    return (1.0f - h) * thermalForSubstance(SUBSTANCE_WATER).conductivity
-        + h * thermalForSubstance(SUBSTANCE_HONEY).conductivity;
+    float f = (index >= 0 && index < GW * GH) ? fill[static_cast<size_t>(index)] : 0.0f;
+    if (f <= kMinLiquidComponent) return thermalForSubstance(SUBSTANCE_WATER).conductivity;
+    float acc = 0.0f;
+    int n = 0;
+    forEachLiquidComponent(index, [&](SubstanceId id, float amt) {
+        acc += (amt / f) * thermalForSubstance(id).conductivity;
+        ++n;
+    });
+    if (n == 0) return thermalForSubstance(SUBSTANCE_WATER).conductivity;
+    return acc;
 }
 
 float FluidEngine::mixViscosity(int index) const {
     float f = fill[static_cast<size_t>(index)];
     FluidProperties const &water = sandboxReferenceLiquid();
     if (f < MIN_ACTIVE_FILL) return water.viscosity;
-    float h = honeyFraction(index);
     float cap = thermalCapacity(massKg(mixDensity(index), f, config.cellsPerMeter), mixSpecificHeat(index));
     float T = tempFromEnergy(liquidHeat[static_cast<size_t>(index)], cap);
-    float muW = water.viscosityAtTemperature(T);
-    float muH = fluidForSubstance(SUBSTANCE_HONEY).viscosityAtTemperature(T);
-    float a = std::log(std::max(1.0e-8f, muW));
-    float b = std::log(std::max(1.0e-8f, muH));
-    return std::exp((1.0f - h) * a + h * b);
+    float logMu = 0.0f;
+    int n = 0;
+    forEachLiquidComponent(index, [&](SubstanceId id, float amt) {
+        float mu = fluidForSubstance(id).viscosityAtTemperature(T);
+        logMu += (amt / f) * std::log(std::max(1.0e-8f, mu));
+        ++n;
+    });
+    if (n == 0) return water.viscosity;
+    return std::exp(logMu);
 }
 
 float FluidEngine::mixSurfaceTension(int index) const {
-    float h = honeyFraction(index);
-    return (1.0f - h) * fluidForSubstance(SUBSTANCE_WATER).surfaceTension
-        + h * fluidForSubstance(SUBSTANCE_HONEY).surfaceTension;
+    float f = (index >= 0 && index < GW * GH) ? fill[static_cast<size_t>(index)] : 0.0f;
+    if (f <= kMinLiquidComponent) return sandboxReferenceLiquid().surfaceTension;
+    float acc = 0.0f;
+    int n = 0;
+    forEachLiquidComponent(index, [&](SubstanceId id, float amt) {
+        acc += (amt / f) * fluidForSubstance(id).surfaceTension;
+        ++n;
+    });
+    if (n == 0) return sandboxReferenceLiquid().surfaceTension;
+    return acc;
 }
 
 void FluidEngine::applyCarry(int index, LiquidCarry const &c) {
@@ -2605,5 +2694,129 @@ void FluidEngine::runThreadBenchmark() {
     }
     config.workerCount = 1;
     syncWorkerPool();
+}
+
+void FluidEngine::runLiquidCompositionDiagnostics() {
+    config.workerCount = 1;
+    syncWorkerPool();
+    std::ofstream out(miscFile("liquid_composition_diag.tsv"));
+    out << std::setprecision(8);
+    int passed = 0, failed = 0;
+    auto emit = [&](char const *name, bool ok, std::string const &detail) {
+        out << "test\t" << name << '\t' << (ok ? "PASS" : "FAIL") << '\t' << detail << '\n';
+        if (ok) ++passed;
+        else ++failed;
+    };
+    auto near = [](float a, float b, float tol = 1.0e-5f) {
+        return std::isfinite(a) && std::isfinite(b) && std::abs(a - b) <= tol;
+    };
+    auto componentSum = [&](int idx) {
+        float s = 0.0f;
+        forEachLiquidComponent(idx, [&](SubstanceId, float amt) { s += amt; });
+        return s;
+    };
+
+    clearWorld();
+    int i = ci(40, 40);
+    auto resetCell = [&]() {
+        fill[static_cast<size_t>(i)] = 0.0f;
+        honey[static_cast<size_t>(i)] = 0.0f;
+        clearEmptyLiquidCell(i);
+    };
+
+    resetCell();
+    setLiquidComponentAmount(i, SUBSTANCE_WATER, 1.0f);
+    emit("pure_water_fraction",
+        near(liquidComponentFraction(i, SUBSTANCE_WATER), 1.0f)
+            && near(liquidComponentFraction(i, SUBSTANCE_HONEY), 0.0f)
+            && dominantLiquidSubstance(i) == SUBSTANCE_WATER,
+        "w=" + std::to_string(liquidComponentFraction(i, SUBSTANCE_WATER))
+            + " h=" + std::to_string(liquidComponentFraction(i, SUBSTANCE_HONEY)));
+    emit("pure_water_sum",
+        near(componentSum(i), fill[static_cast<size_t>(i)]),
+        "sum=" + std::to_string(componentSum(i)) + " fill=" + std::to_string(fill[static_cast<size_t>(i)]));
+
+    resetCell();
+    setLiquidComponentAmount(i, SUBSTANCE_WATER, 1.0f);
+    setLiquidComponentAmount(i, SUBSTANCE_HONEY, 1.0f);
+    emit("pure_honey_fraction",
+        near(liquidComponentFraction(i, SUBSTANCE_HONEY), 1.0f)
+            && near(liquidComponentFraction(i, SUBSTANCE_WATER), 0.0f)
+            && dominantLiquidSubstance(i) == SUBSTANCE_HONEY,
+        "w=" + std::to_string(liquidComponentFraction(i, SUBSTANCE_WATER))
+            + " h=" + std::to_string(liquidComponentFraction(i, SUBSTANCE_HONEY)));
+
+    resetCell();
+    setLiquidComponentAmount(i, SUBSTANCE_WATER, 1.0f);
+    setLiquidComponentAmount(i, SUBSTANCE_HONEY, 0.5f);
+    emit("mix_50_50",
+        near(liquidComponentFraction(i, SUBSTANCE_WATER), 0.5f)
+            && near(liquidComponentFraction(i, SUBSTANCE_HONEY), 0.5f)
+            && near(componentSum(i), fill[static_cast<size_t>(i)])
+            && dominantLiquidSubstance(i) == SUBSTANCE_WATER,
+        "w=" + std::to_string(liquidComponentFraction(i, SUBSTANCE_WATER))
+            + " h=" + std::to_string(liquidComponentFraction(i, SUBSTANCE_HONEY))
+            + " fill=" + std::to_string(fill[static_cast<size_t>(i)]));
+
+    resetCell();
+    setLiquidComponentAmount(i, SUBSTANCE_WATER, 0.5f);
+    setLiquidComponentAmount(i, SUBSTANCE_HONEY, 0.2f);
+    emit("partial_fill_sum",
+        near(componentSum(i), fill[static_cast<size_t>(i)])
+            && near(fill[static_cast<size_t>(i)], 0.5f)
+            && near(liquidComponentAmount(i, SUBSTANCE_WATER), 0.3f)
+            && near(liquidComponentAmount(i, SUBSTANCE_HONEY), 0.2f),
+        "sum=" + std::to_string(componentSum(i)) + " fill=" + std::to_string(fill[static_cast<size_t>(i)]));
+
+    resetCell();
+    float emptyW = liquidComponentAmount(i, SUBSTANCE_WATER);
+    float emptyH = liquidComponentAmount(i, SUBSTANCE_HONEY);
+    float emptyWf = liquidComponentFraction(i, SUBSTANCE_WATER);
+    float emptyHf = liquidComponentFraction(i, SUBSTANCE_HONEY);
+    emit("empty_cell_safe",
+        emptyW == 0.0f && emptyH == 0.0f && emptyWf == 0.0f && emptyHf == 0.0f
+            && std::isfinite(emptyW) && std::isfinite(emptyWf)
+            && liquidComponents(i).count == 0,
+        "w=" + std::to_string(emptyW) + " frac=" + std::to_string(emptyWf));
+
+    emit("invalid_substance",
+        liquidComponentAmount(i, 999) == 0.0f
+            && liquidComponentFraction(i, SUBSTANCE_WOOD) == 0.0f
+            && liquidComponentAmount(i, SUBSTANCE_NONE) == 0.0f,
+        "");
+
+    resetCell();
+    setLiquidComponentAmount(i, SUBSTANCE_WATER, 1.0f);
+    addLiquidComponentAmount(i, SUBSTANCE_HONEY, 0.25f);
+    emit("add_honey_invariants",
+        near(liquidComponentAmount(i, SUBSTANCE_HONEY), 0.25f)
+            && near(liquidComponentAmount(i, SUBSTANCE_WATER), 0.75f)
+            && near(componentSum(i), fill[static_cast<size_t>(i)])
+            && liquidComponentAmount(i, SUBSTANCE_WATER) >= 0.0f
+            && liquidComponentAmount(i, SUBSTANCE_HONEY) >= 0.0f,
+        "w=" + std::to_string(liquidComponentAmount(i, SUBSTANCE_WATER))
+            + " h=" + std::to_string(liquidComponentAmount(i, SUBSTANCE_HONEY))
+            + " fill=" + std::to_string(fill[static_cast<size_t>(i)]));
+    addLiquidComponentAmount(i, SUBSTANCE_HONEY, -0.25f);
+    emit("remove_honey_invariants",
+        near(liquidComponentAmount(i, SUBSTANCE_HONEY), 0.0f)
+            && near(liquidComponentAmount(i, SUBSTANCE_WATER), fill[static_cast<size_t>(i)])
+            && near(componentSum(i), fill[static_cast<size_t>(i)]),
+        "w=" + std::to_string(liquidComponentAmount(i, SUBSTANCE_WATER))
+            + " fill=" + std::to_string(fill[static_cast<size_t>(i)]));
+
+    fill[static_cast<size_t>(i)] = 0.80f;
+    honey[static_cast<size_t>(i)] = 0.30f;
+    emit("backend_agrees_with_api",
+        near(liquidComponentAmount(i, SUBSTANCE_HONEY), honey[static_cast<size_t>(i)])
+            && near(liquidComponentAmount(i, SUBSTANCE_WATER),
+                fill[static_cast<size_t>(i)] - honey[static_cast<size_t>(i)])
+            && near(componentSum(i), fill[static_cast<size_t>(i)])
+            && near(liquidComponentFraction(i, SUBSTANCE_HONEY), 0.30f / 0.80f),
+        "api_h=" + std::to_string(liquidComponentAmount(i, SUBSTANCE_HONEY))
+            + " backend_h=" + std::to_string(honey[static_cast<size_t>(i)]));
+
+    out << "summary\t" << (failed == 0 ? "PASS" : "FAIL") << '\t' << passed << " passed, "
+        << failed << " failed\n";
 }
 

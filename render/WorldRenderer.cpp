@@ -80,7 +80,7 @@ void applyDye(MaterialVisual &vis, float ir, float ig, float ib) {
 
 MaterialVisual sampleLiquidCell(FluidEngine const &fluid, int index) {
     MaterialVisual vis = visualForSubstance(SUBSTANCE_WATER);
-    float h = fluid.honeyFraction(index);
+    float h = fluid.liquidComponentFraction(index, SUBSTANCE_HONEY);
     if (h > 0.001f) lerpVisual(vis, visualForSubstance(SUBSTANCE_HONEY), h);
     float f = std::max(fluid.fill[static_cast<size_t>(index)], 1.0e-8f);
     applyDye(vis,
@@ -546,7 +546,7 @@ void runWorldLookBenchmark(FluidEngine &fluid, RigidBodyEngine &rigid, WorldRend
     for (int y = 0; y < GH; ++y) for (int x = 0; x < GW; ++x) {
         int i = FluidEngine::ci(x, y);
         if (fluid.fill[static_cast<size_t>(i)] < 0.2f) continue;
-        if (x < 70) fluid.honey[static_cast<size_t>(i)] = fluid.fill[static_cast<size_t>(i)];
+        if (x < 70) fluid.setLiquidComponentAmount(i, SUBSTANCE_HONEY, fluid.fill[static_cast<size_t>(i)]);
         else if (x < 110) {
             float f = fluid.fill[static_cast<size_t>(i)];
             fluid.dyeR[static_cast<size_t>(i)] = f * 0.88f;

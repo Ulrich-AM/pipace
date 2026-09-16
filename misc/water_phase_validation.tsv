@@ -5,10 +5,10 @@ tick_rate	60_hz	MEASURE	156.25	13352.827304	1021.88977051	193.385665894	seconds=
 tick_rate	20_vs_30	PASS	0	8.30270898875e-09	0	0	relative differences; 2% materiality threshold
 tick_rate	30_vs_60	PASS	0	8.30270898875e-09	0	0	relative differences; 2% materiality threshold
 tick_rate	20_vs_60	PASS	0	0	0	0	relative differences; 2% materiality threshold
-performance	idle_full_scan	PASS	0.019475	0	0	0	phase-only ms/tick; baseline without phase call=0; nonfinite=0 neg_water=0 neg_gas=0 vapor_over_total=0 vapor_in_solid=0 negK=0 stranded_heat=0
-performance	small_boiling_pool	PASS	1.68787666667	16	0	0	phase-only ms/tick; baseline without phase call=0; nonfinite=0 neg_water=0 neg_gas=0 vapor_over_total=0 vapor_in_solid=0 negK=0 stranded_heat=0
-performance	large_boiling_pool	PASS	10.84222	779.6	0	0	phase-only ms/tick; baseline without phase call=0; nonfinite=0 neg_water=0 neg_gas=0 vapor_over_total=0 vapor_in_solid=0 negK=0 stranded_heat=0
-performance	vapor_condensation_chamber	PASS	1.80343	0	580	1210	phase-only ms/tick; baseline without phase call=0; nonfinite=0 neg_water=0 neg_gas=0 vapor_over_total=0 vapor_in_solid=0 negK=0 stranded_heat=0
+performance	idle_full_scan	PASS	0.023035	0	0	0	phase-only ms/tick; baseline without phase call=0; nonfinite=0 neg_water=0 neg_gas=0 vapor_over_total=0 vapor_in_solid=0 negK=0 stranded_heat=0
+performance	small_boiling_pool	PASS	0.867306666667	16	0	0	phase-only ms/tick; baseline without phase call=0; nonfinite=0 neg_water=0 neg_gas=0 vapor_over_total=0 vapor_in_solid=0 negK=0 stranded_heat=0
+performance	large_boiling_pool	PASS	8.22035	779.6	0	0	phase-only ms/tick; baseline without phase call=0; nonfinite=0 neg_water=0 neg_gas=0 vapor_over_total=0 vapor_in_solid=0 negK=0 stranded_heat=0
+performance	vapor_condensation_chamber	PASS	1.80524	0	580	1210	phase-only ms/tick; baseline without phase call=0; nonfinite=0 neg_water=0 neg_gas=0 vapor_over_total=0 vapor_in_solid=0 negK=0 stranded_heat=0
 stress	closed_energy_no_forcing	PASS	3.58296287217e-06	1.2276692564e-07	29624680	29624676.3631	vapor_kg=2.32276492489 predicted_cp_basis_J=1823620.36572 nonfinite=0 neg_water=0 neg_gas=0 vapor_over_total=0 vapor_in_solid=0 negK=0 stranded_heat=0
 stress	sealed_hot_600_ticks	PASS	0.000265516663148	104706.13085	193.385803223	255648	liq=24.7665896609 vap=1225.23367586 ice=0 esc=0 boiled=4071.84241628 condensed=2846.60897516 frozen=0 melted=0 editVapor=0.0208255234393 expectedVapor=104706.110791 nonfinite=0 neg_water=0 neg_gas=0 vapor_over_total=0 vapor_in_solid=0 negK=0 stranded_heat=0
 stress	forced_30_phase_cycles	PASS	8.89175715635e-06	4.20182291418	11.4231859776	193.385665894	nonfinite=0 neg_water=0 neg_gas=0 vapor_over_total=0 vapor_in_solid=0 negK=0 stranded_heat=0

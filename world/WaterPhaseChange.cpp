@@ -24,6 +24,10 @@ namespace {
 constexpr int kDx[4] = {0, -1, 1, 0};
 constexpr int kDy[4] = {-1, 0, 0, 1}; // above, left, right, below (y down)
 constexpr float kHoneySkip = 1.0e-4f;
+
+bool honeyMixture(FluidEngine const &fluid, int i) {
+    return fluid.liquidComponentFraction(i, SUBSTANCE_HONEY) > kHoneySkip;
+}
 // Time-based liquid/gas conversion cap. 10.5 fill/s matches the old 0.35 fill/tick at 30 Hz.
 constexpr float kMaxFillPerSec = 10.5f;
 // Solver safety only: not a thermodynamic boiling law. Destination storage refuses
@@ -253,7 +257,7 @@ int findLiquidDest(FluidEngine const &fluid, RigidBodyEngine const &rigid, GasEn
         float fill = fluid.fill[static_cast<size_t>(i)];
         float room = 1.0f - fill;
         if (room < kMinFillMove) return -1.0f;
-        if (fluid.honeyFraction(i) > kHoneySkip && fill > 1.0e-6f) return -1.0f;
+        if (honeyMixture(fluid, i) && fill > 1.0e-6f) return -1.0f;
         float s = room;
         if (fill > kMinFillMove) s += 4.0f + fill;
         if (preferCoolSurfaces) s += coolSurfaceBonus(fluid, rigid, gas, x, y, Tref);
@@ -671,7 +675,7 @@ void freezeMeltWater(FluidEngine &fluid, RigidBodyEngine &rigid, GasEngine &gas,
         }
         float fill = fluid.fill[static_cast<size_t>(i)];
         float pending0 = fluid.frozenPendingKg[static_cast<size_t>(i)];
-        if (fill >= kMinFillMove && fluid.honeyFraction(i) <= kHoneySkip) {
+        if (fill >= kMinFillMove && !honeyMixture(fluid, i)) {
             float waterFill = fluid.liquidComponentAmount(i, SUBSTANCE_WATER);
             float C = ThermalEngine::liquidCapacity(fluid, i);
             float E = fluid.liquidHeat[static_cast<size_t>(i)];
@@ -707,7 +711,7 @@ void freezeMeltWater(FluidEngine &fluid, RigidBodyEngine &rigid, GasEngine &gas,
                     }
                 }
             }
-        } else if (fill >= kMinFillMove && fluid.honeyFraction(i) > kHoneySkip) {
+        } else if (fill >= kMinFillMove && honeyMixture(fluid, i)) {
             (void)pending0;
         }
         trySpawnPending(x, y);
@@ -903,7 +907,7 @@ WaterPhaseTickStats stepWaterPhaseChange(FluidEngine &fluid, RigidBodyEngine &ri
             if (isBlockedSolid(fluid, rigid, x, y)) continue;
             float fill = fluid.fill[static_cast<size_t>(i)];
             if (fill < kMinFillMove) continue;
-            if (fluid.honeyFraction(i) > kHoneySkip) continue;
+            if (honeyMixture(fluid, i)) continue;
             float waterFill = fluid.liquidComponentAmount(i, SUBSTANCE_WATER);
             if (waterFill < kMinFillMove) continue;
             float C = ThermalEngine::liquidCapacity(fluid, i);
@@ -1385,8 +1389,9 @@ void runWaterPhaseDiagnostics(FluidEngine &fluid, RigidBodyEngine &rigid,
     // Honey mixture must not boil
     resetSealed();
     int hx = 55, hy = 60;
-    fluid.fill[static_cast<size_t>(FluidEngine::ci(hx, hy))] = 1.0f;
-    fluid.honey[static_cast<size_t>(FluidEngine::ci(hx, hy))] = 0.4f;
+    int mixCell = FluidEngine::ci(hx, hy);
+    fluid.setLiquidComponentAmount(mixCell, SUBSTANCE_WATER, 1.0f);
+    fluid.setLiquidComponentAmount(mixCell, SUBSTANCE_HONEY, 0.4f);
     fluid.expectedVolume = 1.0;
     float Ch = ThermalEngine::liquidCapacity(fluid, FluidEngine::ci(hx, hy));
     fluid.liquidHeat[static_cast<size_t>(FluidEngine::ci(hx, hy))] = energyFromTemp(Ch, Tb + 40.0f);
@@ -1470,13 +1475,13 @@ void runWaterPhaseValidation(FluidEngine &fluid, RigidBodyEngine &rigid,
         }
     };
 
-    auto setPureWater = [&](int x, int y, float fill, float tempK) {
+    auto setPureWater = [&](int x, int y, float fillAmt, float tempK) {
         int i = FluidEngine::ci(x, y);
-        fluid.fill[static_cast<size_t>(i)] = fill;
-        fluid.honey[static_cast<size_t>(i)] = 0.0f;
+        fluid.setLiquidComponentAmount(i, SUBSTANCE_HONEY, 0.0f);
+        fluid.setLiquidComponentAmount(i, SUBSTANCE_WATER, fillAmt);
         float C = ThermalEngine::liquidCapacity(fluid, i);
         fluid.liquidHeat[static_cast<size_t>(i)] = energyFromTemp(C, tempK);
-        fluid.expectedVolume += fill;
+        fluid.expectedVolume += fillAmt;
         fluid.wakeChunkAtCell(x, y);
         thermal.wakeCell(x, y);
     };
@@ -1484,7 +1489,7 @@ void runWaterPhaseValidation(FluidEngine &fluid, RigidBodyEngine &rigid,
     auto forceWaterTemp = [&](float tempK) {
         for (int i = 0; i < GW * GH; ++i) {
             if (fluid.fill[static_cast<size_t>(i)] <= 1.0e-8f) continue;
-            if (fluid.honeyFraction(i) > kHoneySkip) continue;
+            if (honeyMixture(fluid, i)) continue;
             float C = ThermalEngine::liquidCapacity(fluid, i);
             if (C > MIN_THERMAL_CAPACITY)
                 fluid.liquidHeat[static_cast<size_t>(i)] = energyFromTemp(C, tempK);
@@ -1832,7 +1837,7 @@ void runWaterPhaseValidation(FluidEngine &fluid, RigidBodyEngine &rigid,
     reset(GasBoundary::Sealed, true);
     int mixI = FluidEngine::ci(GW / 2, GH / 2);
     setPureWater(GW / 2, GH / 2, 1.0f, Tb + 250.0f);
-    fluid.honey[static_cast<size_t>(mixI)] = 0.4f;
+    fluid.setLiquidComponentAmount(mixI, SUBSTANCE_HONEY, 0.4f);
     float mixC = ThermalEngine::liquidCapacity(fluid, mixI);
     fluid.liquidHeat[static_cast<size_t>(mixI)] = energyFromTemp(mixC, Tb + 250.0f);
     for (int n = 0; n < 120; ++n) {
@@ -1844,7 +1849,7 @@ void runWaterPhaseValidation(FluidEngine &fluid, RigidBodyEngine &rigid,
     out << "stress\twater_honey_mixture\t"
         << (gas.sumWaterVapor() < 1.0e-8 && auditOk(mixAudit) ? "PASS" : "FAIL")
         << '\t' << gas.sumWaterVapor() << '\t' << fluid.fill[static_cast<size_t>(mixI)]
-        << '\t' << fluid.honey[static_cast<size_t>(mixI)] << '\t' << maxLiquidTemp()
+        << '\t' << fluid.liquidComponentAmount(mixI, SUBSTANCE_HONEY) << '\t' << maxLiquidTemp()
         << "\t" << auditDetail(mixAudit) << '\n';
 
     // Sub-active residual: measure whether phase transfer can consume it.
@@ -2370,8 +2375,8 @@ void runWaterSolidPhaseDiagnostics(FluidEngine &fluid, RigidBodyEngine &rigid,
     auto setPureWater = [&](int x, int y, float fillAmt, float tK) {
         int i = FluidEngine::ci(x, y);
         if (fluid.solid[static_cast<size_t>(i)]) return;
-        fluid.fill[static_cast<size_t>(i)] = fillAmt;
-        fluid.honey[static_cast<size_t>(i)] = 0.0f;
+        fluid.setLiquidComponentAmount(i, SUBSTANCE_HONEY, 0.0f);
+        fluid.setLiquidComponentAmount(i, SUBSTANCE_WATER, fillAmt);
         float cap = ThermalEngine::liquidCapacity(fluid, i);
         fluid.liquidHeat[static_cast<size_t>(i)] = energyFromTemp(cap, tK);
         fluid.expectedVolume += fillAmt;
@@ -2490,7 +2495,7 @@ void runWaterSolidPhaseDiagnostics(FluidEngine &fluid, RigidBodyEngine &rigid,
     resetSealed();
     int hx = 60, hy = 70;
     setPureWater(hx, hy, 1.0f, Tm - 30.0f);
-    fluid.honey[static_cast<size_t>(FluidEngine::ci(hx, hy))] = 0.4f;
+    fluid.setLiquidComponentAmount(FluidEngine::ci(hx, hy), SUBSTANCE_HONEY, 0.4f);
     fluid.rebuildActivityAndMetrics();
     WaterPhaseTickStats honeyAcc{};
     for (int n = 0; n < 40; ++n) {

@@ -36,13 +36,12 @@ MatterSample sampleMatterAt(FluidEngine const &fluid, RigidBodyEngine const &rig
             break;
         case ThermalSampleKind::Liquid: {
             float fill = fluid.fill[static_cast<size_t>(i)];
-            float waterAmt = fluid.liquidComponentAmount(i, SUBSTANCE_WATER);
-            float honeyAmt = fluid.liquidComponentAmount(i, SUBSTANCE_HONEY);
+            LiquidComponentView comps = fluid.liquidComponents(i);
             sample.identity = makeMatterIdentity(fluid.dominantLiquidSubstance(i), MatterPhase::Liquid);
             sample.amount = fill;
             sample.waterFraction = fluid.liquidComponentFraction(i, SUBSTANCE_WATER);
             sample.honeyFraction = fluid.liquidComponentFraction(i, SUBSTANCE_HONEY);
-            sample.mixture = waterAmt > 1.0e-6f && honeyAmt > 1.0e-6f;
+            sample.mixture = comps.count >= 2;
             break;
         }
         case ThermalSampleKind::Gas: {
@@ -128,8 +127,7 @@ void runSubstancePhaseDiagnostics(FluidEngine &fluid, RigidBodyEngine &rigid, Ga
 
     int cx = 80, cy = 40;
     int wi = FluidEngine::ci(cx, cy);
-    fluid.fill[static_cast<size_t>(wi)] = 1.0f;
-    fluid.honey[static_cast<size_t>(wi)] = 0.0f;
+    fluid.setLiquidComponentAmount(wi, SUBSTANCE_WATER, 1.0f);
     fluid.expectedVolume = 1.0;
     fluid.wakeAllFluidChunks();
     MatterSample waterCell = sampleMatterAt(fluid, rigid, gas, cx, cy);
@@ -146,14 +144,16 @@ void runSubstancePhaseDiagnostics(FluidEngine &fluid, RigidBodyEngine &rigid, Ga
             && waterCell.identity.phase == MatterPhase::Liquid,
         "neighbor sub=" + std::to_string(neighborAir.identity.substance));
 
-    fluid.honey[static_cast<size_t>(wi)] = 1.0f;
+    fluid.setLiquidComponentAmount(wi, SUBSTANCE_HONEY, 1.0f);
     MatterSample honeyCell = sampleMatterAt(fluid, rigid, gas, cx, cy);
     emit("query_honey_liquid",
         honeyCell.hasMatter && honeyCell.identity.substance == SUBSTANCE_HONEY
             && honeyCell.identity.phase == MatterPhase::Liquid,
         "sub=" + std::to_string(honeyCell.identity.substance));
 
-    fluid.honey[static_cast<size_t>(wi)] = 0.4f;
+    fluid.setLiquidComponentAmount(wi, SUBSTANCE_HONEY, 0.0f);
+    fluid.setLiquidComponentAmount(wi, SUBSTANCE_WATER, 1.0f);
+    fluid.setLiquidComponentAmount(wi, SUBSTANCE_HONEY, 0.4f);
     MatterSample mixCell = sampleMatterAt(fluid, rigid, gas, cx, cy);
     emit("query_mixture_dominant_water",
         mixCell.mixture && mixCell.identity.substance == SUBSTANCE_WATER
@@ -217,8 +217,8 @@ void runSubstancePhaseDiagnostics(FluidEngine &fluid, RigidBodyEngine &rigid, Ga
         !oobFar.hasMatter && oobFar.identity.substance == SUBSTANCE_NONE, "");
 
     int ei = FluidEngine::ci(20, 20);
-    fluid.fill[static_cast<size_t>(ei)] = 0.0f;
-    fluid.honey[static_cast<size_t>(ei)] = 0.0f;
+    fluid.setLiquidComponentAmount(ei, SUBSTANCE_WATER, 0.0f);
+    fluid.setLiquidComponentAmount(ei, SUBSTANCE_HONEY, 0.0f);
     gas.amount[static_cast<size_t>(ei)] = 0.0f;
     gas.heat[static_cast<size_t>(ei)] = 0.0f;
     MatterSample emptyCell = sampleMatterAt(fluid, rigid, gas, 20, 20);

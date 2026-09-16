@@ -42,7 +42,7 @@ PIPACE/
     PhaseTransfer.h/.cpp  # fill/mass/gas-amount conversion
   world/
     WorldQuery.h/.cpp      # sampleMatterAt (SubstanceId + phase), phase/registry diags
-    WaterPhaseChange.h/.cpp # water liquid ⇄ gas (boiling/condensation)
+    WaterPhaseChange.h/.cpp # water liquid ⇄ gas / solid; mixture skip via composition API
   docs/
     PHASE_CHANGES.md       # Water solid ⇄ liquid ⇄ gas is live; honey mixtures are not
   CMakeLists.txt / build.bat / run.bat
@@ -82,8 +82,11 @@ Density stays phase-specific: mechanical.densityRel (solid), fluid.density (liqu
 gas amount/EoS (gas). Honey/water mixtures do not boil or freeze yet.
 
 Water/honey cells that hold both channels are **mixtures**, not a new SubstanceId.
-`MatterSample` reports the dominant component plus fractions. Generalized mixtures
-and SACE are future work.
+High-level composition queries use `FluidEngine` SubstanceId APIs
+(`liquidComponentAmount` / `liquidComponentFraction` / `dominantLiquidSubstance` /
+`liquidComponents`). Storage is still the two-channel `fill` + `honey` backend.
+`MatterSample` reports the dominant component plus fractions. Generalized mixture
+storage and SACE are future work.
 
 Solver unit liquid is `sandboxReferenceLiquid()` (currently SUBSTANCE_WATER's fluid
 table: relative density 1.0). That is a reference, not “all liquid is water”.
@@ -100,7 +103,7 @@ table: relative density 1.0). That is a reference, not “all liquid is water”
 Removed copies: `FluidConfig.water` / `.honey`, `kHoneyLiquid()`, `k*Thermal()`
 wrappers, `GasConfig.thermal`.
 
-Build: `run.bat` or CMake → `build/pipace.exe`. Headless: `--benchmark`, `--scale-benchmark`, `--rigid-benchmark`, `--thread-benchmark`, `--liquid-diag`, `--substance-phase-diag`, `--substance-registry-diag`, `--phase-transfer-diag`, `--water-phase-diag`, `--thermal-diag`, `--thermal-spread-diag`. Grid size via `PIPACE_GRID_WIDTH` / `PIPACE_GRID_HEIGHT` (default 200×120). SETTINGS → Simulation threads (Auto / 1 / 2 / 4 / 6 / 8). Auto is 1 worker on the default grid; see `misc/THREAD_PASS_NOTES.md`.
+Build: `run.bat` or CMake → `build/pipace.exe`. Headless: `--benchmark`, `--scale-benchmark`, `--rigid-benchmark`, `--thread-benchmark`, `--liquid-diag`, `--liquid-composition-diag`, `--substance-phase-diag`, `--substance-registry-diag`, `--phase-transfer-diag`, `--water-phase-diag`, `--thermal-diag`, `--thermal-spread-diag`. Grid size via `PIPACE_GRID_WIDTH` / `PIPACE_GRID_HEIGHT` (default 200×120). SETTINGS → Simulation threads (Auto / 1 / 2 / 4 / 6 / 8). Auto is 1 worker on the default grid; see `misc/THREAD_PASS_NOTES.md`.
 
 ## Fluid engine (what exists)
 

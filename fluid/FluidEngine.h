@@ -33,7 +33,7 @@ struct FluidEngine {
     std::vector<float> liquidHeat;
     std::vector<float> nextHeat;
     std::vector<float> dyeR, dyeG, dyeB; // dye mass; concentration = dye / fill
-    std::vector<float> honey;            // honey volume; 0 ≤ honey ≤ fill
+    std::vector<float> honey;            // backend: honey volume inside fill; prefer composition API
     std::vector<float> frozenPendingKg;  // sub-pixel frozen water waiting for an ice pixel
     std::vector<float> nextDyeR, nextDyeG, nextDyeB;
     std::vector<float> nextHoney;
@@ -176,10 +176,19 @@ struct FluidEngine {
     void addLiquidFill(int index, float dFill, float dHeat);
     LiquidCarry takeLiquidCarry(int index, float amount);
     float takeLiquidVolume(int index, float amount);
-    float honeyFraction(int index) const;
+    float honeyFraction(int index) const; // transport convenience; = liquidComponentFraction(..., HONEY)
     float liquidComponentAmount(int index, SubstanceId id) const;
     float liquidComponentFraction(int index, SubstanceId id) const;
+    void setLiquidComponentAmount(int index, SubstanceId id, float amount);
+    void addLiquidComponentAmount(int index, SubstanceId id, float delta);
     SubstanceId dominantLiquidSubstance(int index) const;
+    LiquidComponentView liquidComponents(int index) const;
+    template<typename Fn>
+    void forEachLiquidComponent(int index, Fn &&fn) const {
+        LiquidComponentView view = liquidComponents(index);
+        for (int n = 0; n < view.count; ++n)
+            fn(view.items[n].id, view.items[n].amount);
+    }
     float mixDensity(int index) const;
     float mixSpecificHeat(int index) const;
     float mixConductivity(int index) const;
@@ -212,6 +221,7 @@ struct FluidEngine {
     void runHeadlessBenchmark();
     void runScaleBenchmark();
     void runLiquidBugDiagnostics();
+    void runLiquidCompositionDiagnostics();
     void runThreadBenchmark();
     void runAdvectionBenchmark();
 

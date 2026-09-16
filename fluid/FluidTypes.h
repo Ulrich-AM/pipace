@@ -42,10 +42,26 @@ struct LiquidPaint {
 };
 
 // Conserved extras that ride with a volume parcel (heat, dye mass, honey volume).
+// `honey` here is the two-channel transport field, not a public composition API.
 struct LiquidCarry {
     float heat = 0.0f;
     float dyeR = 0.0f, dyeG = 0.0f, dyeB = 0.0f;
     float honey = 0.0f;
+};
+
+// Allocation-free view of liquid components in one cell. Count is how many
+// entries are present. Backed by fill+honey today; callers must not assume that.
+constexpr int kMaxLiquidComponents = 2;
+constexpr float kMinLiquidComponent = 1.0e-8f;
+
+struct LiquidComponent {
+    SubstanceId id = SUBSTANCE_NONE;
+    float amount = 0.0f;
+};
+
+struct LiquidComponentView {
+    LiquidComponent items[kMaxLiquidComponents]{};
+    int count = 0;
 };
 
 inline bool isEnergyTool(Tool t) {
