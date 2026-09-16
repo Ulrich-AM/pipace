@@ -44,7 +44,7 @@ PIPACE/
     WorldQuery.h/.cpp      # sampleMatterAt (SubstanceId + phase), phase/registry diags
     WaterPhaseChange.h/.cpp # water liquid ⇄ gas (boiling/condensation)
   docs/
-    PHASE_CHANGES.md       # Water liquid ⇄ gas is live; solid water is not
+    PHASE_CHANGES.md       # Water solid ⇄ liquid ⇄ gas is live; honey mixtures are not
   CMakeLists.txt / build.bat / run.bat
   README.md
   AGENTS.md

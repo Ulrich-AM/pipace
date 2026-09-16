@@ -26,15 +26,17 @@ struct WaterPhaseTickStats {
     int blockedCondense = 0;
     int blockedFreeze = 0;
     int blockedMelt = 0;
-    int blockedBoilNoDest = 0;
-    int blockedBoilPressure = 0;
+    int blockedBoilNoGasSpace = 0;
+    int blockedBoilEquilibrium = 0;
     int blockedBoilEnergy = 0;
-    int blockedCondenseNoDest = 0;
-    int blockedCondenseHotDest = 0;
+    int blockedBoilSafetyLimit = 0;
+    int blockedCondenseNoLiquidSpace = 0;
+    int blockedCondenseEquilibrium = 0;
     int blockedCondenseEnergy = 0;
     int blockedMeltNoDest = 0;
     int blockedMeltEnergy = 0;
     int blockedFreezeNoDest = 0;
+    double worldEditVaporDelta = 0.0;
 };
 
 void runWaterPhaseStabilityDiagnostics(FluidEngine &fluid, RigidBodyEngine &rigid,

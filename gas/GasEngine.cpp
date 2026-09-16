@@ -112,13 +112,20 @@ float GasEngine::vaporFraction(int index) const {
 void GasEngine::clampSpecies(int index) {
     if (index < 0 || index >= GW * GH) return;
     size_t i = static_cast<size_t>(index);
-    if (!(amount[i] > GAS_MIN_AMOUNT) || !std::isfinite(amount[i])) {
+    if (!std::isfinite(waterVapor[i]) || waterVapor[i] < 0.0f) waterVapor[i] = 0.0f;
+    if (!std::isfinite(amount[i]) || amount[i] < 0.0f) amount[i] = 0.0f;
+    // Water vapor is conserved mass. If bookkeeping drifted (vapor > total, or
+    // total dropped below the wipe threshold), keep the vapor — do not delete it.
+    if (waterVapor[i] > amount[i]) amount[i] = waterVapor[i];
+    if (!(amount[i] > GAS_MIN_AMOUNT)) {
+        if (waterVapor[i] > GAS_MIN_AMOUNT) {
+            amount[i] = waterVapor[i];
+            return;
+        }
         amount[i] = 0.0f;
         waterVapor[i] = 0.0f;
         return;
     }
-    if (!std::isfinite(waterVapor[i]) || waterVapor[i] < 0.0f) waterVapor[i] = 0.0f;
-    if (waterVapor[i] > amount[i]) waterVapor[i] = amount[i];
 }
 
 void GasEngine::addWaterVapor(int index, float da) {
@@ -281,11 +288,17 @@ void GasEngine::displaceBlocked(FluidEngine const &fluid) {
         int i = ci(x, y);
         if (volume[static_cast<size_t>(i)] >= GAS_MIN_VOLUME) continue;
         float a = amount[static_cast<size_t>(i)];
+        float vKeep = waterVapor[static_cast<size_t>(i)];
         if (a <= GAS_MIN_AMOUNT) {
-            amount[static_cast<size_t>(i)] = 0.0f;
-            waterVapor[static_cast<size_t>(i)] = 0.0f;
-            heat[static_cast<size_t>(i)] = 0.0f;
-            continue;
+            if (vKeep > GAS_MIN_AMOUNT) {
+                a = vKeep;
+                amount[static_cast<size_t>(i)] = vKeep;
+            } else {
+                amount[static_cast<size_t>(i)] = 0.0f;
+                waterVapor[static_cast<size_t>(i)] = 0.0f;
+                heat[static_cast<size_t>(i)] = 0.0f;
+                continue;
+            }
         }
         float h = heat[static_cast<size_t>(i)];
         float vFrac = vaporFraction(i);
@@ -297,7 +310,7 @@ void GasEngine::displaceBlocked(FluidEngine const &fluid) {
             && fluid.fill[static_cast<size_t>(i)] >= MIN_PRESSURE_FILL)
             maxAtm = config.ambientPressureAtm * 1.12f;
         float rem = relocateAmount(fluid, x, y, a, maxAtm, a > GAS_MIN_AMOUNT ? h / a : 0.0f, vFrac);
-        if (rem > GAS_MIN_AMOUNT) {
+        if (rem > 0.0f && std::isfinite(rem)) {
             amount[static_cast<size_t>(i)] += rem;
             waterVapor[static_cast<size_t>(i)] += rem * vFrac;
             clampSpecies(i);
