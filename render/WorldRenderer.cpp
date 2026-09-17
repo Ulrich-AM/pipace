@@ -78,10 +78,36 @@ void applyDye(MaterialVisual &vis, float ir, float ig, float ib) {
             static_cast<int>(ib * 255.0f), dyeI);
 }
 
+MaterialVisual blendLiquidVisual(LiquidComponent const *items, int count) {
+    float tot = 0.0f;
+    for (int n = 0; n < count; ++n) {
+        if (validLiquidComponentId(items[n].id) && items[n].amount > kMinLiquidComponent)
+            tot += items[n].amount;
+    }
+    if (!(tot > kMinLiquidComponent))
+        return visualForSubstance(SUBSTANCE_WATER);
+    MaterialVisual vis{};
+    float acc = 0.0f;
+    bool first = true;
+    for (int n = 0; n < count; ++n) {
+        if (!validLiquidComponentId(items[n].id) || items[n].amount <= kMinLiquidComponent)
+            continue;
+        if (first) {
+            vis = visualForSubstance(items[n].id);
+            acc = items[n].amount;
+            first = false;
+            continue;
+        }
+        float w = items[n].amount / (acc + items[n].amount);
+        lerpVisual(vis, visualForSubstance(items[n].id), w);
+        acc += items[n].amount;
+    }
+    return vis;
+}
+
 MaterialVisual sampleLiquidCell(FluidEngine const &fluid, int index) {
-    MaterialVisual vis = visualForSubstance(SUBSTANCE_WATER);
-    float h = fluid.liquidComponentFraction(index, SUBSTANCE_HONEY);
-    if (h > 0.001f) lerpVisual(vis, visualForSubstance(SUBSTANCE_HONEY), h);
+    LiquidComponentView view = fluid.liquidComponents(index);
+    MaterialVisual vis = blendLiquidVisual(view.items, view.count);
     float f = std::max(fluid.fill[static_cast<size_t>(index)], 1.0e-8f);
     applyDye(vis,
         std::clamp(fluid.dyeR[static_cast<size_t>(index)] / f, 0.0f, 1.0f),
@@ -91,10 +117,8 @@ MaterialVisual sampleLiquidCell(FluidEngine const &fluid, int index) {
 }
 
 MaterialVisual sampleSplash(SplashParticle const &p) {
-    MaterialVisual vis = visualForSubstance(SUBSTANCE_WATER);
+    MaterialVisual vis = blendLiquidVisual(p.comps, p.compCount);
     float vol = std::max(p.volume, 1.0e-8f);
-    float h = std::clamp(liquidPayloadAmount(p.comps, p.compCount, SUBSTANCE_HONEY) / vol, 0.0f, 1.0f);
-    if (h > 0.001f) lerpVisual(vis, visualForSubstance(SUBSTANCE_HONEY), h);
     applyDye(vis,
         std::clamp(p.dyeR / vol, 0.0f, 1.0f),
         std::clamp(p.dyeG / vol, 0.0f, 1.0f),

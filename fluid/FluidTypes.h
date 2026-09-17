@@ -58,7 +58,10 @@ struct LiquidComponentView {
 };
 
 inline bool validLiquidComponentId(SubstanceId id) {
-    return id != SUBSTANCE_NONE && id < SUBSTANCE_COUNT;
+    return validSubstance(id)
+        && id != SUBSTANCE_NONE
+        && supportsPhase(id, MatterPhase::Liquid)
+        && hasFluidProperties(id);
 }
 
 inline int findLiquidComponent(LiquidComponent const *items, int count, SubstanceId id) {

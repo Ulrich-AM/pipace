@@ -94,6 +94,8 @@ float ThermalEngine::liquidCapacity(FluidEngine const &fluid, int index) {
     if (index < 0 || index >= GW * GH) return 0.0f;
     float fill = fluid.fill[static_cast<size_t>(index)];
     if (fill <= 1.0e-8f) return 0.0f;
+    // Mixture density + mass-weighted Cp; fill scales mass only. Invalid
+    // composition uses reference solver numbers without writing Water identity.
     float mass = massKg(fluid.mixDensity(index), fill, fluid.config.cellsPerMeter);
     return thermalCapacity(mass, fluid.mixSpecificHeat(index));
 }

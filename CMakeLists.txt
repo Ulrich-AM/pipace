@@ -15,6 +15,7 @@ add_executable(pipace WIN32
   render/WorldRenderer.cpp
   substance/SubstanceRegistry.cpp
   substance/PhaseTransfer.cpp
+  substance/LiquidMixtureProperties.cpp
   world/WorldQuery.cpp
   world/WaterPhaseChange.cpp
 )
