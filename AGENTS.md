@@ -91,10 +91,10 @@ total occupancy. `MatterSample` reports the dominant component plus fractions.
 Solver unit liquid is `sandboxReferenceLiquid()` (currently SUBSTANCE_WATER's fluid
 table: relative density 1.0). That is a reference, not “all liquid is water”.
 
-Effective liquid density / Cp / k / viscosity / surface tension come from
-`evaluateLiquidMixture` in `substance/LiquidMixtureProperties.*`. Pure cells use
-the component table directly; mixtures use the documented mixing laws. Empty or
-invalid composition uses reference numbers only (no silent Water identity).
+Effective liquid density / Cp / k / surface tension come from
+`evaluateLiquidMixture`; viscosity from `evaluateLiquidMixtureViscosity(T)`.
+Water phase change requires `liquidCompositionIsPureWater`. Empty or invalid
+composition uses reference numbers only (no silent Water identity).
 
 **Compatibility adapters that remain (justified):**
 

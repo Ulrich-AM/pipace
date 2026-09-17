@@ -421,42 +421,40 @@ bool FluidEngine::liquidCompositionValid(int index) const {
     return std::abs(sum - f) <= 1.0e-5f;
 }
 
-namespace {
-LiquidMixtureProperties cellMixture(FluidEngine const &eng, int index) {
-    LiquidComponentView view{};
-    float T = AMBIENT_TEMPERATURE_K;
-    if (index >= 0 && index < GW * GH) {
-        view = eng.liquidComponents(index);
-        float f = eng.fill[static_cast<size_t>(index)];
-        if (f > kMinLiquidComponent) {
-            LiquidMixtureProperties mix0 = evaluateLiquidMixture(view, T);
-            float cap = thermalCapacity(
-                massKg(mix0.density, f, eng.config.cellsPerMeter), mix0.specificHeat);
-            T = tempFromEnergy(eng.liquidHeat[static_cast<size_t>(index)], cap);
-        }
-    }
-    return evaluateLiquidMixture(view, T);
+LiquidMixtureProperties FluidEngine::mixProperties(int index) const {
+    if (index < 0 || index >= GW * GH)
+        return referenceLiquidMixture();
+    return evaluateLiquidMixture(liquidComponents(index));
 }
-} // namespace
 
 float FluidEngine::mixDensity(int index) const {
-    return cellMixture(*this, index).density;
+    return mixProperties(index).density;
 }
 
 float FluidEngine::mixSpecificHeat(int index) const {
-    return cellMixture(*this, index).specificHeat;
+    return mixProperties(index).specificHeat;
 }
 
 float FluidEngine::mixConductivity(int index) const {
-    return cellMixture(*this, index).conductivity;
+    return mixProperties(index).conductivity;
 }
 
 float FluidEngine::mixViscosity(int index) const {
-    return cellMixture(*this, index).viscosity;
+    if (index < 0 || index >= GW * GH)
+        return evaluateLiquidMixtureViscosity(LiquidComponentView{}, AMBIENT_TEMPERATURE_K);
+    LiquidComponentView view = liquidComponents(index);
+    LiquidMixtureProperties mix = evaluateLiquidMixture(view);
+    float T = AMBIENT_TEMPERATURE_K;
+    float f = fill[static_cast<size_t>(index)];
+    if (f > kMinLiquidComponent) {
+        float cap = thermalCapacity(massKg(mix.density, f, config.cellsPerMeter), mix.specificHeat);
+        T = tempFromEnergy(liquidHeat[static_cast<size_t>(index)], cap);
+    }
+    return evaluateLiquidMixtureViscosity(view, T);
 }
 
 float FluidEngine::mixSurfaceTension(int index) const {
-    return cellMixture(*this, index).surfaceTension;
+    return mixProperties(index).surfaceTension;
 }
 
 void FluidEngine::applyCarry(int index, LiquidCarry const &c) {
@@ -563,8 +561,9 @@ void FluidEngine::seedAmbientHeat() {
     for (int i = 0; i < GW * GH; ++i) {
         float f = fill[static_cast<size_t>(i)];
         if (f > 1.0e-8f) {
-            float cap = thermalCapacity(massKg(mixDensity(i), f, config.cellsPerMeter),
-                mixSpecificHeat(i));
+            LiquidMixtureProperties mix = mixProperties(i);
+            float cap = thermalCapacity(massKg(mix.density, f, config.cellsPerMeter),
+                mix.specificHeat);
             liquidHeat[static_cast<size_t>(i)] = energyFromTemp(cap, AMBIENT_TEMPERATURE_K);
         } else {
             liquidHeat[static_cast<size_t>(i)] = 0.0f;
@@ -1507,7 +1506,8 @@ void FluidEngine::advectLiquidVolume(float dt) {
             }
         }
         if (std::abs(dq) > 1.0e-4f) {
-            float td = tempFromEnergy(liquidHeat[donor], thermalCapacity(massKg(mixDensity(donor), f0, config.cellsPerMeter), mixSpecificHeat(donor)));
+            LiquidMixtureProperties mix = mixProperties(donor);
+            float td = tempFromEnergy(liquidHeat[donor], thermalCapacity(massKg(mix.density, f0, config.cellsPerMeter), mix.specificHeat));
             if (std::abs(td - AMBIENT_TEMPERATURE_K) > 0.2f) {
                 int dx = donor % GW, dy = donor / GW;
                 int rx = receiver % GW, ry = receiver / GW;

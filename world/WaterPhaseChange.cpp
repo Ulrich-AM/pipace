@@ -6,6 +6,7 @@
 #include "rigid/RigidBodyEngine.h"
 #include "substance/PhaseTransfer.h"
 #include "substance/SubstanceRegistry.h"
+#include "substance/LiquidMixtureProperties.h"
 #include "thermal/ThermalEngine.h"
 #include "world/WorldQuery.h"
 
@@ -23,10 +24,9 @@ namespace {
 
 constexpr int kDx[4] = {0, -1, 1, 0};
 constexpr int kDy[4] = {-1, 0, 0, 1}; // above, left, right, below (y down)
-constexpr float kHoneySkip = 1.0e-4f;
 
-bool honeyMixture(FluidEngine const &fluid, int i) {
-    return fluid.liquidComponentFraction(i, SUBSTANCE_HONEY) > kHoneySkip;
+bool liquidIsPureWater(FluidEngine const &fluid, int i) {
+    return liquidCompositionIsPureWater(fluid.liquidComponents(i));
 }
 // Time-based liquid/gas conversion cap. 10.5 fill/s matches the old 0.35 fill/tick at 30 Hz.
 constexpr float kMaxFillPerSec = 10.5f;
@@ -257,7 +257,7 @@ int findLiquidDest(FluidEngine const &fluid, RigidBodyEngine const &rigid, GasEn
         float fill = fluid.fill[static_cast<size_t>(i)];
         float room = 1.0f - fill;
         if (room < kMinFillMove) return -1.0f;
-        if (honeyMixture(fluid, i) && fill > 1.0e-6f) return -1.0f;
+        if (fill > 1.0e-6f && !liquidIsPureWater(fluid, i)) return -1.0f;
         float s = room;
         if (fill > kMinFillMove) s += 4.0f + fill;
         if (preferCoolSurfaces) s += coolSurfaceBonus(fluid, rigid, gas, x, y, Tref);
@@ -666,7 +666,7 @@ void freezeMeltWater(FluidEngine &fluid, RigidBodyEngine &rigid, GasEngine &gas,
         }
         float fill = fluid.fill[static_cast<size_t>(i)];
         float pending0 = fluid.frozenPendingKg[static_cast<size_t>(i)];
-        if (fill >= kMinFillMove && !honeyMixture(fluid, i)) {
+        if (fill >= kMinFillMove && liquidIsPureWater(fluid, i)) {
             float waterFill = fluid.liquidComponentAmount(i, SUBSTANCE_WATER);
             float C = ThermalEngine::liquidCapacity(fluid, i);
             float E = fluid.liquidHeat[static_cast<size_t>(i)];
@@ -702,7 +702,7 @@ void freezeMeltWater(FluidEngine &fluid, RigidBodyEngine &rigid, GasEngine &gas,
                     }
                 }
             }
-        } else if (fill >= kMinFillMove && honeyMixture(fluid, i)) {
+        } else if (fill >= kMinFillMove && !liquidIsPureWater(fluid, i)) {
             (void)pending0;
         }
         trySpawnPending(x, y);
@@ -898,7 +898,7 @@ WaterPhaseTickStats stepWaterPhaseChange(FluidEngine &fluid, RigidBodyEngine &ri
             if (isBlockedSolid(fluid, rigid, x, y)) continue;
             float fill = fluid.fill[static_cast<size_t>(i)];
             if (fill < kMinFillMove) continue;
-            if (honeyMixture(fluid, i)) continue;
+            if (!liquidIsPureWater(fluid, i)) continue;
             float waterFill = fluid.liquidComponentAmount(i, SUBSTANCE_WATER);
             if (waterFill < kMinFillMove) continue;
             float C = ThermalEngine::liquidCapacity(fluid, i);
@@ -1479,7 +1479,7 @@ void runWaterPhaseValidation(FluidEngine &fluid, RigidBodyEngine &rigid,
     auto forceWaterTemp = [&](float tempK) {
         for (int i = 0; i < GW * GH; ++i) {
             if (fluid.fill[static_cast<size_t>(i)] <= 1.0e-8f) continue;
-            if (honeyMixture(fluid, i)) continue;
+            if (!liquidIsPureWater(fluid, i)) continue;
             float C = ThermalEngine::liquidCapacity(fluid, i);
             if (C > MIN_THERMAL_CAPACITY)
                 fluid.liquidHeat[static_cast<size_t>(i)] = energyFromTemp(C, tempK);

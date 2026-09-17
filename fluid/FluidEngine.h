@@ -3,6 +3,7 @@
 #include "FluidConfig.h"
 #include "WorkerPool.h"
 #include "BrushGeom.h"
+#include "substance/LiquidMixtureProperties.h"
 
 #include <chrono>
 #include <cstdint>
@@ -194,9 +195,10 @@ struct FluidEngine {
         for (int n = 0; n < view.count; ++n)
             fn(view.items[n].id, view.items[n].amount);
     }
-    float mixDensity(int index) const;       // evaluateLiquidMixture density
-    float mixSpecificHeat(int index) const;  // mass-weighted Cp
-    float mixConductivity(int index) const;  // volume-fraction k
+    LiquidMixtureProperties mixProperties(int index) const; // density, Cp, k, gamma; viscosity unused
+    float mixDensity(int index) const;
+    float mixSpecificHeat(int index) const;
+    float mixConductivity(int index) const;
     void clearEmptyLiquidCell(int index);
     void updateSplashParticles(float dt);
     void spawnSurfaceSpray();
