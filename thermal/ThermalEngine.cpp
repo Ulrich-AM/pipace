@@ -6,6 +6,7 @@
 #include "rigid/RigidBodyEngine.h"
 #include "substance/SubstanceRegistry.h"
 #include "substance/PhaseTransfer.h"
+#include "substance/LiquidMixtureProperties.h"
 
 #include <algorithm>
 #include <array>
@@ -96,8 +97,9 @@ float ThermalEngine::liquidCapacity(FluidEngine const &fluid, int index) {
     if (fill <= 1.0e-8f) return 0.0f;
     // Mixture density + mass-weighted Cp; fill scales mass only. Invalid
     // composition uses reference solver numbers without writing Water identity.
-    float mass = massKg(fluid.mixDensity(index), fill, fluid.config.cellsPerMeter);
-    return thermalCapacity(mass, fluid.mixSpecificHeat(index));
+    LiquidMixtureProperties mix = evaluateLiquidMixture(fluid.liquidComponents(index));
+    float mass = massKg(mix.density, fill, fluid.config.cellsPerMeter);
+    return thermalCapacity(mass, mix.specificHeat);
 }
 
 float ThermalEngine::wallCapacity(FluidEngine const &fluid, int index) {
@@ -159,8 +161,8 @@ void ThermalEngine::seedAmbient(FluidEngine &fluid, RigidBodyEngine &rigid, GasE
     for (int i = 0; i < GW * GH; ++i) {
         float fill = fluid.fill[static_cast<size_t>(i)];
         if (fill > 1.0e-8f) {
-            float cap = thermalCapacity(massKg(fluid.mixDensity(i), fill, cpm),
-                fluid.mixSpecificHeat(i));
+            LiquidMixtureProperties mix = evaluateLiquidMixture(fluid.liquidComponents(i));
+            float cap = thermalCapacity(massKg(mix.density, fill, cpm), mix.specificHeat);
             fluid.liquidHeat[static_cast<size_t>(i)] = energyFromTemp(cap, AMBIENT_TEMPERATURE_K);
         } else {
             fluid.clearEmptyLiquidCell(i);
