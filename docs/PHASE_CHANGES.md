@@ -70,7 +70,7 @@ lab apparatus except where noted.
 | Full water cell mass | `1 × 1000 kg/m³ × 0.015625 m³` = **15.625 kg** |
 | Gas `amount` | Conserved cell-atmospheres. **1.0 amount in 1.0 volume = 1 atm** (isothermal `P = amount / volume`). |
 | Air mass | `amount × 1.204 kg/m³ × V` (same as `gasMassKg`) |
-| Water vapor mass | `amount × ρ_vapor × V`, `ρ_vapor` from water `chemical.molarMass` at reference P and ambient T. Still `SUBSTANCE_WATER`. Stored as `gas.waterVapor`; air = total − vapor. |
+| Water vapor mass | Component amount × ρ_vapor × V, `ρ_vapor` from water `chemical.molarMass` at reference P and ambient T. Still `SUBSTANCE_WATER` + `MatterPhase::Gas` in generic gas composition slots. Air is an explicit `SUBSTANCE_AIR` component, not `amount − vapor`. |
 | Thermal energy | Joules |
 | Latent heats | `PhaseProperties.latentHeatFusion` / `latentHeatVaporization` (J/kg) |
 

@@ -12,7 +12,7 @@ Long-term architecture (cooperating systems, not one universal solver):
 |---|---|
 | **Physics engines** (liquid / solid / gas) | How does matter with these properties move? |
 | **SACE** (Somewhat Accurate Calculator for Elements) | What is this substance, what can it become, what properties should new substances have? |
-| **Chemistry** (`ReactionDefinition` / `ReactionEngine`) | What reactions are possible, and (when the registry is non-empty) a conservative local execute step. GasEngine is Air + water vapor only — generic gas chemistry is deferred. |
+| **Chemistry** (`ReactionDefinition` / `ReactionEngine`) | What reactions are possible, and (when the registry is non-empty) a conservative local execute step. GasEngine now has generic SubstanceId composition; no player-facing gas reactions are registered yet. |
 | **World state** | Where is it, how much, temperature/pressure/phase/local conditions? |
 | **Rendering** | How should the current state be drawn? |
 
@@ -27,7 +27,7 @@ PIPACE/
   assets/                  # category tray icons (PNG)
   languages/english.json   # editable UI strings; loadLanguage() in main.cpp
   gas/
-    GasEngine.h/.cpp       # Air amount/pressure/flow (temperature-aware, P still isothermal)
+    GasEngine.h/.cpp       # Generic gas composition + amount/pressure/flow (P still isothermal)
   thermal/
     ThermalTypes.h / ThermalConfig.h / ThermalEngine.h/.cpp  # heat storage, conduction, sleep
   fluid/
@@ -74,8 +74,8 @@ These mappings are **implementation, not laws**:
 | Wood/Glass/Metal + Solid | RigidBodyEngine (MaterialId masks) |
 | Water + Solid | RigidBodyEngine (`MATERIAL_WATER_SOLID` mask, still SUBSTANCE_WATER) |
 | Stone + Solid | rigid body **or** static `solid[]` walls (`kStaticWallSubstance`) |
-| Air + Gas | GasEngine (air component) |
-| Water + Gas | GasEngine (`waterVapor` component; same SubstanceId) |
+| Air + Gas | GasEngine (`SUBSTANCE_AIR` component) |
+| Water + Gas | GasEngine (`SUBSTANCE_WATER` gas component; same SubstanceId) |
 
 Static `solid[]` walls use Stone thermal/mechanical identity but are
 **moisture-inert** (no absorb / drip / wetness). Porous Stone rigid bodies still
@@ -92,6 +92,11 @@ High-level composition queries use `FluidEngine` SubstanceId APIs
 `liquidComponents`). Storage is a fixed-capacity SoA of up to 4 components per
 cell (`liquidCompId` / `liquidCompAmt` / `liquidCompCount`); `fill[]` remains
 total occupancy. `MatterSample` reports the dominant component plus fractions.
+
+Gas cells use the same pattern: `amount[]` is total cell-atmospheres; composition
+is a 4-slot SoA (`gasCompId` / `gasCompAmt` / `gasCompCount`). Air is an explicit
+`SUBSTANCE_AIR` component. Water vapor is `SUBSTANCE_WATER` + `MatterPhase::Gas`.
+Do not infer missing gas as Air. Pressure still uses total `amount`.
 
 Solver unit liquid is `sandboxReferenceLiquid()` (currently SUBSTANCE_WATER's fluid
 table: relative density 1.0). That is a reference, not “all liquid is water”.

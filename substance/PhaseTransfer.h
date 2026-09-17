@@ -24,8 +24,9 @@
 //   GasEngine amount       conserved "cell-atmospheres". 1.0 amount in 1.0 available
 //                          volume = 1 atm (isothermal P = amount / volume).
 //                          1.0 ≈ one cell of 1 atm of the stored gas species.
-//                          Today the engine stores Air + water-vapor components
-//                          (gas.amount total, gas.waterVapor species).
+//                          Generic composition: amount[] is total cell-atmospheres;
+//                          per-cell SubstanceId slots (Air, Water vapor, …) sum to amount.
+//                          Water vapor is SUBSTANCE_WATER + MatterPhase::Gas.
 //   air mass               amount * 1.204 kg/m³ * V  (gasMassKg; ambient-T air)
 //   water vapor mass       amount * ρ_vapor(id) * V
 //                          ρ_vapor from ideal gas at phase.referencePressurePa and
@@ -151,15 +152,17 @@ inline double referenceGasDensityKgM3(SubstanceId id) {
     if (!supportsPhase(id, MatterPhase::Gas)) return 0.0;
     if (id == SUBSTANCE_AIR) return static_cast<double>(AIR_DENSITY_KG_M3);
     float M = chemicalForSubstance(id).molarMass;
-    if (!(M > 0.0f) || !std::isfinite(M)) return 0.0;
-    float P = phaseForSubstance(id).referencePressurePa;
-    if (!(P > 0.0f) || !std::isfinite(P)) P = GAS_REFERENCE_PRESSURE_PA;
-    double T = static_cast<double>(AMBIENT_TEMPERATURE_K);
-    if (!(T > 1.0)) T = 293.15;
-    double Mkg = static_cast<double>(M) * 0.001;
-    double rho = static_cast<double>(P) * Mkg / (static_cast<double>(UNIVERSAL_GAS_R_J_MOL_K) * T);
-    if (!std::isfinite(rho) || rho <= 0.0) return 0.0;
-    return rho;
+    if (M > 0.0f && std::isfinite(M)) {
+        float P = phaseForSubstance(id).referencePressurePa;
+        if (!(P > 0.0f) || !std::isfinite(P)) P = GAS_REFERENCE_PRESSURE_PA;
+        double T = static_cast<double>(AMBIENT_TEMPERATURE_K);
+        if (!(T > 1.0)) T = 293.15;
+        double Mkg = static_cast<double>(M) * 0.001;
+        double rho = static_cast<double>(P) * Mkg / (static_cast<double>(UNIVERSAL_GAS_R_J_MOL_K) * T);
+        if (std::isfinite(rho) && rho > 0.0) return rho;
+    }
+    // Numerical safety only. Does not relabel the gas as Air.
+    return static_cast<double>(AIR_DENSITY_KG_M3);
 }
 
 inline double liquidFillToMassKg(SubstanceId id, double fill, double cellsPerMeter) {
