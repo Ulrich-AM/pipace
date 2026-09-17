@@ -1,0 +1,11 @@
+test	limiting_extent	PASS	extent=3.000000
+test	extent_3_commit	PASS	A=4.000000 B=0.000000 C=3.000000
+test	exothermic_heat	PASS	heat=130.000000
+test	rate_limit_extent_1	PASS	e=1.000000
+test	insufficient_reactant_no_mutation	PASS	
+test	unsupported_gas_product	PASS	
+test	unsupported_solid_reactant	PASS	
+test	no_slot_no_mutation	PASS	count=4
+test	endothermic_heat_bound	PASS	e=1.000000 heat=0.000000
+test	empty_registry_fast_path	PASS	count=0
+summary	PASS	10 passed, 0 failed

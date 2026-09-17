@@ -14,6 +14,7 @@
 #include "render/WorldRenderer.h"
 #include "world/WorldQuery.h"
 #include "world/WaterPhaseChange.h"
+#include "chemistry/ReactionEngine.h"
 #include "substance/SubstanceRegistry.h"
 #include "substance/PhaseTransfer.h"
 
@@ -32,6 +33,7 @@ FluidEngine engine;
 RigidBodyEngine rigid;
 GasEngine gas;
 ThermalEngine thermal;
+ReactionEngine reactions;
 ui::ShellState shell;
 
 constexpr std::array<float, 6> speedScales{{0.10f, 0.25f, 0.50f, 1.0f, 2.0f, 4.0f}};
@@ -1023,6 +1025,7 @@ void worldTick() {
     gas.applyPressureForces(rigid, engine);
     thermal.simulationTick(engine, rigid, gas, PHYSICS_DT);
     stepWaterPhaseChange(engine, rigid, gas, thermal, PHYSICS_DT);
+    reactions.simulationTick(engine, rigid, gas, thermal, PHYSICS_DT);
     adaptAutoQuality(FluidEngine::elapsedMs(tickStart));
 }
 
@@ -1536,6 +1539,10 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR commandLine, int show)
     if (commandLine && wcsstr(commandLine, L"--solid-diag")) { rigid.runSolidDiagnostics(engine); return 0; }
     if (commandLine && wcsstr(commandLine, L"--moisture-diag")) { rigid.runMoistureDiagnostics(engine); return 0; }
     if (commandLine && wcsstr(commandLine, L"--moisture-drip-diag")) { rigid.runMoistureDripDiagnostics(engine); return 0; }
+    if (commandLine && wcsstr(commandLine, L"--reaction-engine-sanity")) {
+        runReactionEngineSanityCheck();
+        return 0;
+    }
     if (commandLine && wcsstr(commandLine, L"--substance-registry-diag")) { runSubstanceRegistryDiagnostics(); return 0; }
     if (commandLine && wcsstr(commandLine, L"--phase-transfer-diag")) { runPhaseTransferDiagnostics(); return 0; }
     if (commandLine && wcsstr(commandLine, L"--water-phase-diag")) {

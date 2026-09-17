@@ -199,6 +199,9 @@ struct FluidEngine {
     float mixDensity(int index) const;
     float mixSpecificHeat(int index) const;
     float mixConductivity(int index) const;
+    // Occupancy write for chemistry: sets slots + fill from the view, does not
+    // rescale heat/dye or invent Water. false = no mutation.
+    bool tryCommitLiquidOccupancy(int index, LiquidComponentView const &view);
     void clearEmptyLiquidCell(int index);
     void updateSplashParticles(float dt);
     void spawnSurfaceSpray();

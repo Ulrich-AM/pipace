@@ -457,6 +457,41 @@ float FluidEngine::mixSurfaceTension(int index) const {
     return mixProperties(index).surfaceTension;
 }
 
+bool FluidEngine::tryCommitLiquidOccupancy(int index, LiquidComponentView const &view) {
+    if (index < 0 || index >= GW * GH) return false;
+    size_t i = static_cast<size_t>(index);
+    if (solid[i] || dynamicSolid[i]) return false;
+    if (view.count < 0 || view.count > kMaxLiquidComponents) return false;
+    LiquidComponent packed[kMaxLiquidComponents]{};
+    int n = 0;
+    float sum = 0.0f;
+    for (int s = 0; s < view.count; ++s) {
+        SubstanceId id = view.items[s].id;
+        float amt = view.items[s].amount;
+        if (!std::isfinite(amt) || amt < 0.0f) return false;
+        if (!(amt > kMinLiquidComponent)) continue;
+        if (!validLiquidComponentId(id)) return false;
+        for (int a = 0; a < n; ++a)
+            if (packed[a].id == id) return false;
+        packed[n++] = {id, amt};
+        sum += amt;
+    }
+    if (sum > 1.0f + 1.0e-5f) return false;
+    int base = compositionSlot(index, 0);
+    for (int s = 0; s < kMaxLiquidComponents; ++s) {
+        if (s < n) {
+            liquidCompId[static_cast<size_t>(base + s)] = packed[s].id;
+            liquidCompAmt[static_cast<size_t>(base + s)] = packed[s].amount;
+        } else {
+            liquidCompId[static_cast<size_t>(base + s)] = SUBSTANCE_NONE;
+            liquidCompAmt[static_cast<size_t>(base + s)] = 0.0f;
+        }
+    }
+    liquidCompCount[i] = static_cast<uint8_t>(n);
+    fill[i] = sum;
+    return true;
+}
+
 void FluidEngine::applyCarry(int index, LiquidCarry const &c) {
     size_t i = static_cast<size_t>(index);
     liquidHeat[i] += c.heat;

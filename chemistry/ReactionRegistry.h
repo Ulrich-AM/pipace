@@ -4,7 +4,6 @@
 
 // Built-in table lives in ReactionRegistry.cpp (function-local static), same
 // pattern as SubstanceRegistry. No runtime registration yet.
-// There is no ReactionEngine in this layer: definitions only.
 
 ReactionDefinition const *builtinReactionTable();
 int reactionTableSize(); // includes REACTION_NONE at slot 0
