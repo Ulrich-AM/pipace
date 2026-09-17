@@ -16,6 +16,7 @@ add_executable(pipace WIN32
   substance/SubstanceRegistry.cpp
   substance/PhaseTransfer.cpp
   substance/LiquidMixtureProperties.cpp
+  chemistry/ReactionRegistry.cpp
   world/WorldQuery.cpp
   world/WaterPhaseChange.cpp
 )
