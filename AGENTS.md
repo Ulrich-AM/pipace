@@ -12,7 +12,7 @@ Long-term architecture (cooperating systems, not one universal solver):
 |---|---|
 | **Physics engines** (liquid / solid / gas) | How does matter with these properties move? |
 | **SACE** (Somewhat Accurate Calculator for Elements) | What is this substance, what can it become, what properties should new substances have? |
-| **Chemistry** (`ReactionDefinition`) | What reactions are possible, with what stoichiometry, conditions, and ΔH? Data only today. |
+| **Chemistry** (`ReactionDefinition` / `ReactionEngine`) | What reactions are possible, and (when the registry is non-empty) a conservative local execute step. GasEngine is Air + water vapor only — generic gas chemistry is deferred. |
 | **World state** | Where is it, how much, temperature/pressure/phase/local conditions? |
 | **Rendering** | How should the current state be drawn? |
 
@@ -45,7 +45,9 @@ PIPACE/
     WorldQuery.h/.cpp      # sampleMatterAt (SubstanceId + phase), phase/registry diags
     WaterPhaseChange.h/.cpp # water liquid ⇄ gas / solid; mixture skip via composition API
   chemistry/
-    ReactionTypes.h / ReactionRegistry.h/.cpp  # ReactionId + ReactionDefinition data only (no engine)
+    ReactionTypes.h / ReactionRegistry.h/.cpp  # ReactionId + ReactionDefinition data only
+    ReactionMatterAccess.h/.cpp                # SubstanceId+phase query; liquid commit
+    ReactionEngine.h/.cpp                      # local liquid reactions; empty registry is a no-op
   docs/
     PHASE_CHANGES.md       # Water solid ⇄ liquid ⇄ gas is live; honey mixtures are not
   CMakeLists.txt / build.bat / run.bat

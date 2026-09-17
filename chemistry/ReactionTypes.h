@@ -52,6 +52,10 @@ struct ReactionDefinition {
     uint8_t productCount = 0;
     ReactionConditions conditions{};
     float energyChangeJPerExtent = 0.0f;
+    // Authorable first-order cap. Not Arrhenius kinetics. <= 0 means the
+    // engine default (see ReactionEngine). Extent 1 consumes the written
+    // coefficients in one second at this rate when matter allows.
+    float maxExtentPerSecond = 0.0f;
 };
 
 inline bool reactionParticipantUsed(ReactionParticipant const &p) {
