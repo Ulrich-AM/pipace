@@ -186,6 +186,7 @@ struct FluidEngine {
     void setLiquidComponentAmount(int index, SubstanceId id, float amount);
     void addLiquidComponentAmount(int index, SubstanceId id, float delta);
     SubstanceId dominantLiquidSubstance(int index) const;
+    bool liquidCompositionValid(int index) const;
     LiquidComponentView liquidComponents(int index) const;
     template<typename Fn>
     void forEachLiquidComponent(int index, Fn &&fn) const {
@@ -193,9 +194,9 @@ struct FluidEngine {
         for (int n = 0; n < view.count; ++n)
             fn(view.items[n].id, view.items[n].amount);
     }
-    float mixDensity(int index) const;
-    float mixSpecificHeat(int index) const;
-    float mixConductivity(int index) const;
+    float mixDensity(int index) const;       // evaluateLiquidMixture density
+    float mixSpecificHeat(int index) const;  // mass-weighted Cp
+    float mixConductivity(int index) const;  // volume-fraction k
     void clearEmptyLiquidCell(int index);
     void updateSplashParticles(float dt);
     void spawnSurfaceSpray();
