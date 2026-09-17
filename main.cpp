@@ -161,6 +161,7 @@ void applySimQuality(int level);
 void setQualityPreset(QualityPreset preset);
 void adaptAutoQuality(double worldMs);
 void paintEnergyDisc(int cx, int cy);
+void paintGasDisc(int cx, int cy);
 
 bool paletteUsesToolBrush() {
     using ui::PaletteId;
@@ -596,6 +597,10 @@ void ghostTint(int &r, int &g, int &b) {
     else if (activeTool == Tool::Cool) { r = 80; g = 130; b = 200; }
     else if (activeTool == Tool::Pressurize) { r = 200; g = 160; b = 70; }
     else if (activeTool == Tool::Depressurize) { r = 110; g = 112; b = 140; }
+    else if (activeTool == Tool::Gas) {
+        if (shell.palette == ui::PaletteId::Oxygen) { r = 120; g = 160; b = 210; }
+        else { r = 170; g = 210; b = 220; }
+    }
     else if (activeTool == Tool::Rigid) {
         MaterialDefinition const &mat = materialDef(rigid.drawMaterial);
         r = std::min(255, mat.colorR + 36);
@@ -727,10 +732,17 @@ uint32_t gasPressureColor(float atm) {
     return lerpRgb(72, 92, 108, 245, 220, 70, t);
 }
 
-uint32_t gasAmountColor(float amount) {
+uint32_t gasAmountColor(float amount, SubstanceId dominant) {
     float t = std::clamp(amount / 2.0f, 0.0f, 1.0f);
     if (t <= 0.0f) return rgb(6, 6, 8);
-    return lerpRgb(20, 28, 36, 90, 200, 170, t);
+    int r1 = 90, g1 = 200, b1 = 170;
+    SubstanceVisualMetadata const &vis = substanceDef(dominant).visual;
+    if (vis.valid) {
+        r1 = vis.colorR;
+        g1 = vis.colorG;
+        b1 = vis.colorB;
+    }
+    return lerpRgb(20, 28, 36, r1, g1, b1, t);
 }
 
 void fillWorldPixels() {
@@ -779,7 +791,8 @@ void fillWorldPixels() {
         else if (debugView == DebugView::GasPressure && !engine.dynamicSolid[index]) {
             color = gasPressureColor(gas.pressure[static_cast<size_t>(index)]);
         } else if (debugView == DebugView::GasAmount && !engine.dynamicSolid[index]) {
-            color = gasAmountColor(gas.amount[static_cast<size_t>(index)]);
+            color = gasAmountColor(gas.amount[static_cast<size_t>(index)],
+                gas.dominantGasSubstance(index));
         } else if (debugView == DebugView::GasVelocity && !engine.dynamicSolid[index] && gas.volume[static_cast<size_t>(index)] >= GAS_MIN_VOLUME) {
             float speed = std::sqrt(gas.cellU(x, y) * gas.cellU(x, y) + gas.cellV(x, y) * gas.cellV(x, y));
             float q = std::clamp(speed / 20.0f, 0.0f, 1.0f);
@@ -1114,6 +1127,17 @@ void commitLineStroke() {
             if (twice >= dy) { error += dy; x0 += sx; }
             if (twice <= dx) { error += dx; y0 += sy; }
         }
+    } else if (activeTool == Tool::Gas) {
+        int dx = std::abs(lineEndX - lineStartX), sx = lineStartX < lineEndX ? 1 : -1;
+        int dy = -std::abs(lineEndY - lineStartY), sy = lineStartY < lineEndY ? 1 : -1, error = dx + dy;
+        int x0 = lineStartX, y0 = lineStartY;
+        for (;;) {
+            paintGasDisc(x0, y0);
+            if (x0 == lineEndX && y0 == lineEndY) break;
+            int twice = 2 * error;
+            if (twice >= dy) { error += dy; x0 += sx; }
+            if (twice <= dx) { error += dx; y0 += sy; }
+        }
     } else if (activeTool == Tool::Eraser) {
         eraseStrokeSeen.clear();
         applyEraseLine(lineStartX, lineStartY, lineEndX, lineEndY);
@@ -1141,12 +1165,25 @@ void paintEnergyDisc(int cx, int cy) {
         sign * gas.config.brushAtmPerSec * shell.heatPower, PHYSICS_DT, strokeShape());
 }
 
+void paintGasDisc(int cx, int cy) {
+    SubstanceId sid = SUBSTANCE_NONE;
+    if (shell.palette == ui::PaletteId::Hydrogen) sid = SUBSTANCE_HYDROGEN;
+    else if (shell.palette == ui::PaletteId::Oxygen) sid = SUBSTANCE_OXYGEN;
+    if (sid == SUBSTANCE_NONE) return;
+    gas.applyGasBrush(engine, cx, cy, strokeRadius(), sid,
+        gas.config.brushAtmPerSec * std::max(0.25f, shell.heatPower), PHYSICS_DT, strokeShape());
+}
+
 void beginPaintStroke(int x, int y) {
     if (!shell.hasPlacement()) return;
     preparePlacement();
     clientToGrid(x, y, lastPaintX, lastPaintY);
     if (isEnergyTool(activeTool)) {
         paintEnergyDisc(lastPaintX, lastPaintY);
+        return;
+    }
+    if (activeTool == Tool::Gas) {
+        paintGasDisc(lastPaintX, lastPaintY);
         return;
     }
     if (activeTool == Tool::Eraser) {
@@ -1169,6 +1206,11 @@ void continuePaintStroke(int x, int y) {
     int gx, gy; clientToGrid(x, y, gx, gy);
     if (isEnergyTool(activeTool)) {
         paintEnergyDisc(gx, gy);
+        lastPaintX = gx; lastPaintY = gy;
+        return;
+    }
+    if (activeTool == Tool::Gas) {
+        paintGasDisc(gx, gy);
         lastPaintX = gx; lastPaintY = gy;
         return;
     }

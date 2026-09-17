@@ -12,7 +12,7 @@ Long-term architecture (cooperating systems, not one universal solver):
 |---|---|
 | **Physics engines** (liquid / solid / gas) | How does matter with these properties move? |
 | **SACE** (Somewhat Accurate Calculator for Elements) | What is this substance, what can it become, what properties should new substances have? |
-| **Chemistry** (`ReactionDefinition` / `ReactionEngine`) | What reactions are possible, and (when the registry is non-empty) a conservative local execute step. GasEngine now has generic SubstanceId composition; no player-facing gas reactions are registered yet. |
+| **Chemistry** (`ReactionDefinition` / `ReactionEngine`) | What reactions are possible, and a conservative local execute step. First player-facing reaction: `2 H2(g) + O2(g) -> 2 H2O(g)` (ignition gate ~850 K). |
 | **World state** | Where is it, how much, temperature/pressure/phase/local conditions? |
 | **Rendering** | How should the current state be drawn? |
 
@@ -47,7 +47,7 @@ PIPACE/
   chemistry/
     ReactionTypes.h / ReactionRegistry.h/.cpp  # ReactionId + ReactionDefinition data only
     ReactionMatterAccess.h/.cpp                # SubstanceId+phase query; liquid commit
-    ReactionEngine.h/.cpp                      # local liquid/gas reactions via moles; empty registry is a no-op
+    ReactionEngine.h/.cpp                      # local liquid/gas reactions via moles; H2+O2 combustion live
   docs/
     PHASE_CHANGES.md       # Water solid ⇄ liquid ⇄ gas is live; honey mixtures are not
   CMakeLists.txt / build.bat / run.bat
@@ -75,6 +75,8 @@ These mappings are **implementation, not laws**:
 | Water + Solid | RigidBodyEngine (`MATERIAL_WATER_SOLID` mask, still SUBSTANCE_WATER) |
 | Stone + Solid | rigid body **or** static `solid[]` walls (`kStaticWallSubstance`) |
 | Air + Gas | GasEngine (`SUBSTANCE_AIR` component) |
+| Hydrogen + Gas | GasEngine (`SUBSTANCE_HYDROGEN` component) |
+| Oxygen + Gas | GasEngine (`SUBSTANCE_OXYGEN` component) |
 | Water + Gas | GasEngine (`SUBSTANCE_WATER` gas component; same SubstanceId) |
 
 Static `solid[]` walls use Stone thermal/mechanical identity but are
@@ -95,7 +97,9 @@ total occupancy. `MatterSample` reports the dominant component plus fractions.
 
 Gas cells use the same pattern: `amount[]` is total cell-atmospheres; composition
 is a 4-slot SoA (`gasCompId` / `gasCompAmt` / `gasCompCount`). Air is an explicit
-`SUBSTANCE_AIR` component. Water vapor is `SUBSTANCE_WATER` + `MatterPhase::Gas`.
+`SUBSTANCE_AIR` component. Hydrogen and Oxygen are player-facing gases
+(`SUBSTANCE_HYDROGEN` / `SUBSTANCE_OXYGEN`) painted from the Gases category.
+Water vapor is `SUBSTANCE_WATER` + `MatterPhase::Gas`.
 Do not infer missing gas as Air. Pressure still uses total `amount`.
 
 Solver unit liquid is `sandboxReferenceLiquid()` (currently SUBSTANCE_WATER's fluid

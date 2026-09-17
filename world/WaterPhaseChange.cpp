@@ -1258,7 +1258,7 @@ void runWaterPhaseDiagnostics(FluidEngine &fluid, RigidBodyEngine &rigid,
         "dLiq=" + f8(dLiq) + " dVap=" + f8(dVap)
             + " boiled=" + f8(acc.massBoiledKg) + " condensed=" + f8(acc.massCondensedKg));
     emit("no_steam_id",
-        substanceFromInternalName("steam") == SUBSTANCE_NONE && SUBSTANCE_COUNT == 8, "");
+        substanceFromInternalName("steam") == SUBSTANCE_NONE && SUBSTANCE_COUNT == 10, "");
 
     bool vaporIsWaterGas = false;
     for (int y = 25; y <= 70 && !vaporIsWaterGas; ++y) for (int x = 40; x <= 80; ++x) {
@@ -2404,7 +2404,7 @@ void runWaterSolidPhaseDiagnostics(FluidEngine &fluid, RigidBodyEngine &rigid,
     float Tm = phase.meltingPointK;
     float Tb = phase.boilingPointK;
 
-    emit("no_ice_id", SUBSTANCE_COUNT == 8 && substanceFromInternalName("ice") == SUBSTANCE_NONE, "");
+    emit("no_ice_id", SUBSTANCE_COUNT == 10 && substanceFromInternalName("ice") == SUBSTANCE_NONE, "");
     emit("ice_density_below_liquid",
         mechanicalForSubstance(SUBSTANCE_WATER).densityRel < fluidForSubstance(SUBSTANCE_WATER).density
             && std::abs(mechanicalForSubstance(SUBSTANCE_WATER).densityRel - 0.917f) < 0.002f,
@@ -3095,7 +3095,7 @@ void runWaterPhaseStabilityDiagnostics(FluidEngine &fluid, RigidBodyEngine &rigi
         "pending=" + f8(rigid.totalPendingDrip()));
 
     emit("no_ice_substance_id",
-        substanceFromInternalName("ice") == SUBSTANCE_NONE && SUBSTANCE_COUNT == 8, "");
+        substanceFromInternalName("ice") == SUBSTANCE_NONE && SUBSTANCE_COUNT == 10, "");
     emit("no_nan_inf_negK", finiteTemps(fluid, rigid, gas), "");
 
     out << "summary\t" << (failed == 0 ? "PASS" : "FAIL") << '\t'

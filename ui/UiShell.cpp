@@ -183,6 +183,8 @@ void ShellState::applyPalette(PaletteId id, Tool &tool, MaterialId &drawMaterial
         case PaletteId::Cool:  category = Category::Energy; tool = Tool::Cool; break;
         case PaletteId::Pressurize: category = Category::Energy; tool = Tool::Pressurize; break;
         case PaletteId::Depressurize: category = Category::Energy; tool = Tool::Depressurize; break;
+        case PaletteId::Hydrogen: category = Category::Gases; tool = Tool::Gas; break;
+        case PaletteId::Oxygen: category = Category::Gases; tool = Tool::Gas; break;
     }
     syncToolWindow(*this, id, openToolWindow);
 }
@@ -204,6 +206,7 @@ int ShellState::elementCount() const {
         case Category::Solids: return 4;
         case Category::Misc: return 1;
         case Category::Energy: return 1;
+        case Category::Gases: return 2;
         default: return 0;
     }
 }
@@ -224,6 +227,8 @@ PaletteId ShellState::elementAt(int slot) const {
         case Category::Misc: return PaletteId::Wall;
         case Category::Energy:
             return PaletteId::Heat;
+        case Category::Gases:
+            return slot == 1 ? PaletteId::Oxygen : PaletteId::Hydrogen;
         default: return PaletteId::None;
     }
 }
@@ -262,6 +267,8 @@ wchar_t const *ShellState::paletteName(PaletteId id) const {
         case PaletteId::Cool:  return tr("el_cool");
         case PaletteId::Pressurize: return tr("el_pressurize");
         case PaletteId::Depressurize: return tr("el_depressurize");
+        case PaletteId::Hydrogen: return tr("el_hydrogen");
+        case PaletteId::Oxygen: return tr("el_oxygen");
         case PaletteId::None:  return L"";
     }
     return L"";
@@ -284,6 +291,8 @@ wchar_t const *ShellState::paletteHint(PaletteId id) const {
         case PaletteId::Cool:  return tr("hint_cool");
         case PaletteId::Pressurize: return tr("hint_pressurize");
         case PaletteId::Depressurize: return tr("hint_depressurize");
+        case PaletteId::Hydrogen: return tr("hint_hydrogen");
+        case PaletteId::Oxygen: return tr("hint_oxygen");
         case PaletteId::None:  return tr("hint_none");
     }
     return L"";
@@ -491,6 +500,8 @@ void drawShell(HDC dc, ShellState &shell, View const &view) {
         if (pid == PaletteId::Cool) fill = RGB(50, 90, 150);
         if (pid == PaletteId::Pressurize) fill = RGB(150, 110, 50);
         if (pid == PaletteId::Depressurize) fill = RGB(70, 72, 92);
+        if (pid == PaletteId::Hydrogen) fill = RGB(150, 190, 205);
+        if (pid == PaletteId::Oxygen) fill = RGB(110, 150, 196);
         drawButton(dc, shell.layout.palSlot[i], shell.paletteName(pid),
             btnState(shell, hid, shell.palette == pid), fill, fill);
     }
@@ -615,6 +626,10 @@ void drawShell(HDC dc, ShellState &shell, View const &view) {
     } else if (shell.category == Category::Energy) {
         propLine(tr("prop_tool_heat"));
         propLine(tr("prop_tool_window_hint"));
+    } else if (shell.category == Category::Gases) {
+        if (shell.palette == PaletteId::Oxygen) propLine(tr("prop_substance_oxygen"));
+        else propLine(tr("prop_substance_hydrogen"));
+        propLine(tr("prop_gases_note"));
     } else if (shell.category == Category::Misc) {
         propLine(tr("prop_tool_wall"));
     } else {
@@ -687,8 +702,8 @@ void drawShell(HDC dc, ShellState &shell, View const &view) {
         bool mix = hasLiquid && e->liquidComponents(hi).count >= 2;
         SubstanceId matId = SUBSTANCE_NONE;
         MatterPhase matPhase = MatterPhase::None;
-        float gasVaporFrac = 0.0f;
         bool mixGas = false;
+        GasComponentView gasComps{};
         if (isRigid) {
             matId = substanceForMaterial(rg->worldCellMaterial(hx, hy));
             matPhase = MatterPhase::Solid;
@@ -699,11 +714,9 @@ void drawShell(HDC dc, ShellState &shell, View const &view) {
             matId = e->dominantLiquidSubstance(hi);
             matPhase = MatterPhase::Liquid;
         } else if (hasGas) {
-            float tot = g->amount[static_cast<size_t>(hi)];
-            float vap = g->vaporAmount(hi);
-            gasVaporFrac = (tot > 1.0e-8f) ? std::clamp(vap / tot, 0.0f, 1.0f) : 0.0f;
-            mixGas = vap > 1.0e-6f && (tot - vap) > 1.0e-6f;
-            matId = (vap > tot - vap) ? SUBSTANCE_WATER : SUBSTANCE_AIR;
+            gasComps = g->gasComponents(hi);
+            mixGas = gasComps.count >= 2;
+            matId = g->dominantGasSubstance(hi);
             matPhase = MatterPhase::Gas;
         }
         ThermalCellSample thermal{};
@@ -745,8 +758,13 @@ void drawShell(HDC dc, ShellState &shell, View const &view) {
             insSplit(tr("ins_mat_honey"), formatPercent(honeyFrac), kInsCompHoney);
         } else if (hasGas) {
             insHead("inspector_section_composition", kInsHeadComposition);
-            insSplit(tr("ins_mat_air"), formatPercent(1.0f - gasVaporFrac), kInsHeadGas);
-            insSplit(tr("ins_mat_water"), formatPercent(gasVaporFrac), kInsCompWater);
+            float tot = g->amount[static_cast<size_t>(hi)];
+            for (int n = 0; n < gasComps.count; ++n) {
+                SubstanceId sid = gasComps.items[n].id;
+                if (!validGasComponentId(sid)) continue;
+                float frac = (tot > 1.0e-8f) ? std::clamp(gasComps.items[n].amount / tot, 0.0f, 1.0f) : 0.0f;
+                insSplit(tr(substanceDef(sid).displayNameKey), formatPercent(frac), kInsHeadGas);
+            }
         }
 
         insHead("inspector_section_world", kInsHeadWorld);

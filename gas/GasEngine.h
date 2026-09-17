@@ -70,6 +70,8 @@ struct GasEngine {
     void handleWorldEdit(FluidEngine &fluid);
     void applyPressureBrush(FluidEngine &fluid, int cx, int cy, int brushRadius,
         float signedAtmPerSec, float dt, BrushShape shape = BrushShape::Circle);
+    void applyGasBrush(FluidEngine &fluid, int cx, int cy, int brushRadius,
+        SubstanceId gas, float amountPerSec, float dt, BrushShape shape = BrushShape::Circle);
     void eraseAmountBrush(FluidEngine &fluid, int cx, int cy, int brushRadius,
         BrushShape shape = BrushShape::Circle);
     void simulationTick(FluidEngine &fluid);

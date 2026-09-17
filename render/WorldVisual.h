@@ -88,6 +88,8 @@ inline MaterialVisual visualForSubstance(SubstanceId id) {
         case SUBSTANCE_WATER: return kVisualWater;
         case SUBSTANCE_HONEY: return kVisualHoney;
         case SUBSTANCE_AIR: return kVisualVoid;
+        case SUBSTANCE_HYDROGEN: return kVisualVoid;
+        case SUBSTANCE_OXYGEN: return kVisualVoid;
         case SUBSTANCE_WOOD: return visualForSolid(MATERIAL_WOOD);
         case SUBSTANCE_STONE: return visualForSolid(MATERIAL_STONE);
         case SUBSTANCE_GLASS: return visualForSolid(MATERIAL_GLASS);
