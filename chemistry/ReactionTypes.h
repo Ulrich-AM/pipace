@@ -14,13 +14,13 @@ constexpr ReactionId REACTION_NONE = 0;
 constexpr int kMaxReactionParticipants = 8;
 
 // One participant: a substance in an optional required phase, with a
-// stoichiometric coefficient. Coefficients are generic positive quantities;
-// they need not sum to 1. MatterPhase::None means any supported phase.
+// stoichiometric coefficient in moles per reaction extent. Coefficients need
+// not sum to 1. MatterPhase::None means any supported phase.
 // Same SubstanceId may appear as liquid and as gas in different slots.
 struct ReactionParticipant {
     SubstanceId substance = SUBSTANCE_NONE;
     MatterPhase requiredPhase = MatterPhase::None;
-    float coefficient = 0.0f;
+    float coefficient = 0.0f; // stoichiometric moles of this participant per extent
 };
 
 // Declarative bounds. Unset flags mean unbounded (no fake 0 K / 0 Pa limits).
@@ -41,8 +41,13 @@ struct ReactionConditions {
 //   < 0  exothermic (releases heat to the thermal system)
 //   > 0  endothermic (consumes heat from the thermal system)
 //   = 0  thermally neutral / unspecified
-// Extent 1 consumes/produces the written coefficients (e.g. 2 H2 + 1 O2).
-// This layer does not move heat; ReactionEngine will apply the sign later.
+//
+// Extent is one mole of the written stoichiometric reaction. Example:
+//   2 H2 + O2 -> 2 H2O
+// extent = 1 means consume 2 mol H2, 1 mol O2, produce 2 mol H2O.
+// energyChangeJPerExtent is then J per mole of that reaction as written.
+// Diagnostic synthetic reactions may use a separate unit path (not moles).
+// This layer does not move heat; ReactionEngine applies the sign later.
 struct ReactionDefinition {
     ReactionId id = REACTION_NONE;
     char const *internalName = "none";

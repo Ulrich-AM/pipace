@@ -6,8 +6,9 @@ struct GasEngine;
 struct ThermalEngine;
 
 // Local, conservative reaction execution. Empty ReactionRegistry is a no-op.
-// Liquid and gas participants use separate inventories (FluidEngine fill vs
-// GasEngine amount). Solid/plasma still skip. No player-facing gas reactions yet.
+// Physical reactions convert storage -> mass -> moles using chemical.molarMass.
+// Extent 1 is one mole of the written reaction. Synthetic inventories keep a
+// diagnostic unit path. Liquid and gas stay separate; solid/plasma still skip.
 
 struct ReactionEngine {
     void simulationTick(FluidEngine &fluid, RigidBodyEngine &rigid, GasEngine &gas,

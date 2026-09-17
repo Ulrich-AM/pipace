@@ -76,6 +76,7 @@ struct GasEngine {
     void applyPressureForces(RigidBodyEngine &rigid, FluidEngine const &fluid) const;
     void loadTestScene(FluidEngine &fluid, RigidBodyEngine &rigid, int scene);
     void runDiagnostics(FluidEngine &fluid, RigidBodyEngine &rigid);
+    void runCompositionSanityCheck(FluidEngine &fluid, RigidBodyEngine &rigid);
 
     float gasComponentAmount(int index, SubstanceId id) const;
     float gasComponentFraction(int index, SubstanceId id) const;

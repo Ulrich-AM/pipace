@@ -47,7 +47,7 @@ PIPACE/
   chemistry/
     ReactionTypes.h / ReactionRegistry.h/.cpp  # ReactionId + ReactionDefinition data only
     ReactionMatterAccess.h/.cpp                # SubstanceId+phase query; liquid commit
-    ReactionEngine.h/.cpp                      # local liquid reactions; empty registry is a no-op
+    ReactionEngine.h/.cpp                      # local liquid/gas reactions via moles; empty registry is a no-op
   docs/
     PHASE_CHANGES.md       # Water solid ⇄ liquid ⇄ gas is live; honey mixtures are not
   CMakeLists.txt / build.bat / run.bat

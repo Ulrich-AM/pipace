@@ -3,6 +3,7 @@
 #include "fluid/FluidEngine.h"
 #include "fluid/DiagOutput.h"
 #include "rigid/RigidBodyEngine.h"
+#include "substance/PhaseTransfer.h"
 #include "thermal/ThermalTypes.h"
 
 #include <algorithm>
@@ -453,6 +454,9 @@ void GasEngine::transferSpecies(int donor, int receiver, float q) {
     if (q <= GAS_MIN_AMOUNT || donor == receiver) return;
     float a0 = amount[static_cast<size_t>(donor)];
     if (a0 <= GAS_MIN_AMOUNT) return;
+    GasComponentView src = gasComponents(donor);
+    GasComponentView dst = gasComponents(receiver);
+    if (!gasPayloadCanMerge(dst.items, dst.count, src.items, src.count)) return;
     float frac = q / a0;
     int base = compositionSlot(donor, 0);
     int n = gasCompCount[static_cast<size_t>(donor)];
@@ -567,6 +571,11 @@ float GasEngine::relocateAmount(FluidEngine const &fluid, int x, int y, GasCompo
         int cx = i % GW, cy = i / GW;
         float vol = volume[static_cast<size_t>(i)];
         if (vol >= GAS_MIN_VOLUME) {
+            GasComponentView dest = gasComponents(i);
+            if (!gasPayloadCanMerge(dest.items, dest.count, parcel.items, parcel.count)) {
+                for (int n = 0; n < 4; ++n) consider(cx + kDx[n], cy + kDy[n]);
+                continue;
+            }
             float room = leftover;
             if (maxAtm > 0.0f) {
                 float cap = vol * maxAtm;
@@ -818,10 +827,26 @@ void GasEngine::applyBoundaryFlux(float dt) {
 void GasEngine::applyFluxes() {
     heatNext = heat;
     for (int i = 0; i < GW * GH; ++i) copyGasCompToNext(i);
-    auto mixFlux = [&](int donor, int receiver, float q) {
+    auto nextView = [&](int index) {
+        GasComponentView view;
+        int base = compositionSlot(index, 0);
+        int n = nextGasCompCount[static_cast<size_t>(index)];
+        for (int s = 0; s < n && view.count < kMaxGasComponents; ++s) {
+            SubstanceId id = nextGasCompId[static_cast<size_t>(base + s)];
+            float amt = nextGasCompAmt[static_cast<size_t>(base + s)];
+            if (amt > kMinGasComponent)
+                view.items[view.count++] = {id, amt};
+        }
+        return view;
+    };
+    auto mixFlux = [&](int donor, int receiver, float q) -> float {
         if (q <= 0.0f) return 0.0f;
         float a0 = amount[static_cast<size_t>(donor)];
         if (a0 <= GAS_MIN_AMOUNT) return 0.0f;
+        GasComponentView src = gasComponents(donor);
+        GasComponentView dst = nextView(receiver);
+        if (!gasPayloadCanMerge(dst.items, dst.count, src.items, src.count))
+            return 0.0f;
         float frac = q / a0;
         float dq = heat[static_cast<size_t>(donor)] * frac;
         heatNext[static_cast<size_t>(donor)] -= dq;
@@ -835,7 +860,6 @@ void GasEngine::applyFluxes() {
             float unplaced = addNextGasComponentUntracked(receiver, id, d);
             float got = d - unplaced;
             int nbase = compositionSlot(donor, 0);
-            // Subtract from donor next (same slot ids as current at copy time).
             for (int t = 0; t < nextGasCompCount[static_cast<size_t>(donor)]; ++t) {
                 if (nextGasCompId[static_cast<size_t>(nbase + t)] == id) {
                     nextGasCompAmt[static_cast<size_t>(nbase + t)] -= got;
@@ -843,21 +867,37 @@ void GasEngine::applyFluxes() {
                 }
             }
         }
-        return dq;
+        return q;
     };
     for (int y = 0; y < GH; ++y) for (int x = 1; x < GW; ++x) {
-        float flux = fluxU[static_cast<size_t>(ui(x, y))];
+        float &flux = fluxU[static_cast<size_t>(ui(x, y))];
         if (flux == 0.0f) continue;
         int iL = ci(x - 1, y), iR = ci(x, y);
-        float dq = mixFlux(flux > 0.0f ? iL : iR, flux > 0.0f ? iR : iL, std::abs(flux));
-        if (std::abs(dq) > 1.0e-3f) { wakeThermalAt(x - 1, y); wakeThermalAt(x, y); }
+        int donor = flux > 0.0f ? iL : iR;
+        int receiver = flux > 0.0f ? iR : iL;
+        float accepted = mixFlux(donor, receiver, std::abs(flux));
+        if (!(accepted > 0.0f)) {
+            flux = 0.0f;
+            continue;
+        }
+        if (std::abs(flux) > 1.0e-3f) { wakeThermalAt(x - 1, y); wakeThermalAt(x, y); }
+        if (accepted + 1.0e-8f < std::abs(flux))
+            flux = (flux > 0.0f ? accepted : -accepted);
     }
     for (int y = 1; y < GH; ++y) for (int x = 0; x < GW; ++x) {
-        float flux = fluxV[static_cast<size_t>(vi(x, y))];
+        float &flux = fluxV[static_cast<size_t>(vi(x, y))];
         if (flux == 0.0f) continue;
         int iT = ci(x, y - 1), iB = ci(x, y);
-        float dq = mixFlux(flux > 0.0f ? iT : iB, flux > 0.0f ? iB : iT, std::abs(flux));
-        if (std::abs(dq) > 1.0e-3f) { wakeThermalAt(x, y - 1); wakeThermalAt(x, y); }
+        int donor = flux > 0.0f ? iT : iB;
+        int receiver = flux > 0.0f ? iB : iT;
+        float accepted = mixFlux(donor, receiver, std::abs(flux));
+        if (!(accepted > 0.0f)) {
+            flux = 0.0f;
+            continue;
+        }
+        if (std::abs(flux) > 1.0e-3f) { wakeThermalAt(x, y - 1); wakeThermalAt(x, y); }
+        if (accepted + 1.0e-8f < std::abs(flux))
+            flux = (flux > 0.0f ? accepted : -accepted);
     }
     for (int y = 0; y < GH; ++y) for (int x = 1; x < GW; ++x) {
         float flux = fluxU[static_cast<size_t>(ui(x, y))];
@@ -898,13 +938,12 @@ void GasEngine::integrateVelocity(FluidEngine const &fluid, float dt) {
     float damp = std::clamp(1.0f - config.velocityDamping, 0.0f, 1.0f);
     float gravity = fluid.gridGravity();
     float buoy = config.buoyancyScale;
-    float airCp = thermalForSubstance(SUBSTANCE_AIR).specificHeat;
     auto gasT = [&](int index) -> float {
         float a = amount[static_cast<size_t>(index)];
         if (a <= GAS_MIN_AMOUNT) return AMBIENT_TEMPERATURE_K;
         float h = heat[static_cast<size_t>(index)];
         if (!(h > 0.0f)) return AMBIENT_TEMPERATURE_K;
-        float cap = thermalCapacity(gasMassKg(a), airCp);
+        float cap = gasMixtureThermalCapacity(gasComponents(index), fluid.config.cellsPerMeter);
         if (cap < MIN_THERMAL_CAPACITY) return AMBIENT_TEMPERATURE_K;
         return tempFromEnergy(h, cap);
     };
@@ -1470,4 +1509,84 @@ void GasEngine::runDiagnostics(FluidEngine &fluid, RigidBodyEngine &rigid) {
     double h0 = currentAmount;
     tickN(240);
     emit("H_conservation", 240, std::abs(currentAmount - h0) < 1.0e-2 && std::abs(amountError) < 1.0e-2);
+}
+
+void GasEngine::runCompositionSanityCheck(FluidEngine &fluid, RigidBodyEngine &rigid) {
+    std::ofstream out(miscFile("gas_composition_sanity.tsv"));
+    int passed = 0, failed = 0;
+    auto emit = [&](char const *name, bool ok, std::string const &detail) {
+        out << "test\t" << name << '\t' << (ok ? "PASS" : "FAIL") << '\t' << detail << '\n';
+        if (ok) ++passed;
+        else ++failed;
+    };
+    auto near = [](float a, float b) {
+        return std::isfinite(a) && std::isfinite(b) && std::abs(a - b) <= 1.0e-4f;
+    };
+
+    GasComponent full[kMaxGasComponents] = {
+        {SUBSTANCE_AIR, 0.25f}, {SUBSTANCE_AIR, 0.25f},
+        {SUBSTANCE_AIR, 0.25f}, {SUBSTANCE_AIR, 0.25f}
+    };
+    GasComponent waterSrc[1] = {{SUBSTANCE_WATER, 0.5f}};
+    emit("merge_reject_new_species_into_full_slots",
+        !gasPayloadCanMerge(full, kMaxGasComponents, waterSrc, 1), "");
+    emit("merge_accept_existing_species_into_full_slots",
+        gasPayloadCanMerge(full, kMaxGasComponents, full, 1), "");
+    GasComponent airOnly[1] = {{SUBSTANCE_AIR, 1.0f}};
+    emit("merge_accept_water_into_air",
+        gasPayloadCanMerge(airOnly, 1, waterSrc, 1), "");
+
+    rigid.clear();
+    fluid.clearWorld();
+    config.boundary = GasBoundary::Sealed;
+    bool changed = false;
+    rebuildVolumes(fluid, changed);
+    vacuumAll();
+    int ia = ci(10, 10);
+    int ib = ci(11, 10);
+    volume[static_cast<size_t>(ia)] = 1.0f;
+    volume[static_cast<size_t>(ib)] = 1.0f;
+    writePureGas(ia, SUBSTANCE_WATER, 1.0f);
+    writePureGas(ib, SUBSTANCE_AIR, 1.0f);
+    int base = compositionSlot(ib, 0);
+    for (int s = 0; s < kMaxGasComponents; ++s) {
+        gasCompId[static_cast<size_t>(base + s)] = SUBSTANCE_AIR;
+        gasCompAmt[static_cast<size_t>(base + s)] = 0.25f;
+    }
+    gasCompCount[static_cast<size_t>(ib)] = static_cast<uint8_t>(kMaxGasComponents);
+    amount[static_cast<size_t>(ib)] = 1.0f;
+    heat[static_cast<size_t>(ia)] = 1.0f;
+    heat[static_cast<size_t>(ib)] = 1.0f;
+    std::fill(fluxU.begin(), fluxU.end(), 0.0f);
+    std::fill(fluxV.begin(), fluxV.end(), 0.0f);
+    fluxU[static_cast<size_t>(ui(11, 10))] = 0.25f;
+    applyFluxes();
+    emit("overflow_face_rejects_amount_and_species",
+        near(amount[static_cast<size_t>(ia)], 1.0f)
+            && near(amount[static_cast<size_t>(ib)], 1.0f)
+            && near(gasComponentAmount(ia, SUBSTANCE_WATER), 1.0f)
+            && gasComponentAmount(ib, SUBSTANCE_WATER) <= GAS_MIN_AMOUNT
+            && gasCompositionValid(ia),
+        "a=" + std::to_string(amount[static_cast<size_t>(ia)])
+            + " b=" + std::to_string(amount[static_cast<size_t>(ib)])
+            + " bWater=" + std::to_string(gasComponentAmount(ib, SUBSTANCE_WATER)));
+
+    writePureGas(ia, SUBSTANCE_WATER, 1.0f);
+    writePureGas(ib, SUBSTANCE_AIR, 1.0f);
+    heat[static_cast<size_t>(ia)] = 1.0f;
+    heat[static_cast<size_t>(ib)] = 1.0f;
+    std::fill(fluxU.begin(), fluxU.end(), 0.0f);
+    std::fill(fluxV.begin(), fluxV.end(), 0.0f);
+    fluxU[static_cast<size_t>(ui(11, 10))] = 0.25f;
+    applyFluxes();
+    emit("compatible_face_transfers_composition",
+        near(amount[static_cast<size_t>(ia)] + amount[static_cast<size_t>(ib)], 2.0f)
+            && gasCompositionValid(ia) && gasCompositionValid(ib)
+            && gasComponentAmount(ib, SUBSTANCE_WATER) > GAS_MIN_AMOUNT,
+        "a=" + std::to_string(amount[static_cast<size_t>(ia)])
+            + " b=" + std::to_string(amount[static_cast<size_t>(ib)])
+            + " bWater=" + std::to_string(gasComponentAmount(ib, SUBSTANCE_WATER)));
+
+    out << "summary\t" << (failed == 0 ? "PASS" : "FAIL") << '\t' << passed << " passed, "
+        << failed << " failed\n";
 }
