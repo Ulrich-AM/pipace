@@ -52,6 +52,19 @@ uint32_t mixToward(uint32_t dst, int r, int g, int b, float t) {
     return lerpRgb(dr, dg, db, r, g, b, t);
 }
 
+// Rendering only. Full cells stay opaque; tiny fill stays visible.
+float liquidVisualAlpha(float fill) {
+    float f = std::clamp(fill, 0.0f, 1.0f);
+    return 0.15f + 0.85f * std::sqrt(f);
+}
+
+uint32_t applyLiquidFillAlpha(uint32_t color, uint32_t bg, float fill) {
+    int cr = static_cast<int>((color >> 16) & 255);
+    int cg = static_cast<int>((color >> 8) & 255);
+    int cb = static_cast<int>(color & 255);
+    return mixToward(bg, cr, cg, cb, liquidVisualAlpha(fill));
+}
+
 float stableNoise(int x, int y, uint32_t salt) {
     uint32_t h = FluidEngine::hashCell(static_cast<uint32_t>(x), static_cast<uint32_t>(y), salt);
     return (static_cast<int>(h & 255u) / 127.5f) - 1.0f;
@@ -391,6 +404,8 @@ void WorldRenderer::paintNormal(FluidEngine &fluid, RigidBodyEngine const &rigid
                 speed = std::sqrt(fluid.cellU(x, y) * fluid.cellU(x, y) + fluid.cellV(x, y) * fluid.cellV(x, y));
             float amount = std::clamp(fluid.fill[static_cast<size_t>(index)], 0.0f, 1.0f);
             color = shadeMaterial(vis, look, x, y, depth, amount, speed, bg, 41u, true, topSurface, false);
+            if (style != WorldRenderStyle::AlphaFlat)
+                color = applyLiquidFillAlpha(color, bg, amount);
         }
         fluid.pixels[static_cast<size_t>(index)] = color;
     }
@@ -460,7 +475,9 @@ void WorldRenderer::paintNormal(FluidEngine &fluid, RigidBodyEngine const &rigid
         if (!FluidEngine::inside(x, y) || fluid.solid[FluidEngine::ci(x, y)] || fluid.dynamicSolid[FluidEngine::ci(x, y)])
             continue;
         MaterialVisual vis = sampleSplash(p);
-        fluid.pixels[static_cast<size_t>(FluidEngine::ci(x, y))] = packRgb(vis.r, vis.g, vis.b);
+        uint32_t dst = fluid.pixels[static_cast<size_t>(FluidEngine::ci(x, y))];
+        fluid.pixels[static_cast<size_t>(FluidEngine::ci(x, y))] =
+            mixToward(dst, vis.r, vis.g, vis.b, liquidVisualAlpha(p.volume));
     }
 
     for (int y = 0; y < GH; ++y) for (int x = 0; x < GW; ++x) {

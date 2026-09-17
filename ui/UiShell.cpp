@@ -200,7 +200,11 @@ void ShellState::applyCategory(Category cat, Tool &tool, MaterialId &drawMateria
 }
 
 int ShellState::elementCount() const {
-    switch (category) {
+    return elementCount(category);
+}
+
+int ShellState::elementCount(Category cat) const {
+    switch (cat) {
         case Category::Tools: return 4;
         case Category::Fluids: return 2;
         case Category::Solids: return 4;
@@ -212,7 +216,11 @@ int ShellState::elementCount() const {
 }
 
 PaletteId ShellState::elementAt(int slot) const {
-    switch (category) {
+    return elementAt(category, slot);
+}
+
+PaletteId ShellState::elementAt(Category cat, int slot) const {
+    switch (cat) {
         case Category::Tools:
             if (slot == 1) return PaletteId::Grab;
             if (slot == 2) return PaletteId::Brush;
@@ -429,7 +437,7 @@ void drawShell(HDC dc, ShellState &shell, View const &view) {
         HitId hid = static_cast<HitId>(static_cast<int>(HitId::Cat0) + i);
         RECT slot = L.traySlot[i];
         if (i > 0) slot.left += 1;
-        bool empty = (cat == Category::Gases || cat == Category::Plasma);
+        bool empty = shell.elementCount(cat) <= 0;
         BtnState st = btnState(shell, hid, shell.category == cat);
         drawButton(dc, slot, L"", st, empty ? RGB(70, 70, 70) : kBtn, kBtnSel);
         int iconW = drawCategoryIcon(dc, slot, i, empty && shell.category != cat);
