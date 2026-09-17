@@ -8,6 +8,7 @@
 using ReactionId = uint16_t;
 
 constexpr ReactionId REACTION_NONE = 0;
+constexpr ReactionId REACTION_HYDROGEN_COMBUSTION = 1;
 
 // Fixed participant slots. Covers 2 H2 + O2 -> 2 H2O with room for extras.
 // No per-cell or per-definition heap.

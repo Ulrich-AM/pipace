@@ -74,6 +74,8 @@ void seedEnglish() {
     set("el_cool", L"COOL");
     set("el_pressurize", L"PRESSURIZE");
     set("el_depressurize", L"DEPRESSURIZE");
+    set("el_hydrogen", L"HYDROGEN");
+    set("el_oxygen", L"OXYGEN");
 
     set("hint_water", L"Free-surface liquid. Paint into the world. Shift+drag previews a straight line; release to place.");
     set("hint_honey", L"Thicker, denser liquid. Mixes with water. Dye it from Properties. Shift+drag previews a straight line; release to place.");
@@ -90,6 +92,8 @@ void seedEnglish() {
     set("hint_cool", L"Removes thermal energy under the brush. Works on liquid, solids, and air. Not a substance.");
     set("hint_pressurize", L"Adds air under the brush, raising gas pressure. Does not add liquid. Not a substance.");
     set("hint_depressurize", L"Removes air under the brush, lowering gas pressure. Does not remove liquid. Not a substance.");
+    set("hint_hydrogen", L"A light flammable gas. Reacts with oxygen when sufficiently heated.");
+    set("hint_oxygen", L"An oxidizing gas. Supports reactions with fuels such as hydrogen.");
     set("hint_none", L"Nothing in this tab yet.");
 
     set("view_normal", L"NORM");
@@ -140,7 +144,7 @@ void seedEnglish() {
     set("view_title_gasp", L"GASP - Gas pressure");
     set("view_help_gasp", L"Air pressure in atmospheres. Dark is vacuum. Mid gray-blue is about 1 atm. Bright is over-pressure.");
     set("view_title_gasa", L"GASA - Gas amount");
-    set("view_help_gasa", L"How much Air is in each cell. Vacuum is dark. More Air reads brighter, independent of the cell's free volume.");
+    set("view_help_gasa", L"How much gas is in each cell. Vacuum is dark. More gas reads brighter. Color follows the dominant gas identity.");
     set("view_title_gasv", L"GASV - Gas velocity");
     set("view_help_gasv", L"Which way the air is moving. Quiet uniform Air stays dark.");
 
@@ -183,6 +187,9 @@ void seedEnglish() {
     set("prop_material_metal", L"Material: metal");
     set("prop_substance_water", L"Substance: water");
     set("prop_substance_honey", L"Substance: honey");
+    set("prop_substance_hydrogen", L"Substance: hydrogen");
+    set("prop_substance_oxygen", L"Substance: oxygen");
+    set("prop_gases_note", L"Injects into existing air. Mix hydrogen with oxygen, then heat past ignition.");
     set("prop_fill_paint", L"Fill: paint to 100%");
     set("prop_dye_mode", L"Paint: dye only (no new fill)");
     set("prop_dye", L"Dye");
@@ -290,6 +297,8 @@ void seedEnglish() {
     set("ins_mat_water", L"Water");
     set("ins_mat_honey", L"Honey");
     set("ins_mat_air", L"Air");
+    set("ins_mat_hydrogen", L"Hydrogen");
+    set("ins_mat_oxygen", L"Oxygen");
     set("ins_mat_none", L"(none)");
     set("ins_substance", L"Substance: {0}");
     set("ins_substance_dominant", L"Substance: {0} (dominant)");
@@ -528,7 +537,7 @@ void seedEnglish() {
     set("tip_cat_tools", L"Eraser and grab. Tools change how you edit the world, not what material you spawn.");
     set("tip_cat_fluids", L"Paintable liquids. Water is the current free-surface engine.");
     set("tip_cat_solids", L"Drawable rigid bodies. Wood, stone, glass, and metal share the same solver with different density and strength.");
-    set("tip_cat_gases", L"Gas elements are not paintable yet. Air still fills the map and has its own views and scenes.");
+    set("tip_cat_gases", L"Paintable gases. Hydrogen and oxygen mix with air. Heat a hydrogen-oxygen mixture past ignition to form water vapor.");
     set("tip_cat_plasma", L"Nothing in this tab yet.");
     set("tip_cat_energy", L"Heat, cool, pressurize, and depressurize. These add or remove energy or air; they are not substances.");
     set("tip_cat_misc", L"Static world walls. These do not move.");

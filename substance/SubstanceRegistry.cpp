@@ -479,6 +479,88 @@ SubstanceDefinition makeAir() {
     return s;
 }
 
+SubstanceDefinition makeHydrogen() {
+    SubstanceDefinition s;
+
+    s.id = SUBSTANCE_HYDROGEN;
+    s.internalName = "hydrogen";
+    s.displayName = "Hydrogen";
+    s.displayNameKey = "ins_mat_hydrogen";
+    s.classification = SubstanceClass::PureSubstance;
+    s.compositionKind = CompositionKind::PureChemical;
+    s.formulaHint = "H2";
+
+    s.thermal.valid = true;
+    s.thermal.specificHeat = 14300.0f;
+    s.thermal.gasSpecificHeat = 14300.0f;
+    s.thermal.conductivity = 0.18f;
+    s.thermal.meltingPointK = 0.0f;
+    s.thermal.boilingPointK = 0.0f;
+    s.thermal.latentFusion = 0.0f;
+    s.thermal.latentVapor = 0.0f;
+    s.thermal.expansionCoeff = 1.0f / AMBIENT_TEMPERATURE_K;
+    s.thermal.softeningTempK = 0.0f;
+
+    s.phase.valid = true;
+    s.phase.solidCapable = false;
+    s.phase.liquidCapable = false;
+    s.phase.gasCapable = true;
+    copyPhaseTransitionFromThermal(s);
+
+    s.chemical.valid = true;
+    s.chemical.molarMass = 2.016f;
+    s.chemical.flammable = true;
+    s.chemical.oxidizer = false;
+
+    s.visual.valid = true;
+    s.visual.colorR = 186;
+    s.visual.colorG = 220;
+    s.visual.colorB = 230;
+
+    return s;
+}
+
+SubstanceDefinition makeOxygen() {
+    SubstanceDefinition s;
+
+    s.id = SUBSTANCE_OXYGEN;
+    s.internalName = "oxygen";
+    s.displayName = "Oxygen";
+    s.displayNameKey = "ins_mat_oxygen";
+    s.classification = SubstanceClass::PureSubstance;
+    s.compositionKind = CompositionKind::PureChemical;
+    s.formulaHint = "O2";
+
+    s.thermal.valid = true;
+    s.thermal.specificHeat = 918.0f;
+    s.thermal.gasSpecificHeat = 918.0f;
+    s.thermal.conductivity = 0.026f;
+    s.thermal.meltingPointK = 0.0f;
+    s.thermal.boilingPointK = 0.0f;
+    s.thermal.latentFusion = 0.0f;
+    s.thermal.latentVapor = 0.0f;
+    s.thermal.expansionCoeff = 1.0f / AMBIENT_TEMPERATURE_K;
+    s.thermal.softeningTempK = 0.0f;
+
+    s.phase.valid = true;
+    s.phase.solidCapable = false;
+    s.phase.liquidCapable = false;
+    s.phase.gasCapable = true;
+    copyPhaseTransitionFromThermal(s);
+
+    s.chemical.valid = true;
+    s.chemical.molarMass = 31.998f;
+    s.chemical.flammable = false;
+    s.chemical.oxidizer = true;
+
+    s.visual.valid = true;
+    s.visual.colorR = 140;
+    s.visual.colorG = 176;
+    s.visual.colorB = 214;
+
+    return s;
+}
+
 } // namespace
 
 SubstanceDefinition const *builtinSubstanceTable() {
@@ -491,6 +573,8 @@ SubstanceDefinition const *builtinSubstanceTable() {
         makeGlass(),
         makeMetal(),
         makeAir(),
+        makeHydrogen(),
+        makeOxygen(),
     };
     return table;
 }
@@ -579,7 +663,7 @@ void runSubstanceRegistryDiagnostics() {
     emit("ids_unique", idsUnique, "");
     emit("names_unique", namesUnique, "");
     emit("table_index_matches_id", indexMatches, "");
-    emit("builtin_count", SUBSTANCE_COUNT == 8, std::to_string(SUBSTANCE_COUNT));
+    emit("builtin_count", SUBSTANCE_COUNT == 10, std::to_string(SUBSTANCE_COUNT));
     emit("none_is_slot_zero", table[SUBSTANCE_NONE].id == SUBSTANCE_NONE
         && std::strcmp(table[SUBSTANCE_NONE].internalName, "none") == 0, "");
     emit("none_no_fake_physics",
@@ -667,6 +751,21 @@ void runSubstanceRegistryDiagnostics() {
     emit("all_electrical_inactive",
         !water.electrical.valid && !wood.electrical.valid && !metal.electrical.valid
             && !air.electrical.valid && !honey.electrical.valid, "");
+    SubstanceDefinition const &hydrogen = substanceDef(SUBSTANCE_HYDROGEN);
+    emit("hydrogen_gas_only",
+        hydrogen.phase.gasCapable && !hydrogen.phase.liquidCapable && !hydrogen.phase.solidCapable
+                && hasGasProperties(SUBSTANCE_HYDROGEN), "");
+    emit("hydrogen_flammable",
+        hydrogen.chemical.valid && hydrogen.chemical.flammable && !hydrogen.chemical.oxidizer
+            && near(hydrogen.chemical.molarMass, 2.016f), std::to_string(hydrogen.chemical.molarMass));
+    SubstanceDefinition const &oxygen = substanceDef(SUBSTANCE_OXYGEN);
+    emit("oxygen_gas_only",
+        oxygen.phase.gasCapable && !oxygen.phase.liquidCapable && !oxygen.phase.solidCapable
+                && hasGasProperties(SUBSTANCE_OXYGEN), "");
+    emit("oxygen_oxidizer",
+        oxygen.chemical.valid && oxygen.chemical.oxidizer && !oxygen.chemical.flammable
+            && near(oxygen.chemical.molarMass, 31.998f), std::to_string(oxygen.chemical.molarMass));
+
     emit("no_ice_or_steam_slots",
         substanceFromInternalName("ice") == SUBSTANCE_NONE
             && substanceFromInternalName("steam") == SUBSTANCE_NONE, "");

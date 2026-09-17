@@ -1127,6 +1127,56 @@ void GasEngine::applyPressureBrush(FluidEngine &fluid, int cx, int cy, int brush
     amountError = currentAmount - expectedAmount;
 }
 
+void GasEngine::applyGasBrush(FluidEngine &fluid, int cx, int cy, int brushRadius,
+    SubstanceId gasId, float amountPerSec, float dt, BrushShape shape)
+{
+    if (!validGasComponentId(gasId)) return;
+    float dAtm = amountPerSec * std::max(dt, 1.0f / 30.0f);
+    if (!(dAtm > 1.0e-8f) || !std::isfinite(dAtm)) return;
+    double net = 0.0;
+    float maxAtm = std::max(config.ambientPressureAtm, config.brushMaxAtm);
+    for (int y = cy - brushRadius; y <= cy + brushRadius; ++y)
+        for (int x = cx - brushRadius; x <= cx + brushRadius; ++x) {
+            if (!FluidEngine::inside(x, y)) continue;
+            if (!brushContains(shape, cx, cy, x, y, brushRadius)) continue;
+            int i = ci(x, y);
+            float vol = availableVolume(fluid, x, y);
+            volume[static_cast<size_t>(i)] = vol;
+            if (vol < GAS_MIN_VOLUME) continue;
+            float a = amount[static_cast<size_t>(i)];
+            float p = a / vol;
+            float np = std::clamp(p + dAtm, 0.0f, maxAtm);
+            float na = np * vol;
+            float da = na - a;
+            if (!(da > GAS_MIN_AMOUNT) || !std::isfinite(da)) continue;
+            GasComponentView cur = gasComponents(i);
+            GasComponent add[1] = {{gasId, da}};
+            if (!gasPayloadCanMerge(cur.items, cur.count, add, 1)) continue;
+            if (addGasComponentUntracked(i, gasId, da) > 0.0f) continue;
+            GasComponentView parcel;
+            parcel.count = 1;
+            parcel.items[0] = {gasId, da};
+            float capAdd = gasMixtureThermalCapacity(parcel, fluid.config.cellsPerMeter);
+            heat[static_cast<size_t>(i)] += energyFromTemp(capAdd, AMBIENT_TEMPERATURE_K);
+            if (!(heat[static_cast<size_t>(i)] >= 0.0f) || !std::isfinite(heat[static_cast<size_t>(i)]))
+                heat[static_cast<size_t>(i)] = 0.0f;
+            amount[static_cast<size_t>(i)] = na;
+            clampSpecies(i);
+            if (amount[static_cast<size_t>(i)] <= GAS_MIN_AMOUNT) {
+                amount[static_cast<size_t>(i)] = 0.0f;
+                clearGasComposition(i);
+                heat[static_cast<size_t>(i)] = 0.0f;
+                na = 0.0f;
+            }
+            pressure[static_cast<size_t>(i)] = (vol > GAS_MIN_VOLUME) ? (na / vol) : 0.0f;
+            net += static_cast<double>(na - a);
+            wakeAt(x, y);
+        }
+    expectedAmount += net;
+    currentAmount += net;
+    amountError = currentAmount - expectedAmount;
+}
+
 void GasEngine::eraseAmountBrush(FluidEngine &fluid, int cx, int cy, int brushRadius, BrushShape shape)
 {
     (void)fluid;

@@ -5,7 +5,7 @@ struct RigidBodyEngine;
 struct GasEngine;
 struct ThermalEngine;
 
-// Local, conservative reaction execution. Empty ReactionRegistry is a no-op.
+// Local, conservative reaction execution. Scans liquid and gas-occupied cells.
 // Physical reactions convert storage -> mass -> moles using chemical.molarMass.
 // Extent 1 is one mole of the written reaction. Synthetic inventories keep a
 // diagnostic unit path. Liquid and gas stay separate; solid/plasma still skip.

@@ -28,7 +28,7 @@ constexpr float PHYSICS_DT = 1.0f / 30.0f;
 enum class Tool : uint8_t {
     Solid = 0, Water = 1, Eraser = 2, Rigid = 3, Grab = 4,
     Heat = 5, Cool = 6, Pressurize = 7, Depressurize = 8,
-    Brush = 9, Touch = 10
+    Brush = 9, Touch = 10, Gas = 11
 };
 
 // Brush extras for Tool::Water. Dye never creates fill; honey is composition inside fill.

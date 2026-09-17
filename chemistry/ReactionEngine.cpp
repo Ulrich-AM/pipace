@@ -396,7 +396,12 @@ bool tryReactCell(FluidEngine &fluid, RigidBodyEngine &rigid, GasEngine &gas,
     if (!reactionCatalystPresent(fluid, gas, index, def.conditions.catalyst)) return false;
 
     int x = index % GW, y = index / GW;
-    float T = hasLiquid ? ThermalEngine::liquidTempK(fluid, index) : ThermalEngine::gasTempK(gas, index);
+    float T = 0.0f;
+    if (hasGas) T = ThermalEngine::gasTempK(gas, index);
+    if (hasLiquid) {
+        float Tl = ThermalEngine::liquidTempK(fluid, index);
+        if (!(T > 0.0f) || !std::isfinite(T) || (std::isfinite(Tl) && Tl > T)) T = Tl;
+    }
     if (!(T > 0.0f) || !std::isfinite(T))
         T = ThermalEngine::sampleTemperatureK(fluid, rigid, gas, x, y);
     float P = gas.pressurePa(index);
@@ -421,6 +426,7 @@ bool tryReactCell(FluidEngine &fluid, RigidBodyEngine &rigid, GasEngine &gas,
     GasComponentView nextG = toGasView(committedG);
     float oldFill = fluid.fill[i];
     float oldGas = gas.amount[i];
+    float oldVap = gas.vaporAmount(index);
     if (!reactionCommitLiquidOccupancy(fluid, index, nextL)) return false;
     if (!reactionCommitGasOccupancy(gas, index, nextG)) {
         (void)reactionCommitLiquidOccupancy(fluid, index, liquidView);
@@ -429,6 +435,7 @@ bool tryReactCell(FluidEngine &fluid, RigidBodyEngine &rigid, GasEngine &gas,
     }
     fluid.expectedVolume += static_cast<double>(fluid.fill[i] - oldFill);
     gas.expectedAmount += static_cast<double>(gas.amount[i] - oldGas);
+    gas.expectedWaterVapor += static_cast<double>(gas.vaporAmount(index) - oldVap);
     if (fluid.fill[i] > kMinLiquidComponent)
         fluid.liquidHeat[i] = committedL.heat;
     else
@@ -456,10 +463,12 @@ void ReactionEngine::simulationTick(FluidEngine &fluid, RigidBodyEngine &rigid, 
     if (!(dt > 0.0f) || !std::isfinite(dt)) return;
     int nTable = reactionTableSize();
     ReactionDefinition const *table = builtinReactionTable();
-    int x0 = std::max(0, fluid.solveX0);
-    int y0 = std::max(0, fluid.solveY0);
-    int x1 = std::min(GW - 1, fluid.solveX1);
-    int y1 = std::min(GH - 1, fluid.solveY1);
+    // Gas-only mixtures can sit outside FluidEngine's liquid solve region.
+    // Full-grid scan at 200x120; empty cells return immediately.
+    int x0 = 0;
+    int y0 = 0;
+    int x1 = GW - 1;
+    int y1 = GH - 1;
     for (int y = y0; y <= y1; ++y) for (int x = x0; x <= x1; ++x) {
         int index = FluidEngine::ci(x, y);
         if (fluid.fill[static_cast<size_t>(index)] < kMinLiquidComponent
@@ -701,7 +710,134 @@ void runReactionEngineSanityCheck() {
     emit("gas_merge_accept_into_air",
         gasPayloadCanMerge(fullSlots, 1, waterSrc, 1), "");
 
-    emit("empty_registry_fast_path", reactionCount() == 0, "count=" + std::to_string(reactionCount()));
+    ReactionDefinition const &h2o2 = reactionDef(REACTION_HYDROGEN_COMBUSTION);
+    emit("hydrogen_combustion_registered",
+        reactionCount() == 1 && validReaction(REACTION_HYDROGEN_COMBUSTION)
+            && reactionFromInternalName("hydrogen_combustion") == REACTION_HYDROGEN_COMBUSTION
+            && h2o2.reactantCount == 2 && h2o2.productCount == 1
+            && h2o2.reactants[0].substance == SUBSTANCE_HYDROGEN
+            && h2o2.reactants[0].requiredPhase == MatterPhase::Gas
+            && h2o2.reactants[0].coefficient == 2.0f
+            && h2o2.reactants[1].substance == SUBSTANCE_OXYGEN
+            && h2o2.reactants[1].requiredPhase == MatterPhase::Gas
+            && h2o2.reactants[1].coefficient == 1.0f
+            && h2o2.products[0].substance == SUBSTANCE_WATER
+            && h2o2.products[0].requiredPhase == MatterPhase::Gas
+            && h2o2.products[0].coefficient == 2.0f, "");
+    emit("hydrogen_combustion_mass_balanced",
+        reactionMassConservation(REACTION_HYDROGEN_COMBUSTION) == ReactionMassConservation::Balanced, "");
+    emit("hydrogen_combustion_cold_no_react",
+        !reactionConditionsMatch(h2o2.conditions, 293.15f, 101325.0f), "");
+    emit("hydrogen_combustion_hot_reacts",
+        reactionConditionsMatch(h2o2.conditions, 900.0f, 101325.0f)
+            && h2o2.conditions.minTemperatureValid && h2o2.conditions.minTemperatureK == 850.0f, "");
+
+    auto nearRel = [](double a, double b) {
+        double scale = std::max(1.0, std::max(std::abs(a), std::abs(b)));
+        return std::isfinite(a) && std::isfinite(b)
+            && std::abs(a - b) <= 1.0e-3 * scale + 1.0e-6;
+    };
+
+    Inventory emptyL{};
+    emptyL.maxFill = 1.0f;
+    emptyL.cellsPerMeter = cpm;
+    Inventory stoichG{};
+    stoichG.gas = true;
+    stoichG.maxFill = 1.0e6f;
+    stoichG.cellsPerMeter = cpm;
+    stoichG.items[0] = {SUBSTANCE_HYDROGEN,
+        static_cast<float>(molesToStorageAmount(SUBSTANCE_HYDROGEN, MatterPhase::Gas, 2.0, cpm))};
+    stoichG.items[1] = {SUBSTANCE_OXYGEN,
+        static_cast<float>(molesToStorageAmount(SUBSTANCE_OXYGEN, MatterPhase::Gas, 1.0, cpm))};
+    stoichG.count = 2;
+    stoichG.heat = 0.0f;
+    recountFill(stoichG);
+    Inventory stoichG2 = stoichG;
+    float stoichExtent = limitingExtent(h2o2, emptyL, stoichG2);
+    bool stoichOk = applyExtent(h2o2, emptyL, stoichG2, stoichExtent);
+    double waterMol = storageAmountToMoles(SUBSTANCE_WATER, MatterPhase::Gas,
+        amountOf(stoichG2, SUBSTANCE_WATER), cpm);
+    double h2Left = storageAmountToMoles(SUBSTANCE_HYDROGEN, MatterPhase::Gas,
+        amountOf(stoichG2, SUBSTANCE_HYDROGEN), cpm);
+    double o2Left = storageAmountToMoles(SUBSTANCE_OXYGEN, MatterPhase::Gas,
+        amountOf(stoichG2, SUBSTANCE_OXYGEN), cpm);
+    emit("hydrogen_combustion_stoich_2_1",
+        stoichOk && nearRel(stoichExtent, 1.0) && nearRel(waterMol, 2.0)
+            && h2Left <= 1.0e-4 && o2Left <= 1.0e-4,
+        "extent=" + std::to_string(stoichExtent) + " waterMol=" + std::to_string(waterMol));
+
+    Inventory excessG{};
+    excessG.gas = true;
+    excessG.maxFill = 1.0e6f;
+    excessG.cellsPerMeter = cpm;
+    excessG.items[0] = {SUBSTANCE_HYDROGEN,
+        static_cast<float>(molesToStorageAmount(SUBSTANCE_HYDROGEN, MatterPhase::Gas, 4.0, cpm))};
+    excessG.items[1] = {SUBSTANCE_OXYGEN,
+        static_cast<float>(molesToStorageAmount(SUBSTANCE_OXYGEN, MatterPhase::Gas, 1.0, cpm))};
+    excessG.count = 2;
+    excessG.heat = 0.0f;
+    recountFill(excessG);
+    Inventory excessL{};
+    excessL.maxFill = 1.0f;
+    excessL.cellsPerMeter = cpm;
+    float excessExtent = limitingExtent(h2o2, excessL, excessG);
+    bool excessOk = applyExtent(h2o2, excessL, excessG, excessExtent);
+    double h2Remain = storageAmountToMoles(SUBSTANCE_HYDROGEN, MatterPhase::Gas,
+        amountOf(excessG, SUBSTANCE_HYDROGEN), cpm);
+    double o2Remain = storageAmountToMoles(SUBSTANCE_OXYGEN, MatterPhase::Gas,
+        amountOf(excessG, SUBSTANCE_OXYGEN), cpm);
+    double waterMade = storageAmountToMoles(SUBSTANCE_WATER, MatterPhase::Gas,
+        amountOf(excessG, SUBSTANCE_WATER), cpm);
+    emit("hydrogen_combustion_excess_h2",
+        excessOk && nearRel(excessExtent, 1.0) && nearRel(h2Remain, 2.0)
+            && o2Remain <= 1.0e-4 && nearRel(waterMade, 2.0),
+        "h2Remain=" + std::to_string(h2Remain) + " water=" + std::to_string(waterMade));
+
+    float heatReleased = reactionHeatReleasedJ(h2o2, 1.0f);
+    emit("hydrogen_combustion_heat_released",
+        stoichOk && heatReleased > 0.0f && std::isfinite(heatReleased)
+            && nearRel(heatReleased, 483600.0)
+            && stoichG2.heat > 0.0f && std::isfinite(stoichG2.heat)
+            && nearRel(stoichG2.heat, heatReleased),
+        "q=" + std::to_string(stoichG2.heat));
+
+    Inventory airMixG{};
+    airMixG.gas = true;
+    airMixG.maxFill = 1.0e6f;
+    airMixG.cellsPerMeter = cpm;
+    airMixG.items[0] = {SUBSTANCE_HYDROGEN,
+        static_cast<float>(molesToStorageAmount(SUBSTANCE_HYDROGEN, MatterPhase::Gas, 2.0, cpm))};
+    airMixG.items[1] = {SUBSTANCE_OXYGEN,
+        static_cast<float>(molesToStorageAmount(SUBSTANCE_OXYGEN, MatterPhase::Gas, 1.0, cpm))};
+    airMixG.items[2] = {SUBSTANCE_AIR, 1.0f};
+    airMixG.count = 3;
+    airMixG.heat = 0.0f;
+    recountFill(airMixG);
+    Inventory airMixL{};
+    airMixL.maxFill = 1.0f;
+    airMixL.cellsPerMeter = cpm;
+    float airMixExtent = limitingExtent(h2o2, airMixL, airMixG);
+    bool airMixOk = applyExtent(h2o2, airMixL, airMixG, airMixExtent);
+    GasEngine ge;
+    int gi = 0;
+    ge.volume[static_cast<size_t>(gi)] = 1.0f;
+    GasComponentView mixView = toGasView(airMixG);
+    bool committed = airMixOk && ge.tryCommitGasOccupancy(gi, mixView);
+    bool idsOk = committed;
+    for (int n = 0; n < mixView.count; ++n) {
+        if (!validGasComponentId(mixView.items[n].id)) idsOk = false;
+    }
+    SubstanceId dom = ge.dominantGasSubstance(gi);
+    emit("hydrogen_combustion_composition_valid",
+        committed && ge.gasCompositionValid(gi) && idsOk, "");
+    emit("hydrogen_combustion_no_identityless",
+        committed && dom != SUBSTANCE_NONE && validGasComponentId(dom)
+            && ge.gasComponentAmount(gi, SUBSTANCE_AIR) > kMinGasComponent
+            && ge.gasComponentAmount(gi, SUBSTANCE_WATER) > kMinGasComponent
+            && ge.gasComponentAmount(gi, SUBSTANCE_HYDROGEN) <= kMinGasComponent
+            && ge.gasComponentAmount(gi, SUBSTANCE_OXYGEN) <= kMinGasComponent,
+        "dom=" + std::to_string(dom) + " air=" + std::to_string(ge.airAmount(gi))
+            + " water=" + std::to_string(ge.vaporAmount(gi)));
 
     out << "summary\t" << (failed == 0 ? "PASS" : "FAIL") << '\t' << passed << " passed, "
         << failed << " failed\n";

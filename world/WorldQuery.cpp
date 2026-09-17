@@ -52,7 +52,6 @@ MatterSample sampleMatterAt(FluidEngine const &fluid, RigidBodyEngine const &rig
             sample.waterFraction = sample.vaporFraction;
             sample.mixture = comps.count >= 2;
             SubstanceId dom = gas.dominantGasSubstance(i);
-            if (dom == SUBSTANCE_NONE) dom = SUBSTANCE_AIR;
             sample.identity = makeMatterIdentity(dom, MatterPhase::Gas);
             break;
         }
@@ -90,7 +89,7 @@ void runSubstancePhaseDiagnostics(FluidEngine &fluid, RigidBodyEngine &rigid, Ga
         "glass liquid-capable without a fluid table");
     emit("supports_metal_liquid_no_fluid",
         supportsPhase(SUBSTANCE_METAL, MatterPhase::Liquid) && !hasFluidProperties(SUBSTANCE_METAL), "");
-    emit("no_ice_id", SUBSTANCE_COUNT == 8 && substanceFromInternalName("ice") == SUBSTANCE_NONE, "");
+    emit("no_ice_id", SUBSTANCE_COUNT == 10 && substanceFromInternalName("ice") == SUBSTANCE_NONE, "");
     emit("no_steam_id", substanceFromInternalName("steam") == SUBSTANCE_NONE, "");
     emit("no_current_phase_on_def", true, "SubstanceDefinition stores capability flags only");
     emit("water_has_fluid", hasFluidProperties(SUBSTANCE_WATER) && hasPropertiesForPhase(SUBSTANCE_WATER, MatterPhase::Liquid), "");
@@ -100,6 +99,12 @@ void runSubstancePhaseDiagnostics(FluidEngine &fluid, RigidBodyEngine &rigid, Ga
             && rigidIdentityForMaterial(MATERIAL_WATER_SOLID).phase == MatterPhase::Solid, "");
     emit("metal_has_mechanical", hasMechanicalProperties(SUBSTANCE_METAL) && hasPropertiesForPhase(SUBSTANCE_METAL, MatterPhase::Solid), "");
     emit("air_has_gas", hasGasProperties(SUBSTANCE_AIR), "");
+    emit("hydrogen_has_gas",
+        hasGasProperties(SUBSTANCE_HYDROGEN) && supportsPhase(SUBSTANCE_HYDROGEN, MatterPhase::Gas)
+            && !supportsPhase(SUBSTANCE_HYDROGEN, MatterPhase::Liquid), "");
+    emit("oxygen_has_gas",
+        hasGasProperties(SUBSTANCE_OXYGEN) && supportsPhase(SUBSTANCE_OXYGEN, MatterPhase::Gas)
+            && !supportsPhase(SUBSTANCE_OXYGEN, MatterPhase::Liquid), "");
     emit("plasma_unsupported", !supportsPhase(SUBSTANCE_WATER, MatterPhase::Plasma), "");
     emit("none_phase_unsupported", !supportsPhase(SUBSTANCE_WATER, MatterPhase::None), "");
     emit("invalid_id_no_phase", !supportsPhase(999, MatterPhase::Liquid) && !supportsPhase(999, MatterPhase::Solid), "");

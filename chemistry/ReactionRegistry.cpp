@@ -2,6 +2,7 @@
 
 #include "substance/SubstanceTypes.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 
@@ -17,17 +18,40 @@ ReactionDefinition makeNoneReaction() {
     return r;
 }
 
-// No scientifically defensible chemical reaction exists among current built-ins
-// (Water, Honey, Wood, Stone, Glass, Metal, Air). Do not invent H2/O2, wood
-// ash, or honey combustion here. Slot 0 is the empty sentinel only.
+// 2 H2(g) + O2(g) -> 2 H2O(g)
+//
+// energyChangeJPerExtent is a simplified sandbox heat of reaction for the
+// gas-water product (~483.6 kJ per mole of the written reaction). It is not a
+// temperature-dependent thermochemical model. Do not substitute the
+// liquid-water formation enthalpy here.
+//
+// minTemperatureK = 850 K is a practical ignition gate until reaction kinetics
+// exist. It is NOT an Arrhenius model and NOT a universal autoignition
+// temperature.
+ReactionDefinition makeHydrogenCombustion() {
+    ReactionDefinition r;
+    r.id = REACTION_HYDROGEN_COMBUSTION;
+    r.internalName = "hydrogen_combustion";
+    r.reactants[0] = {SUBSTANCE_HYDROGEN, MatterPhase::Gas, 2.0f};
+    r.reactants[1] = {SUBSTANCE_OXYGEN, MatterPhase::Gas, 1.0f};
+    r.reactantCount = 2;
+    r.products[0] = {SUBSTANCE_WATER, MatterPhase::Gas, 2.0f};
+    r.productCount = 1;
+    r.conditions.minTemperatureValid = true;
+    r.conditions.minTemperatureK = 850.0f;
+    r.energyChangeJPerExtent = -483600.0f;
+    r.maxExtentPerSecond = 1.0f;
+    return r;
+}
 
-constexpr int kReactionTableSize = 1;
+constexpr int kReactionTableSize = 2;
 
 } // namespace
 
 ReactionDefinition const *builtinReactionTable() {
     static ReactionDefinition const table[kReactionTableSize] = {
         makeNoneReaction(),
+        makeHydrogenCombustion(),
     };
     return table;
 }

@@ -17,7 +17,9 @@ constexpr SubstanceId SUBSTANCE_STONE = 4;
 constexpr SubstanceId SUBSTANCE_GLASS = 5;
 constexpr SubstanceId SUBSTANCE_METAL = 6;
 constexpr SubstanceId SUBSTANCE_AIR = 7;
-constexpr SubstanceId SUBSTANCE_COUNT = 8;
+constexpr SubstanceId SUBSTANCE_HYDROGEN = 8;
+constexpr SubstanceId SUBSTANCE_OXYGEN = 9;
+constexpr SubstanceId SUBSTANCE_COUNT = 10;
 
 // Static world walls currently use the stone solid table. This is an explicit
 // world-boundary identity, not a rule that every future solid is stone.
