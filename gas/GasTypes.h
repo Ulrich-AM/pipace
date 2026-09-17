@@ -85,6 +85,23 @@ inline void copyGasPayload(GasComponent *dst, int &dstCount,
     for (int n = srcCount; n < kMaxGasComponents; ++n) dst[n] = {};
 }
 
+// True if every occupied src species can merge into dst's fixed slots
+// (existing id or a free slot). Used to reject a whole transfer rather than
+// drop a species or move identity-less amount.
+inline bool gasPayloadCanMerge(GasComponent const *dst, int dstCount,
+    GasComponent const *src, int srcCount)
+{
+    if (!dst || !src || dstCount < 0 || srcCount < 0) return false;
+    if (dstCount > kMaxGasComponents) return false;
+    int extra = 0;
+    for (int s = 0; s < srcCount; ++s) {
+        if (!(src[s].amount > kMinGasComponent) || src[s].id == SUBSTANCE_NONE) continue;
+        if (findGasComponent(dst, dstCount, src[s].id) >= 0) continue;
+        ++extra;
+    }
+    return dstCount + extra <= kMaxGasComponents;
+}
+
 // Compatibility labels only. Authoritative storage is SubstanceId slots:
 // Air = SUBSTANCE_AIR, water vapor = SUBSTANCE_WATER + MatterPhase::Gas.
 enum class GasSpecies : uint8_t { Air = 0, WaterVapor = 1 };

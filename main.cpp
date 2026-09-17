@@ -1541,6 +1541,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR commandLine, int show)
     if (commandLine && wcsstr(commandLine, L"--moisture-drip-diag")) { rigid.runMoistureDripDiagnostics(engine); return 0; }
     if (commandLine && wcsstr(commandLine, L"--reaction-engine-sanity")) {
         runReactionEngineSanityCheck();
+        gas.runCompositionSanityCheck(engine, rigid);
         return 0;
     }
     if (commandLine && wcsstr(commandLine, L"--substance-registry-diag")) { runSubstanceRegistryDiagnostics(); return 0; }

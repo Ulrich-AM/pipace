@@ -7,6 +7,7 @@
 #include "fluid/FluidTypes.h"
 #include "gas/GasEngine.h"
 #include "rigid/RigidBodyEngine.h"
+#include "substance/PhaseTransfer.h"
 #include "thermal/ThermalEngine.h"
 
 #include <algorithm>
@@ -27,6 +28,7 @@ struct Inventory {
     float maxFill = 1.0f;
     bool allowUnregisteredIds = false;
     bool gas = false;
+    float cellsPerMeter = 4.0f;
 };
 
 bool idAllowed(Inventory const &inv, SubstanceId id) {
@@ -63,6 +65,99 @@ Inventory const *pickInvConst(ReactionParticipant const &p, Inventory const &liq
     Inventory const &gas)
 {
     return pickInv(p, const_cast<Inventory &>(liquid), const_cast<Inventory &>(gas));
+}
+
+MatterPhase inventoryPhase(Inventory const &inv) {
+    return inv.gas ? MatterPhase::Gas : MatterPhase::Liquid;
+}
+
+bool reactionMolarDataOk(ReactionDefinition const &def, bool synthetic) {
+    if (synthetic) return true;
+    auto check = [](ReactionParticipant const &p) {
+        if (!reactionParticipantUsed(p)) return true;
+        return substanceHasMolarMass(p.substance);
+    };
+    for (int n = 0; n < def.reactantCount && n < kMaxReactionParticipants; ++n)
+        if (!check(def.reactants[n])) return false;
+    for (int n = 0; n < def.productCount && n < kMaxReactionParticipants; ++n)
+        if (!check(def.products[n])) return false;
+    return true;
+}
+
+float availableExtent(ReactionParticipant const &p, Inventory const &inv) {
+    float amt = amountOf(inv, p.substance);
+    if (!(p.coefficient > 0.0f) || !(amt > kExtentEps)) return 0.0f;
+    if (inv.allowUnregisteredIds) return amt / p.coefficient;
+    double moles = storageAmountToMoles(p.substance, inventoryPhase(inv), amt, inv.cellsPerMeter);
+    if (!(moles > 0.0) || !std::isfinite(moles)) return 0.0f;
+    return static_cast<float>(moles / static_cast<double>(p.coefficient));
+}
+
+float storageForExtent(ReactionParticipant const &p, Inventory const &inv, float extent) {
+    float n = p.coefficient * extent;
+    if (!(n > 0.0f) || !std::isfinite(n)) return 0.0f;
+    if (inv.allowUnregisteredIds) return n;
+    double storage = molesToStorageAmount(p.substance, inventoryPhase(inv), n, inv.cellsPerMeter);
+    if (!(storage > 0.0) || !std::isfinite(storage)) return 0.0f;
+    return static_cast<float>(storage);
+}
+
+void scanParticipatingPhases(ReactionDefinition const &def, Inventory &liquid, Inventory &gas,
+    bool &usesLiquid, bool &usesGas)
+{
+    usesLiquid = false;
+    usesGas = false;
+    auto mark = [&](ReactionParticipant const &p) {
+        if (!reactionParticipantUsed(p)) return;
+        Inventory *inv = pickInv(p, liquid, gas);
+        if (inv->gas) usesGas = true;
+        else usesLiquid = true;
+    };
+    for (int n = 0; n < def.reactantCount && n < kMaxReactionParticipants; ++n)
+        mark(def.reactants[n]);
+    for (int n = 0; n < def.productCount && n < kMaxReactionParticipants; ++n)
+        mark(def.products[n]);
+}
+
+float participatingHeat(bool usesLiquid, bool usesGas, Inventory const &liquid, Inventory const &gas) {
+    float h = 0.0f;
+    if (usesLiquid) h += std::max(0.0f, liquid.heat);
+    if (usesGas) h += std::max(0.0f, gas.heat);
+    return h;
+}
+
+bool applyReactionHeat(bool usesLiquid, bool usesGas, Inventory &liquid, Inventory &gas, float q) {
+    if (!std::isfinite(q) || q == 0.0f) return true;
+    float wL = usesLiquid ? std::max(0.0f, liquid.heat) : 0.0f;
+    float wG = usesGas ? std::max(0.0f, gas.heat) : 0.0f;
+    if (q < 0.0f) {
+        float need = -q;
+        float have = wL + wG;
+        if (need > have + 1.0e-5f) return false;
+        if (have <= 1.0e-12f) return !(need > kExtentEps);
+        if (usesLiquid) liquid.heat -= need * (wL / have);
+        if (usesGas) gas.heat -= need * (wG / have);
+    } else {
+        float have = wL + wG;
+        if (have > 1.0e-12f) {
+            if (usesLiquid) liquid.heat += q * (wL / have);
+            if (usesGas) gas.heat += q * (wG / have);
+        } else {
+            float n = (usesLiquid ? 1.0f : 0.0f) + (usesGas ? 1.0f : 0.0f);
+            if (!(n > 0.0f)) return false;
+            if (usesLiquid) liquid.heat += q / n;
+            if (usesGas) gas.heat += q / n;
+        }
+    }
+    if (usesLiquid && liquid.heat < 0.0f) {
+        if (liquid.heat < -1.0e-5f) return false;
+        liquid.heat = 0.0f;
+    }
+    if (usesGas && gas.heat < 0.0f) {
+        if (gas.heat < -1.0e-5f) return false;
+        gas.heat = 0.0f;
+    }
+    return true;
 }
 
 void recountFill(Inventory &inv) {
@@ -133,9 +228,9 @@ float limitingExtent(ReactionDefinition const &def, Inventory const &liquid, Inv
         if (!reactionParticipantUsed(p)) continue;
         any = true;
         Inventory const *inv = pickInvConst(p, liquid, gas);
-        float avail = amountOf(*inv, p.substance);
-        if (!(p.coefficient > 0.0f) || !(avail > kExtentEps)) return 0.0f;
-        extent = std::min(extent, avail / p.coefficient);
+        float e = availableExtent(p, *inv);
+        if (!(e > kExtentEps)) return 0.0f;
+        extent = std::min(extent, e);
     }
     if (!any || !std::isfinite(extent) || extent <= kExtentEps) return 0.0f;
     return extent;
@@ -166,33 +261,31 @@ float heatLimit(ReactionDefinition const &def, float heat, float extent) {
 
 bool applyExtent(ReactionDefinition const &def, Inventory &liquid, Inventory &gas, float extent) {
     if (!(extent > kExtentEps) || !std::isfinite(extent)) return false;
+    bool synthetic = liquid.allowUnregisteredIds || gas.allowUnregisteredIds;
+    if (!reactionMolarDataOk(def, synthetic)) return false;
     Inventory trialL = liquid;
     Inventory trialG = gas;
     bool usesLiquid = false;
     bool usesGas = false;
+    scanParticipatingPhases(def, trialL, trialG, usesLiquid, usesGas);
     for (int n = 0; n < def.reactantCount && n < kMaxReactionParticipants; ++n) {
         ReactionParticipant const &p = def.reactants[n];
         if (!reactionParticipantUsed(p)) continue;
         Inventory *inv = pickInv(p, trialL, trialG);
-        if (inv->gas) usesGas = true;
-        else usesLiquid = true;
-        if (!consume(*inv, p.substance, p.coefficient * extent)) return false;
+        float take = storageForExtent(p, *inv, extent);
+        if (!(take > 0.0f)) return false;
+        if (!consume(*inv, p.substance, take)) return false;
     }
     for (int n = 0; n < def.productCount && n < kMaxReactionParticipants; ++n) {
         ReactionParticipant const &p = def.products[n];
         if (!reactionParticipantUsed(p)) continue;
         Inventory *inv = pickInv(p, trialL, trialG);
-        if (inv->gas) usesGas = true;
-        else usesLiquid = true;
-        if (!produce(*inv, p.substance, p.coefficient * extent)) return false;
+        float add = storageForExtent(p, *inv, extent);
+        if (!(add > 0.0f)) return false;
+        if (!produce(*inv, p.substance, add)) return false;
     }
     float q = reactionHeatReleasedJ(def, extent);
-    Inventory *heatInv = (usesLiquid && trialL.fill > slotMin(trialL)) ? &trialL : &trialG;
-    if (!usesLiquid && usesGas) heatInv = &trialG;
-    if (usesLiquid && !usesGas) heatInv = &trialL;
-    float heat1 = heatInv->heat + q;
-    if (!std::isfinite(heat1) || heat1 < 0.0f) return false;
-    heatInv->heat = heat1;
+    if (!applyReactionHeat(usesLiquid, usesGas, trialL, trialG, q)) return false;
     liquid = trialL;
     gas = trialG;
     return true;
@@ -208,11 +301,15 @@ bool applyExtent(ReactionDefinition const &def, Inventory &inv, float extent) {
 }
 
 float planExtent(ReactionDefinition const &def, Inventory const &liquid, Inventory const &gas, float dt) {
-    if (!reactionStorageOk(def, liquid.allowUnregisteredIds || gas.allowUnregisteredIds)) return 0.0f;
+    bool synthetic = liquid.allowUnregisteredIds || gas.allowUnregisteredIds;
+    if (!reactionStorageOk(def, synthetic)) return 0.0f;
+    if (!reactionMolarDataOk(def, synthetic)) return 0.0f;
     float extent = limitingExtent(def, liquid, gas);
     extent = rateLimit(def, dt, extent);
-    float heat = std::max(liquid.heat, 0.0f) + std::max(gas.heat, 0.0f);
-    extent = heatLimit(def, heat, extent);
+    bool usesLiquid = false, usesGas = false;
+    Inventory liq = liquid, ginv = gas;
+    scanParticipatingPhases(def, liq, ginv, usesLiquid, usesGas);
+    extent = heatLimit(def, participatingHeat(usesLiquid, usesGas, liquid, gas), extent);
     if (!(extent > kExtentEps)) return 0.0f;
     Inventory trialL = liquid;
     Inventory trialG = gas;
@@ -226,7 +323,8 @@ float planExtent(ReactionDefinition const &def, Inventory const &liquid, Invento
     return 0.0f;
 }
 
-Inventory fromView(LiquidComponentView const &view, float fill, float heat, bool synthetic) {
+Inventory fromView(LiquidComponentView const &view, float fill, float heat, bool synthetic,
+    float cellsPerMeter = 4.0f) {
     Inventory inv;
     inv.allowUnregisteredIds = synthetic;
     inv.maxFill = 1.0f;
@@ -234,6 +332,7 @@ Inventory fromView(LiquidComponentView const &view, float fill, float heat, bool
     inv.fill = fill;
     inv.count = 0;
     inv.gas = false;
+    inv.cellsPerMeter = cellsPerMeter;
     for (int n = 0; n < view.count && n < kMaxLiquidComponents; ++n) {
         if (view.items[n].amount > kMinLiquidComponent)
             inv.items[inv.count++] = view.items[n];
@@ -242,7 +341,8 @@ Inventory fromView(LiquidComponentView const &view, float fill, float heat, bool
     return inv;
 }
 
-Inventory fromGasView(GasComponentView const &view, float amt, float heat, bool synthetic) {
+Inventory fromGasView(GasComponentView const &view, float amt, float heat, bool synthetic,
+    float cellsPerMeter = 4.0f) {
     Inventory inv;
     inv.allowUnregisteredIds = synthetic;
     inv.maxFill = 1.0e6f;
@@ -250,6 +350,7 @@ Inventory fromGasView(GasComponentView const &view, float amt, float heat, bool 
     inv.fill = amt;
     inv.count = 0;
     inv.gas = true;
+    inv.cellsPerMeter = cellsPerMeter;
     for (int n = 0; n < view.count && n < kMaxGasComponents; ++n) {
         if (view.items[n].amount > kMinGasComponent)
             inv.items[inv.count++] = {view.items[n].id, view.items[n].amount};
@@ -306,8 +407,10 @@ bool tryReactCell(FluidEngine &fluid, RigidBodyEngine &rigid, GasEngine &gas,
     GasComponentView gasView;
     if (!reactionReadLiquidOccupancy(fluid, index, liquidView)) return false;
     if (!reactionReadGasOccupancy(gas, index, gasView)) return false;
-    Inventory liquidInv = fromView(liquidView, fluid.fill[i], fluid.liquidHeat[i], false);
-    Inventory gasInv = fromGasView(gasView, gas.amount[i], gas.heat[i], false);
+    Inventory liquidInv = fromView(liquidView, fluid.fill[i], fluid.liquidHeat[i], false,
+        fluid.config.cellsPerMeter);
+    Inventory gasInv = fromGasView(gasView, gas.amount[i], gas.heat[i], false,
+        fluid.config.cellsPerMeter);
     float extent = planExtent(def, liquidInv, gasInv, dt);
     if (!(extent > kExtentEps)) return false;
     Inventory committedL = liquidInv;
@@ -518,6 +621,85 @@ void runReactionEngineSanityCheck() {
     emit("endothermic_heat_bound",
         endoOk && near(eEndo, 1.0f) && endoAfter.heat >= -1.0e-4f,
         "e=" + std::to_string(eEndo) + " heat=" + std::to_string(endoAfter.heat));
+
+    Inventory endoL{};
+    endoL.allowUnregisteredIds = true;
+    endoL.maxFill = 1.0e9f;
+    endoL.items[0] = {kA, 4.0f};
+    endoL.count = 1;
+    endoL.heat = 12.0f;
+    recountFill(endoL);
+    Inventory endoG{};
+    endoG.allowUnregisteredIds = true;
+    endoG.gas = true;
+    endoG.maxFill = 1.0e6f;
+    endoG.items[0] = {kB, 2.0f};
+    endoG.count = 1;
+    endoG.heat = 4.0f;
+    recountFill(endoG);
+    ReactionDefinition endoMix = mixRx;
+    endoMix.energyChangeJPerExtent = 8.0f;
+    Inventory endoL1 = endoL, endoG1 = endoG;
+    bool endoMixOk = applyExtent(endoMix, endoL1, endoG1, 1.0f);
+    emit("mixed_endo_split_nonnegative",
+        endoMixOk && near(endoL1.heat, 6.0f) && near(endoG1.heat, 2.0f)
+            && endoL1.heat >= -1.0e-4f && endoG1.heat >= -1.0e-4f,
+        "liqH=" + std::to_string(endoL1.heat) + " gasH=" + std::to_string(endoG1.heat));
+
+    constexpr float cpm = 4.0f;
+    Inventory wL{};
+    wL.allowUnregisteredIds = false;
+    wL.maxFill = 1.0f;
+    wL.cellsPerMeter = cpm;
+    wL.items[0] = {SUBSTANCE_WATER, 0.20f};
+    wL.count = 1;
+    wL.heat = 1.0e8f;
+    recountFill(wL);
+    Inventory wG{};
+    wG.allowUnregisteredIds = false;
+    wG.gas = true;
+    wG.maxFill = 1.0e6f;
+    wG.cellsPerMeter = cpm;
+    wG.heat = 0.0f;
+    ReactionDefinition twoWater{};
+    twoWater.id = 3;
+    twoWater.internalName = "diag_2_water_liquid_to_gas";
+    twoWater.reactants[0] = {SUBSTANCE_WATER, MatterPhase::Liquid, 2.0f};
+    twoWater.products[0] = {SUBSTANCE_WATER, MatterPhase::Gas, 2.0f};
+    twoWater.reactantCount = 1;
+    twoWater.productCount = 1;
+    twoWater.maxExtentPerSecond = 1.0e9f;
+    double waterMoles = storageAmountToMoles(SUBSTANCE_WATER, MatterPhase::Liquid, 0.20, cpm);
+    float molarLim = limitingExtent(twoWater, wL, wG);
+    emit("molar_limit_2_water",
+        waterMoles > 0.0 && near(molarLim, static_cast<float>(waterMoles / 2.0)),
+        "moles=" + std::to_string(waterMoles) + " extent=" + std::to_string(molarLim));
+
+    double mass0 = liquidFillToMassKg(SUBSTANCE_WATER, 0.20, cpm);
+    Inventory wL2 = wL, wG2 = wG;
+    bool molarOk = applyExtent(twoWater, wL2, wG2, molarLim);
+    double massL = liquidFillToMassKg(SUBSTANCE_WATER, amountOf(wL2, SUBSTANCE_WATER), cpm);
+    double massG = gasAmountToMassKg(SUBSTANCE_WATER, amountOf(wG2, SUBSTANCE_WATER), cpm);
+    emit("physical_mass_liquid_to_gas",
+        molarOk && mass0 > 0.0 && std::abs((massL + massG) - mass0) <= 1.0e-4 * mass0 + 1.0e-6,
+        "m0=" + std::to_string(mass0) + " mL=" + std::to_string(massL)
+            + " mG=" + std::to_string(massG));
+
+    ReactionDefinition airRx = twoWater;
+    airRx.reactants[0] = {SUBSTANCE_AIR, MatterPhase::Gas, 1.0f};
+    airRx.products[0] = {SUBSTANCE_WATER, MatterPhase::Gas, 1.0f};
+    emit("physical_skip_missing_molar_mass",
+        !reactionMolarDataOk(airRx, false) && planExtent(airRx, wL, wG, 1.0f) <= kExtentEps, "");
+
+    GasComponent fullSlots[kMaxGasComponents] = {
+        {SUBSTANCE_AIR, 0.25f}, {SUBSTANCE_AIR, 0.25f},
+        {SUBSTANCE_AIR, 0.25f}, {SUBSTANCE_AIR, 0.25f}
+    };
+    GasComponent waterSrc[1] = {{SUBSTANCE_WATER, 0.4f}};
+    emit("gas_merge_reject_full_slots",
+        !gasPayloadCanMerge(fullSlots, kMaxGasComponents, waterSrc, 1), "");
+    emit("gas_merge_accept_into_air",
+        gasPayloadCanMerge(fullSlots, 1, waterSrc, 1), "");
 
     emit("empty_registry_fast_path", reactionCount() == 0, "count=" + std::to_string(reactionCount()));
 

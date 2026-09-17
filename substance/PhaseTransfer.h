@@ -238,6 +238,62 @@ inline double massKgToAmount(SubstanceId id, MatterPhase phase, double massKg, d
     }
 }
 
+inline bool substanceHasMolarMass(SubstanceId id) {
+    ChemicalProperties const &c = chemicalForSubstance(id);
+    return c.valid && c.molarMass > 0.0f && std::isfinite(c.molarMass);
+}
+
+inline double massKgToMoles(SubstanceId id, double massKg) {
+    if (!substanceHasMolarMass(id) || !(massKg > 0.0) || !std::isfinite(massKg)) return 0.0;
+    double kgPerMol = static_cast<double>(chemicalForSubstance(id).molarMass) * 1.0e-3;
+    if (!(kgPerMol > 0.0)) return 0.0;
+    double n = massKg / kgPerMol;
+    return std::isfinite(n) ? n : 0.0;
+}
+
+inline double molesToMassKg(SubstanceId id, double moles) {
+    if (!substanceHasMolarMass(id) || !(moles > 0.0) || !std::isfinite(moles)) return 0.0;
+    double kgPerMol = static_cast<double>(chemicalForSubstance(id).molarMass) * 1.0e-3;
+    if (!(kgPerMol > 0.0)) return 0.0;
+    double m = moles * kgPerMol;
+    return std::isfinite(m) ? m : 0.0;
+}
+
+// Storage amount (liquid fill, gas cell-atmospheres, or solid fraction) -> moles.
+// Returns 0 if molar mass or the phase mass path is unavailable. Does not invent M.
+inline double storageAmountToMoles(SubstanceId id, MatterPhase phase, double amount, double cellsPerMeter) {
+    return massKgToMoles(id, amountToMassKg(id, phase, amount, cellsPerMeter));
+}
+
+inline double molesToStorageAmount(SubstanceId id, MatterPhase phase, double moles, double cellsPerMeter) {
+    return massKgToAmount(id, phase, molesToMassKg(id, moles), cellsPerMeter);
+}
+
+// Shared gas heat capacity: Σ mass_i · Cp_gas,i. Pure Air uses gasMassKg × air Cp.
+// Missing molar/density data uses Air's mass scale as a numerical fallback only.
+inline float gasMixtureThermalCapacity(GasComponentView const &view, float cellsPerMeter = 4.0f) {
+    if (view.count <= 0) return 0.0f;
+    if (view.count == 1 && view.items[0].id == SUBSTANCE_AIR)
+        return thermalCapacity(gasMassKg(view.items[0].amount, cellsPerMeter),
+            thermalForSubstance(SUBSTANCE_AIR).specificHeat);
+    float cap = 0.0f;
+    for (int n = 0; n < view.count; ++n) {
+        SubstanceId id = view.items[n].id;
+        float amt = view.items[n].amount;
+        if (!(amt > GAS_MIN_AMOUNT) || !validGasComponentId(id)) continue;
+        float mass = 0.0f;
+        if (id == SUBSTANCE_AIR)
+            mass = gasMassKg(amt, cellsPerMeter);
+        else {
+            mass = static_cast<float>(gasAmountToMassKg(id, amt, static_cast<double>(cellsPerMeter)));
+            if (!(mass > 0.0f) || !std::isfinite(mass))
+                mass = gasMassKg(amt, cellsPerMeter);
+        }
+        cap += thermalCapacity(mass, gasPhaseSpecificHeat(id));
+    }
+    return cap;
+}
+
 // Closed accounting only. Does not mutate FluidEngine / GasEngine / rigid storage.
 inline PhaseTransferResult convertPhaseAmount(SubstanceId id, MatterPhase from, MatterPhase to,
     double sourceAmount, double cellsPerMeter)
