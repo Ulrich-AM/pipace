@@ -15,11 +15,9 @@ struct GasEngine {
 
     GasConfig config;
 
-    std::vector<float> amount;     // total cell-atmospheres (air + water vapor)
-    std::vector<float> waterVapor; // water-vapor component; 0 <= waterVapor <= amount
+    std::vector<float> amount;     // total cell-atmospheres; must match sum of gas components
     std::vector<float> heat;       // Joules associated with amount
     std::vector<float> heatNext;
-    std::vector<float> waterVaporNext;
     std::vector<float> volume;     // available gas volume in the cell, 0..1
     std::vector<float> pressure;   // derived atmospheres (amount / volume)
     std::vector<float> u;          // MAC horizontal, cells/s
@@ -31,6 +29,14 @@ struct GasEngine {
     std::vector<uint8_t> chunkQuietTicks;
     std::vector<uint8_t> chunkSolveMask;
     std::vector<uint8_t> thermalChunkWake;
+
+    // Fixed-capacity SoA composition. amount[] is occupancy; these slots say what it is.
+    std::vector<SubstanceId> gasCompId; // cell * kMaxGasComponents + slot
+    std::vector<float> gasCompAmt;
+    std::vector<uint8_t> gasCompCount;
+    std::vector<SubstanceId> nextGasCompId;
+    std::vector<float> nextGasCompAmt;
+    std::vector<uint8_t> nextGasCompCount;
 
     double currentAmount = 0.0;
     double expectedAmount = 0.0;
@@ -71,6 +77,20 @@ struct GasEngine {
     void loadTestScene(FluidEngine &fluid, RigidBodyEngine &rigid, int scene);
     void runDiagnostics(FluidEngine &fluid, RigidBodyEngine &rigid);
 
+    float gasComponentAmount(int index, SubstanceId id) const;
+    float gasComponentFraction(int index, SubstanceId id) const;
+    SubstanceId dominantGasSubstance(int index) const;
+    bool gasCompositionValid(int index) const;
+    GasComponentView gasComponents(int index) const;
+    void setGasComponentAmount(int index, SubstanceId id, float componentAmount);
+    void addGasComponentAmount(int index, SubstanceId id, float delta);
+    float takeGasComponentAmount(int index, SubstanceId id, float da);
+    bool tryCommitGasOccupancy(int index, GasComponentView const &view);
+    void clearGasComposition(int index);
+    float gasPartialPressurePa(int index, SubstanceId id) const;
+
+    // Compatibility wrappers over generic composition. Water vapor is
+    // SUBSTANCE_WATER + MatterPhase::Gas; Air is SUBSTANCE_AIR. Not a second store.
     float vaporAmount(int index) const;
     float airAmount(int index) const;
     float vaporFraction(int index) const;
@@ -88,10 +108,19 @@ private:
     std::vector<int> lastOccupancyScan;
     int volumeScanTick = 0;
 
+    static int compositionSlot(int cell, int slot);
+    void compactGasComposition(int index);
+    void copyGasCompToNext(int index);
+    void commitGasCompFromNext(int index);
+    float addGasComponentUntracked(int index, SubstanceId id, float componentAmount);
+    float addNextGasComponentUntracked(int index, SubstanceId id, float componentAmount);
+    void writePureGas(int index, SubstanceId id, float componentAmount);
+    void scaleGasComposition(int index, float frac);
+    void syncAmountFromComposition(int index);
     void rebuildVolumes(FluidEngine const &fluid, bool &volumeChanged, bool fullGrid = true);
     void recomputePressure();
-    float relocateAmount(FluidEngine const &fluid, int x, int y, float leftover, float maxAtm,
-        float leftoverHeatPerAmount = 0.0f, float leftoverVaporFraction = 0.0f);
+    float relocateAmount(FluidEngine const &fluid, int x, int y, GasComponentView parcel,
+        float leftoverHeatPerAmount = 0.0f, float maxAtm = 0.0f);
     void wakeThermalAt(int x, int y);
     void displaceBlocked(FluidEngine const &fluid);
     void displaceLiquidOverflow(FluidEngine const &fluid);

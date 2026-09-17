@@ -6,8 +6,8 @@ struct GasEngine;
 struct ThermalEngine;
 
 // Local, conservative reaction execution. Empty ReactionRegistry is a no-op.
-// Liquid-only for this milestone. Gas/solid participants skip the reaction
-// without mutating the cell (GasEngine is Air + water vapor, not generic gas).
+// Liquid and gas participants use separate inventories (FluidEngine fill vs
+// GasEngine amount). Solid/plasma still skip. No player-facing gas reactions yet.
 
 struct ReactionEngine {
     void simulationTick(FluidEngine &fluid, RigidBodyEngine &rigid, GasEngine &gas,

@@ -46,16 +46,14 @@ MatterSample sampleMatterAt(FluidEngine const &fluid, RigidBodyEngine const &rig
         }
         case ThermalSampleKind::Gas: {
             float tot = gas.amount[static_cast<size_t>(i)];
-            float vap = gas.vaporAmount(i);
-            float air = std::max(0.0f, tot - vap);
+            GasComponentView comps = gas.gasComponents(i);
             sample.amount = tot;
-            sample.vaporFraction = (tot > GAS_MIN_AMOUNT) ? std::clamp(vap / tot, 0.0f, 1.0f) : 0.0f;
+            sample.vaporFraction = gas.gasComponentFraction(i, SUBSTANCE_WATER);
             sample.waterFraction = sample.vaporFraction;
-            sample.mixture = vap > 1.0e-6f && air > 1.0e-6f;
-            if (vap > air)
-                sample.identity = makeMatterIdentity(SUBSTANCE_WATER, MatterPhase::Gas);
-            else
-                sample.identity = makeMatterIdentity(SUBSTANCE_AIR, MatterPhase::Gas);
+            sample.mixture = comps.count >= 2;
+            SubstanceId dom = gas.dominantGasSubstance(i);
+            if (dom == SUBSTANCE_NONE) dom = SUBSTANCE_AIR;
+            sample.identity = makeMatterIdentity(dom, MatterPhase::Gas);
             break;
         }
         case ThermalSampleKind::Empty:

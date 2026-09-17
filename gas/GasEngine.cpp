@@ -25,10 +25,8 @@ int chunkIndex(int x, int y) {
 
 GasEngine::GasEngine()
     : amount(GW * GH, 0.0f)
-    , waterVapor(GW * GH, 0.0f)
     , heat(GW * GH, 0.0f)
     , heatNext(GW * GH, 0.0f)
-    , waterVaporNext(GW * GH, 0.0f)
     , volume(GW * GH, 0.0f)
     , pressure(GW * GH, 0.0f)
     , u((GW + 1) * GH, 0.0f)
@@ -40,6 +38,12 @@ GasEngine::GasEngine()
     , chunkQuietTicks(CHUNK_W * CHUNK_H, 0)
     , chunkSolveMask(CHUNK_W * CHUNK_H, 0)
     , thermalChunkWake(CHUNK_W * CHUNK_H, 0)
+    , gasCompId(static_cast<size_t>(GW * GH) * kMaxGasComponents, SUBSTANCE_NONE)
+    , gasCompAmt(static_cast<size_t>(GW * GH) * kMaxGasComponents, 0.0f)
+    , gasCompCount(GW * GH, 0)
+    , nextGasCompId(static_cast<size_t>(GW * GH) * kMaxGasComponents, SUBSTANCE_NONE)
+    , nextGasCompAmt(static_cast<size_t>(GW * GH) * kMaxGasComponents, 0.0f)
+    , nextGasCompCount(GW * GH, 0)
     , relocateStamp(GW * GH, 0)
     , prevVolume(GW * GH, 0.0f)
 {
@@ -81,74 +85,363 @@ double GasEngine::sumAmount() const {
     return s;
 }
 
+int GasEngine::compositionSlot(int cell, int slot) {
+    return cell * kMaxGasComponents + slot;
+}
+
+void GasEngine::clearGasComposition(int index) {
+    if (index < 0 || index >= GW * GH) return;
+    int base = compositionSlot(index, 0);
+    int n = gasCompCount[static_cast<size_t>(index)];
+    for (int s = 0; s < n; ++s) {
+        gasCompId[static_cast<size_t>(base + s)] = SUBSTANCE_NONE;
+        gasCompAmt[static_cast<size_t>(base + s)] = 0.0f;
+    }
+    gasCompCount[static_cast<size_t>(index)] = 0;
+}
+
+void GasEngine::compactGasComposition(int index) {
+    if (index < 0 || index >= GW * GH) return;
+    int base = compositionSlot(index, 0);
+    int n = gasCompCount[static_cast<size_t>(index)];
+    int w = 0;
+    for (int s = 0; s < n; ++s) {
+        SubstanceId id = gasCompId[static_cast<size_t>(base + s)];
+        float amt = gasCompAmt[static_cast<size_t>(base + s)];
+        if (!std::isfinite(amt) || amt < 0.0f) amt = 0.0f;
+        if (amt > kMinGasComponent && validGasComponentId(id)) {
+            if (w != s) {
+                gasCompId[static_cast<size_t>(base + w)] = id;
+                gasCompAmt[static_cast<size_t>(base + w)] = amt;
+            }
+            ++w;
+        }
+    }
+    for (int s = w; s < n; ++s) {
+        gasCompId[static_cast<size_t>(base + s)] = SUBSTANCE_NONE;
+        gasCompAmt[static_cast<size_t>(base + s)] = 0.0f;
+    }
+    gasCompCount[static_cast<size_t>(index)] = static_cast<uint8_t>(w);
+}
+
+void GasEngine::copyGasCompToNext(int index) {
+    if (index < 0 || index >= GW * GH) return;
+    int base = compositionSlot(index, 0);
+    int n = gasCompCount[static_cast<size_t>(index)];
+    nextGasCompCount[static_cast<size_t>(index)] = static_cast<uint8_t>(n);
+    for (int s = 0; s < n; ++s) {
+        nextGasCompId[static_cast<size_t>(base + s)] = gasCompId[static_cast<size_t>(base + s)];
+        nextGasCompAmt[static_cast<size_t>(base + s)] = gasCompAmt[static_cast<size_t>(base + s)];
+    }
+    for (int s = n; s < kMaxGasComponents; ++s) {
+        nextGasCompId[static_cast<size_t>(base + s)] = SUBSTANCE_NONE;
+        nextGasCompAmt[static_cast<size_t>(base + s)] = 0.0f;
+    }
+}
+
+void GasEngine::commitGasCompFromNext(int index) {
+    if (index < 0 || index >= GW * GH) return;
+    int base = compositionSlot(index, 0);
+    int n = nextGasCompCount[static_cast<size_t>(index)];
+    if (n < 0) n = 0;
+    if (n > kMaxGasComponents) n = kMaxGasComponents;
+    gasCompCount[static_cast<size_t>(index)] = static_cast<uint8_t>(n);
+    for (int s = 0; s < n; ++s) {
+        gasCompId[static_cast<size_t>(base + s)] = nextGasCompId[static_cast<size_t>(base + s)];
+        float amt = nextGasCompAmt[static_cast<size_t>(base + s)];
+        if (!std::isfinite(amt) || amt < 0.0f) amt = 0.0f;
+        gasCompAmt[static_cast<size_t>(base + s)] = amt;
+    }
+    for (int s = n; s < kMaxGasComponents; ++s) {
+        gasCompId[static_cast<size_t>(base + s)] = SUBSTANCE_NONE;
+        gasCompAmt[static_cast<size_t>(base + s)] = 0.0f;
+    }
+    compactGasComposition(index);
+}
+
+float GasEngine::addGasComponentUntracked(int index, SubstanceId id, float componentAmount) {
+    if (index < 0 || index >= GW * GH || !validGasComponentId(id)) return std::max(0.0f, componentAmount);
+    if (!(componentAmount > kMinGasComponent) || !std::isfinite(componentAmount)) return 0.0f;
+    int base = compositionSlot(index, 0);
+    int n = gasCompCount[static_cast<size_t>(index)];
+    for (int s = 0; s < n; ++s) {
+        if (gasCompId[static_cast<size_t>(base + s)] == id) {
+            gasCompAmt[static_cast<size_t>(base + s)] += componentAmount;
+            return 0.0f;
+        }
+    }
+    if (n >= kMaxGasComponents) return componentAmount;
+    gasCompId[static_cast<size_t>(base + n)] = id;
+    gasCompAmt[static_cast<size_t>(base + n)] = componentAmount;
+    gasCompCount[static_cast<size_t>(index)] = static_cast<uint8_t>(n + 1);
+    return 0.0f;
+}
+
+float GasEngine::addNextGasComponentUntracked(int index, SubstanceId id, float componentAmount) {
+    if (index < 0 || index >= GW * GH || !validGasComponentId(id)) return std::max(0.0f, componentAmount);
+    if (!(componentAmount > kMinGasComponent) || !std::isfinite(componentAmount)) return 0.0f;
+    int base = compositionSlot(index, 0);
+    int n = nextGasCompCount[static_cast<size_t>(index)];
+    for (int s = 0; s < n; ++s) {
+        if (nextGasCompId[static_cast<size_t>(base + s)] == id) {
+            nextGasCompAmt[static_cast<size_t>(base + s)] += componentAmount;
+            return 0.0f;
+        }
+    }
+    if (n >= kMaxGasComponents) return componentAmount;
+    nextGasCompId[static_cast<size_t>(base + n)] = id;
+    nextGasCompAmt[static_cast<size_t>(base + n)] = componentAmount;
+    nextGasCompCount[static_cast<size_t>(index)] = static_cast<uint8_t>(n + 1);
+    return 0.0f;
+}
+
+void GasEngine::writePureGas(int index, SubstanceId id, float componentAmount) {
+    clearGasComposition(index);
+    if (!(componentAmount > GAS_MIN_AMOUNT) || !std::isfinite(componentAmount) || !validGasComponentId(id)) {
+        amount[static_cast<size_t>(index)] = 0.0f;
+        return;
+    }
+    addGasComponentUntracked(index, id, componentAmount);
+    amount[static_cast<size_t>(index)] = componentAmount;
+}
+
+void GasEngine::scaleGasComposition(int index, float frac) {
+    if (index < 0 || index >= GW * GH) return;
+    if (!(frac > 0.0f) || !std::isfinite(frac)) {
+        clearGasComposition(index);
+        return;
+    }
+    int base = compositionSlot(index, 0);
+    int n = gasCompCount[static_cast<size_t>(index)];
+    for (int s = 0; s < n; ++s)
+        gasCompAmt[static_cast<size_t>(base + s)] *= frac;
+    compactGasComposition(index);
+}
+
+void GasEngine::syncAmountFromComposition(int index) {
+    if (index < 0 || index >= GW * GH) return;
+    int base = compositionSlot(index, 0);
+    int n = gasCompCount[static_cast<size_t>(index)];
+    float sum = 0.0f;
+    for (int s = 0; s < n; ++s) sum += gasCompAmt[static_cast<size_t>(base + s)];
+    if (!std::isfinite(sum) || sum < 0.0f) sum = 0.0f;
+    amount[static_cast<size_t>(index)] = sum;
+}
+
+float GasEngine::gasComponentAmount(int index, SubstanceId id) const {
+    if (index < 0 || index >= GW * GH || !validGasComponentId(id)) return 0.0f;
+    int base = compositionSlot(index, 0);
+    int n = gasCompCount[static_cast<size_t>(index)];
+    for (int s = 0; s < n; ++s) {
+        if (gasCompId[static_cast<size_t>(base + s)] == id) {
+            float amt = gasCompAmt[static_cast<size_t>(base + s)];
+            return (std::isfinite(amt) && amt > 0.0f) ? amt : 0.0f;
+        }
+    }
+    return 0.0f;
+}
+
+float GasEngine::gasComponentFraction(int index, SubstanceId id) const {
+    if (index < 0 || index >= GW * GH) return 0.0f;
+    float a = amount[static_cast<size_t>(index)];
+    if (!(a > GAS_MIN_AMOUNT)) return 0.0f;
+    return std::clamp(gasComponentAmount(index, id) / a, 0.0f, 1.0f);
+}
+
+SubstanceId GasEngine::dominantGasSubstance(int index) const {
+    if (index < 0 || index >= GW * GH) return SUBSTANCE_NONE;
+    int base = compositionSlot(index, 0);
+    int n = gasCompCount[static_cast<size_t>(index)];
+    SubstanceId best = SUBSTANCE_NONE;
+    float bestAmt = 0.0f;
+    for (int s = 0; s < n; ++s) {
+        SubstanceId id = gasCompId[static_cast<size_t>(base + s)];
+        float amt = gasCompAmt[static_cast<size_t>(base + s)];
+        if (validGasComponentId(id) && amt > bestAmt) {
+            bestAmt = amt;
+            best = id;
+        }
+    }
+    return best;
+}
+
+bool GasEngine::gasCompositionValid(int index) const {
+    if (index < 0 || index >= GW * GH) return false;
+    int base = compositionSlot(index, 0);
+    int n = gasCompCount[static_cast<size_t>(index)];
+    if (n < 0 || n > kMaxGasComponents) return false;
+    float sum = 0.0f;
+    for (int s = 0; s < n; ++s) {
+        SubstanceId id = gasCompId[static_cast<size_t>(base + s)];
+        float amt = gasCompAmt[static_cast<size_t>(base + s)];
+        if (!(amt > kMinGasComponent)) continue;
+        if (!validGasComponentId(id)) return false;
+        for (int b = 0; b < s; ++b) {
+            if (gasCompId[static_cast<size_t>(base + b)] == id) return false;
+        }
+        sum += amt;
+    }
+    float a = amount[static_cast<size_t>(index)];
+    if (!(a > GAS_MIN_AMOUNT))
+        return !(sum > GAS_MIN_AMOUNT);
+    if (!(sum > GAS_MIN_AMOUNT)) return false; // positive amount must have composition
+    return std::abs(sum - a) <= 1.0e-4f * std::max(1.0f, a) + 1.0e-6f;
+}
+
+GasComponentView GasEngine::gasComponents(int index) const {
+    GasComponentView view;
+    if (index < 0 || index >= GW * GH) return view;
+    int base = compositionSlot(index, 0);
+    int n = gasCompCount[static_cast<size_t>(index)];
+    for (int s = 0; s < n && view.count < kMaxGasComponents; ++s) {
+        SubstanceId id = gasCompId[static_cast<size_t>(base + s)];
+        float amt = gasCompAmt[static_cast<size_t>(base + s)];
+        if (amt > kMinGasComponent && validGasComponentId(id))
+            view.items[view.count++] = {id, amt};
+    }
+    return view;
+}
+
+void GasEngine::setGasComponentAmount(int index, SubstanceId id, float componentAmount) {
+    if (index < 0 || index >= GW * GH || !validGasComponentId(id)) return;
+    if (!std::isfinite(componentAmount) || componentAmount < 0.0f) componentAmount = 0.0f;
+    int base = compositionSlot(index, 0);
+    int n = gasCompCount[static_cast<size_t>(index)];
+    int slot = -1;
+    for (int s = 0; s < n; ++s) {
+        if (gasCompId[static_cast<size_t>(base + s)] == id) { slot = s; break; }
+    }
+    if (componentAmount <= kMinGasComponent) {
+        if (slot >= 0) {
+            gasCompAmt[static_cast<size_t>(base + slot)] = 0.0f;
+            compactGasComposition(index);
+        }
+        syncAmountFromComposition(index);
+        return;
+    }
+    if (slot < 0) {
+        if (n >= kMaxGasComponents) return;
+        slot = n;
+        gasCompId[static_cast<size_t>(base + slot)] = id;
+        gasCompCount[static_cast<size_t>(index)] = static_cast<uint8_t>(n + 1);
+    }
+    gasCompAmt[static_cast<size_t>(base + slot)] = componentAmount;
+    compactGasComposition(index);
+    syncAmountFromComposition(index);
+}
+
+void GasEngine::addGasComponentAmount(int index, SubstanceId id, float delta) {
+    if (!(delta > 0.0f) || !std::isfinite(delta)) {
+        if (delta < 0.0f) (void)takeGasComponentAmount(index, id, -delta);
+        return;
+    }
+    if (addGasComponentUntracked(index, id, delta) > 0.0f) return;
+    amount[static_cast<size_t>(index)] += delta;
+}
+
+float GasEngine::takeGasComponentAmount(int index, SubstanceId id, float da) {
+    if (index < 0 || index >= GW * GH || !validGasComponentId(id) || !(da > 0.0f)) return 0.0f;
+    float have = gasComponentAmount(index, id);
+    float take = std::min(have, da);
+    if (take <= kMinGasComponent) return 0.0f;
+    size_t i = static_cast<size_t>(index);
+    float a = amount[i];
+    if (a > GAS_MIN_AMOUNT) heat[i] *= std::max(0.0f, (a - take) / a);
+    setGasComponentAmount(index, id, have - take);
+    if (amount[i] <= GAS_MIN_AMOUNT) heat[i] = 0.0f;
+    return take;
+}
+
+bool GasEngine::tryCommitGasOccupancy(int index, GasComponentView const &view) {
+    if (index < 0 || index >= GW * GH) return false;
+    if (view.count < 0 || view.count > kMaxGasComponents) return false;
+    GasComponent packed[kMaxGasComponents]{};
+    int packedCount = 0;
+    float sum = 0.0f;
+    for (int n = 0; n < view.count; ++n) {
+        SubstanceId id = view.items[n].id;
+        float amt = view.items[n].amount;
+        if (!(amt > kMinGasComponent)) continue;
+        if (!validGasComponentId(id)) return false;
+        if (addGasPayload(packed, packedCount, id, amt) > 0.0f) return false;
+        sum += amt;
+    }
+    if (!std::isfinite(sum) || sum < 0.0f) return false;
+    int base = compositionSlot(index, 0);
+    for (int s = 0; s < kMaxGasComponents; ++s) {
+        if (s < packedCount) {
+            gasCompId[static_cast<size_t>(base + s)] = packed[s].id;
+            gasCompAmt[static_cast<size_t>(base + s)] = packed[s].amount;
+        } else {
+            gasCompId[static_cast<size_t>(base + s)] = SUBSTANCE_NONE;
+            gasCompAmt[static_cast<size_t>(base + s)] = 0.0f;
+        }
+    }
+    gasCompCount[static_cast<size_t>(index)] = static_cast<uint8_t>(packedCount);
+    amount[static_cast<size_t>(index)] = sum;
+    if (!(sum > GAS_MIN_AMOUNT)) heat[static_cast<size_t>(index)] = 0.0f;
+    return true;
+}
+
+float GasEngine::gasPartialPressurePa(int index, SubstanceId id) const {
+    if (index < 0 || index >= GW * GH) return 0.0f;
+    float vol = volume[static_cast<size_t>(index)];
+    if (!(vol >= GAS_MIN_VOLUME)) return 0.0f;
+    float amt = gasComponentAmount(index, id);
+    if (!(amt > GAS_MIN_AMOUNT)) return 0.0f;
+    return (amt / vol) * config.referencePressurePa;
+}
+
 double GasEngine::sumWaterVapor() const {
     double s = 0.0;
-    for (float v : waterVapor) s += v;
+    for (int i = 0; i < GW * GH; ++i)
+        s += static_cast<double>(gasComponentAmount(i, SUBSTANCE_WATER));
     return s;
 }
 
 float GasEngine::vaporAmount(int index) const {
-    if (index < 0 || index >= GW * GH) return 0.0f;
-    float a = amount[static_cast<size_t>(index)];
-    float v = waterVapor[static_cast<size_t>(index)];
-    if (a <= GAS_MIN_AMOUNT || v <= 0.0f) return 0.0f;
-    return std::min(v, a);
+    return gasComponentAmount(index, SUBSTANCE_WATER);
 }
 
 float GasEngine::airAmount(int index) const {
-    if (index < 0 || index >= GW * GH) return 0.0f;
-    float a = amount[static_cast<size_t>(index)];
-    if (a <= GAS_MIN_AMOUNT) return 0.0f;
-    return std::max(0.0f, a - vaporAmount(index));
+    return gasComponentAmount(index, SUBSTANCE_AIR);
 }
 
 float GasEngine::vaporFraction(int index) const {
-    if (index < 0 || index >= GW * GH) return 0.0f;
-    float a = amount[static_cast<size_t>(index)];
-    if (a <= GAS_MIN_AMOUNT) return 0.0f;
-    return std::clamp(vaporAmount(index) / a, 0.0f, 1.0f);
+    return gasComponentFraction(index, SUBSTANCE_WATER);
 }
 
 void GasEngine::clampSpecies(int index) {
     if (index < 0 || index >= GW * GH) return;
     size_t i = static_cast<size_t>(index);
-    if (!std::isfinite(waterVapor[i]) || waterVapor[i] < 0.0f) waterVapor[i] = 0.0f;
     if (!std::isfinite(amount[i]) || amount[i] < 0.0f) amount[i] = 0.0f;
-    // Water vapor is conserved mass. If bookkeeping drifted (vapor > total, or
-    // total dropped below the wipe threshold), keep the vapor — do not delete it.
-    if (waterVapor[i] > amount[i]) amount[i] = waterVapor[i];
-    if (!(amount[i] > GAS_MIN_AMOUNT)) {
-        if (waterVapor[i] > GAS_MIN_AMOUNT) {
-            amount[i] = waterVapor[i];
-            return;
-        }
+    compactGasComposition(index);
+    float sum = 0.0f;
+    int base = compositionSlot(index, 0);
+    int n = gasCompCount[i];
+    for (int s = 0; s < n; ++s) sum += gasCompAmt[static_cast<size_t>(base + s)];
+    if (!std::isfinite(sum) || sum < 0.0f) sum = 0.0f;
+    // Species are conserved mass. If bookkeeping drifted, keep components —
+    // do not invent missing Air and do not delete leftover vapor.
+    if (sum > amount[i]) amount[i] = sum;
+    if (!(amount[i] > GAS_MIN_AMOUNT) && !(sum > GAS_MIN_AMOUNT)) {
         amount[i] = 0.0f;
-        waterVapor[i] = 0.0f;
+        clearGasComposition(index);
         return;
+    }
+    if (!(sum > GAS_MIN_AMOUNT)) {
+        // Positive amount with empty composition is invalid. Do not invent Air.
+        amount[i] = 0.0f;
+        clearGasComposition(index);
     }
 }
 
 void GasEngine::addWaterVapor(int index, float da) {
-    if (index < 0 || index >= GW * GH || !(da > 0.0f) || !std::isfinite(da)) return;
-    size_t i = static_cast<size_t>(index);
-    amount[i] += da;
-    waterVapor[i] += da;
-    clampSpecies(index);
+    addGasComponentAmount(index, SUBSTANCE_WATER, da);
 }
 
 float GasEngine::takeWaterVapor(int index, float da) {
-    if (index < 0 || index >= GW * GH || !(da > 0.0f)) return 0.0f;
-    float have = vaporAmount(index);
-    float take = std::min(have, da);
-    if (take <= GAS_MIN_AMOUNT) return 0.0f;
-    size_t i = static_cast<size_t>(index);
-    float a = amount[i];
-    if (a > GAS_MIN_AMOUNT) heat[i] *= std::max(0.0f, (a - take) / a);
-    amount[i] -= take;
-    waterVapor[i] -= take;
-    clampSpecies(index);
-    if (amount[i] <= GAS_MIN_AMOUNT) heat[i] = 0.0f;
-    return take;
+    return takeGasComponentAmount(index, SUBSTANCE_WATER, da);
 }
 
 void GasEngine::wakeAt(int x, int y) {
@@ -160,9 +453,20 @@ void GasEngine::transferSpecies(int donor, int receiver, float q) {
     if (q <= GAS_MIN_AMOUNT || donor == receiver) return;
     float a0 = amount[static_cast<size_t>(donor)];
     if (a0 <= GAS_MIN_AMOUNT) return;
-    float dv = waterVapor[static_cast<size_t>(donor)] * (q / a0);
-    waterVapor[static_cast<size_t>(donor)] -= dv;
-    waterVapor[static_cast<size_t>(receiver)] += dv;
+    float frac = q / a0;
+    int base = compositionSlot(donor, 0);
+    int n = gasCompCount[static_cast<size_t>(donor)];
+    for (int s = 0; s < n; ++s) {
+        SubstanceId id = gasCompId[static_cast<size_t>(base + s)];
+        float d = gasCompAmt[static_cast<size_t>(base + s)] * frac;
+        if (!(d > kMinGasComponent) || !validGasComponentId(id)) continue;
+        gasCompAmt[static_cast<size_t>(base + s)] -= d;
+        float unplaced = addGasComponentUntracked(receiver, id, d);
+        if (unplaced > kMinGasComponent)
+            gasCompAmt[static_cast<size_t>(base + s)] += unplaced;
+    }
+    compactGasComposition(donor);
+    compactGasComposition(receiver);
 }
 
 void GasEngine::commitExpected() {
@@ -238,10 +542,11 @@ void GasEngine::rebuildVolumes(FluidEngine const &fluid, bool &volumeChanged, bo
     lastOccupancyScan = fluid.dynamicOccupiedCells;
 }
 
-float GasEngine::relocateAmount(FluidEngine const &fluid, int x, int y, float leftover, float maxAtm,
-    float leftoverHeatPerAmount, float leftoverVaporFraction)
+float GasEngine::relocateAmount(FluidEngine const &fluid, int x, int y, GasComponentView parcel,
+    float leftoverHeatPerAmount, float maxAtm)
 {
-    leftoverVaporFraction = std::clamp(leftoverVaporFraction, 0.0f, 1.0f);
+    compactGasPayload(parcel.items, parcel.count);
+    float leftover = gasPayloadSum(parcel.items, parcel.count);
     if (leftover <= GAS_MIN_AMOUNT) return 0.0f;
     if (++relocateEpoch == 0) {
         std::fill(relocateStamp.begin(), relocateStamp.end(), 0);
@@ -269,11 +574,20 @@ float GasEngine::relocateAmount(FluidEngine const &fluid, int x, int y, float le
             }
             float placed = std::min(leftover, room);
             if (placed > GAS_MIN_AMOUNT) {
-                amount[static_cast<size_t>(i)] += placed;
-                waterVapor[static_cast<size_t>(i)] += placed * leftoverVaporFraction;
+                float frac = placed / leftover;
+                float accepted = 0.0f;
+                for (int s = 0; s < parcel.count; ++s) {
+                    float d = parcel.items[s].amount * frac;
+                    float unplaced = addGasComponentUntracked(i, parcel.items[s].id, d);
+                    float got = d - unplaced;
+                    parcel.items[s].amount -= got;
+                    accepted += got;
+                }
+                compactGasPayload(parcel.items, parcel.count);
+                amount[static_cast<size_t>(i)] += accepted;
                 clampSpecies(i);
-                heat[static_cast<size_t>(i)] += placed * leftoverHeatPerAmount;
-                leftover -= placed;
+                heat[static_cast<size_t>(i)] += accepted * leftoverHeatPerAmount;
+                leftover = gasPayloadSum(parcel.items, parcel.count);
                 wakeChunkAtCell(cx, cy);
                 if (std::abs(leftoverHeatPerAmount) > 1.0e-6f) wakeThermalAt(cx, cy);
             }
@@ -287,32 +601,28 @@ void GasEngine::displaceBlocked(FluidEngine const &fluid) {
     for (int y = 0; y < GH; ++y) for (int x = 0; x < GW; ++x) {
         int i = ci(x, y);
         if (volume[static_cast<size_t>(i)] >= GAS_MIN_VOLUME) continue;
+        clampSpecies(i);
         float a = amount[static_cast<size_t>(i)];
-        float vKeep = waterVapor[static_cast<size_t>(i)];
         if (a <= GAS_MIN_AMOUNT) {
-            if (vKeep > GAS_MIN_AMOUNT) {
-                a = vKeep;
-                amount[static_cast<size_t>(i)] = vKeep;
-            } else {
-                amount[static_cast<size_t>(i)] = 0.0f;
-                waterVapor[static_cast<size_t>(i)] = 0.0f;
-                heat[static_cast<size_t>(i)] = 0.0f;
-                continue;
-            }
+            amount[static_cast<size_t>(i)] = 0.0f;
+            clearGasComposition(i);
+            heat[static_cast<size_t>(i)] = 0.0f;
+            continue;
         }
         float h = heat[static_cast<size_t>(i)];
-        float vFrac = vaporFraction(i);
+        GasComponentView parcel = gasComponents(i);
         amount[static_cast<size_t>(i)] = 0.0f;
-        waterVapor[static_cast<size_t>(i)] = 0.0f;
+        clearGasComposition(i);
         heat[static_cast<size_t>(i)] = 0.0f;
         float maxAtm = 0.0f;
         if (!fluid.solid[static_cast<size_t>(i)] && !fluid.dynamicSolid[static_cast<size_t>(i)]
             && fluid.fill[static_cast<size_t>(i)] >= MIN_PRESSURE_FILL)
             maxAtm = config.ambientPressureAtm * 1.12f;
-        float rem = relocateAmount(fluid, x, y, a, maxAtm, a > GAS_MIN_AMOUNT ? h / a : 0.0f, vFrac);
+        float rem = relocateAmount(fluid, x, y, parcel, a > GAS_MIN_AMOUNT ? h / a : 0.0f, maxAtm);
         if (rem > 0.0f && std::isfinite(rem)) {
+            for (int s = 0; s < parcel.count; ++s)
+                (void)addGasComponentUntracked(i, parcel.items[s].id, parcel.items[s].amount);
             amount[static_cast<size_t>(i)] += rem;
-            waterVapor[static_cast<size_t>(i)] += rem * vFrac;
             clampSpecies(i);
             heat[static_cast<size_t>(i)] += rem * (a > GAS_MIN_AMOUNT ? h / a : 0.0f);
         }
@@ -334,20 +644,26 @@ void GasEngine::displaceLiquidOverflow(FluidEngine const &fluid) {
         float pushed = a - keep;
         if (pushed <= GAS_MIN_AMOUNT) continue;
         float h = heat[static_cast<size_t>(i)];
-        float vFrac = vaporFraction(i);
         float hKeep = a > GAS_MIN_AMOUNT ? h * (keep / a) : 0.0f;
         float hPush = h - hKeep;
+        GasComponentView view = gasComponents(i);
+        GasComponentView parcel;
+        copyGasPayload(parcel.items, parcel.count, view.items, view.count);
+        scaleGasPayload(parcel.items, parcel.count, pushed / a);
+        compactGasPayload(parcel.items, parcel.count);
+        scaleGasComposition(i, keep / a);
         amount[static_cast<size_t>(i)] = keep;
-        waterVapor[static_cast<size_t>(i)] = keep * vFrac;
         clampSpecies(i);
         heat[static_cast<size_t>(i)] = hKeep;
-        float rem = relocateAmount(fluid, x, y, pushed, config.ambientPressureAtm * 1.12f,
-            pushed > GAS_MIN_AMOUNT ? hPush / pushed : 0.0f, vFrac);
-        amount[static_cast<size_t>(i)] += rem;
-        waterVapor[static_cast<size_t>(i)] += rem * vFrac;
-        clampSpecies(i);
-        if (rem > GAS_MIN_AMOUNT && pushed > GAS_MIN_AMOUNT)
+        float rem = relocateAmount(fluid, x, y, parcel,
+            pushed > GAS_MIN_AMOUNT ? hPush / pushed : 0.0f, config.ambientPressureAtm * 1.12f);
+        if (rem > GAS_MIN_AMOUNT) {
+            for (int s = 0; s < parcel.count; ++s)
+                (void)addGasComponentUntracked(i, parcel.items[s].id, parcel.items[s].amount);
+            amount[static_cast<size_t>(i)] += rem;
+            clampSpecies(i);
             heat[static_cast<size_t>(i)] += rem * (hPush / pushed);
+        }
         wakeChunkAtCell(x, y);
     }
 }
@@ -462,17 +778,18 @@ void GasEngine::applyBoundaryFlux(float dt) {
         if (flux > 0.0f) {
             float a = amount[static_cast<size_t>(i)];
             float dq = (a > GAS_MIN_AMOUNT) ? heat[static_cast<size_t>(i)] * (flux / a) : 0.0f;
-            float dv = (a > GAS_MIN_AMOUNT) ? waterVapor[static_cast<size_t>(i)] * (flux / a) : 0.0f;
+            float dv = (a > GAS_MIN_AMOUNT) ? gasComponentAmount(i, SUBSTANCE_WATER) * (flux / a) : 0.0f;
             heat[static_cast<size_t>(i)] -= dq;
-            waterVapor[static_cast<size_t>(i)] -= dv;
+            scaleGasComposition(i, a > GAS_MIN_AMOUNT ? (a - flux) / a : 0.0f);
             escapedWaterVapor += dv;
             expectedWaterVapor -= dv;
             escapedHeat += dq;
         } else if (flux < 0.0f) {
-            float cap = thermalCapacity(gasMassKg(-flux), thermalForSubstance(substanceForGasSpecies()).specificHeat);
+            float cap = thermalCapacity(gasMassKg(-flux), thermalForSubstance(SUBSTANCE_AIR).specificHeat);
             float added = energyFromTemp(cap, AMBIENT_TEMPERATURE_K);
             heat[static_cast<size_t>(i)] += added;
             escapedHeat -= added;
+            (void)addGasComponentUntracked(i, SUBSTANCE_AIR, -flux);
         }
         amount[static_cast<size_t>(i)] -= flux;
         if (amount[static_cast<size_t>(i)] < 0.0f) {
@@ -500,18 +817,32 @@ void GasEngine::applyBoundaryFlux(float dt) {
 
 void GasEngine::applyFluxes() {
     heatNext = heat;
-    waterVaporNext = waterVapor;
+    for (int i = 0; i < GW * GH; ++i) copyGasCompToNext(i);
     auto mixFlux = [&](int donor, int receiver, float q) {
         if (q <= 0.0f) return 0.0f;
         float a0 = amount[static_cast<size_t>(donor)];
         if (a0 <= GAS_MIN_AMOUNT) return 0.0f;
         float frac = q / a0;
         float dq = heat[static_cast<size_t>(donor)] * frac;
-        float dv = waterVapor[static_cast<size_t>(donor)] * frac;
         heatNext[static_cast<size_t>(donor)] -= dq;
         heatNext[static_cast<size_t>(receiver)] += dq;
-        waterVaporNext[static_cast<size_t>(donor)] -= dv;
-        waterVaporNext[static_cast<size_t>(receiver)] += dv;
+        int base = compositionSlot(donor, 0);
+        int n = gasCompCount[static_cast<size_t>(donor)];
+        for (int s = 0; s < n; ++s) {
+            SubstanceId id = gasCompId[static_cast<size_t>(base + s)];
+            float d = gasCompAmt[static_cast<size_t>(base + s)] * frac;
+            if (!(d > 0.0f) || !validGasComponentId(id)) continue;
+            float unplaced = addNextGasComponentUntracked(receiver, id, d);
+            float got = d - unplaced;
+            int nbase = compositionSlot(donor, 0);
+            // Subtract from donor next (same slot ids as current at copy time).
+            for (int t = 0; t < nextGasCompCount[static_cast<size_t>(donor)]; ++t) {
+                if (nextGasCompId[static_cast<size_t>(nbase + t)] == id) {
+                    nextGasCompAmt[static_cast<size_t>(nbase + t)] -= got;
+                    break;
+                }
+            }
+        }
         return dq;
     };
     for (int y = 0; y < GH; ++y) for (int x = 1; x < GW; ++x) {
@@ -552,9 +883,7 @@ void GasEngine::applyFluxes() {
     }
     for (int i = 0; i < GW * GH; ++i) {
         if (amount[static_cast<size_t>(i)] < 0.0f) amount[static_cast<size_t>(i)] = 0.0f;
-        float nv = waterVaporNext[static_cast<size_t>(i)];
-        if (!std::isfinite(nv) || nv < 0.0f) nv = 0.0f;
-        waterVapor[static_cast<size_t>(i)] = nv;
+        commitGasCompFromNext(i);
         clampSpecies(i);
         if (amount[static_cast<size_t>(i)] <= GAS_MIN_AMOUNT) heat[static_cast<size_t>(i)] = 0.0f;
         else {
@@ -678,8 +1007,8 @@ void GasEngine::resetAmbient(FluidEngine &fluid) {
     for (int i = 0; i < GW * GH; ++i) {
         float vol = volume[static_cast<size_t>(i)];
         amount[static_cast<size_t>(i)] = vol * config.ambientPressureAtm;
-        waterVapor[static_cast<size_t>(i)] = 0.0f;
-        float cap = thermalCapacity(gasMassKg(amount[static_cast<size_t>(i)]), thermalForSubstance(substanceForGasSpecies()).specificHeat);
+        writePureGas(i, SUBSTANCE_AIR, amount[static_cast<size_t>(i)]);
+        float cap = thermalCapacity(gasMassKg(amount[static_cast<size_t>(i)]), thermalForSubstance(SUBSTANCE_AIR).specificHeat);
         heat[static_cast<size_t>(i)] = energyFromTemp(cap, AMBIENT_TEMPERATURE_K);
     }
     std::fill(u.begin(), u.end(), 0.0f);
@@ -736,14 +1065,16 @@ void GasEngine::applyPressureBrush(FluidEngine &fluid, int cx, int cy, int brush
                 heat[static_cast<size_t>(i)] *= (na / a);
             }
             amount[static_cast<size_t>(i)] = na;
-            if (da < 0.0f && a > GAS_MIN_AMOUNT)
-                waterVapor[static_cast<size_t>(i)] *= (na / a);
+            if (da > 0.0f)
+                (void)addGasComponentUntracked(i, SUBSTANCE_AIR, da);
+            else if (da < 0.0f && a > GAS_MIN_AMOUNT)
+                scaleGasComposition(i, na / a);
             else if (na <= GAS_MIN_AMOUNT)
-                waterVapor[static_cast<size_t>(i)] = 0.0f;
+                clearGasComposition(i);
             clampSpecies(i);
             if (na <= GAS_MIN_AMOUNT) {
                 amount[static_cast<size_t>(i)] = 0.0f;
-                waterVapor[static_cast<size_t>(i)] = 0.0f;
+                clearGasComposition(i);
                 heat[static_cast<size_t>(i)] = 0.0f;
                 na = 0.0f;
             }
@@ -769,9 +1100,9 @@ void GasEngine::eraseAmountBrush(FluidEngine &fluid, int cx, int cy, int brushRa
             float a = amount[static_cast<size_t>(i)];
             if (a <= GAS_MIN_AMOUNT) continue;
             net -= static_cast<double>(a);
-            expectedWaterVapor -= waterVapor[static_cast<size_t>(i)];
+            expectedWaterVapor -= gasComponentAmount(i, SUBSTANCE_WATER);
             amount[static_cast<size_t>(i)] = 0.0f;
-            waterVapor[static_cast<size_t>(i)] = 0.0f;
+            clearGasComposition(i);
             heat[static_cast<size_t>(i)] = 0.0f;
             pressure[static_cast<size_t>(i)] = 0.0f;
             wakeChunkAtCell(x, y);
@@ -906,7 +1237,9 @@ void GasEngine::wallRect(FluidEngine &fluid, int x0, int y0, int x1, int y1) {
 
 void GasEngine::vacuumAll() {
     std::fill(amount.begin(), amount.end(), 0.0f);
-    std::fill(waterVapor.begin(), waterVapor.end(), 0.0f);
+    std::fill(gasCompId.begin(), gasCompId.end(), SUBSTANCE_NONE);
+    std::fill(gasCompAmt.begin(), gasCompAmt.end(), 0.0f);
+    std::fill(gasCompCount.begin(), gasCompCount.end(), uint8_t{0});
     std::fill(heat.begin(), heat.end(), 0.0f);
     std::fill(u.begin(), u.end(), 0.0f);
     std::fill(v.begin(), v.end(), 0.0f);
@@ -923,7 +1256,7 @@ void GasEngine::fillRectAmount(FluidEngine const &fluid, int x0, int y0, int x1,
         float vol = volume[static_cast<size_t>(i)];
         if (vol < GAS_MIN_VOLUME) continue;
         amount[static_cast<size_t>(i)] = vol * atm;
-        waterVapor[static_cast<size_t>(i)] = 0.0f;
+        writePureGas(i, SUBSTANCE_AIR, amount[static_cast<size_t>(i)]);
         float cap = thermalCapacity(gasMassKg(amount[static_cast<size_t>(i)]),
             thermalForSubstance(SUBSTANCE_AIR).specificHeat);
         heat[static_cast<size_t>(i)] = energyFromTemp(cap, AMBIENT_TEMPERATURE_K);

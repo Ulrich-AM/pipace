@@ -143,12 +143,7 @@ float gasCellPressureAtm(GasEngine const &gas, int i, float vol) {
 
 float vaporPartialPressurePa(FluidEngine const &fluid, GasEngine const &gas, int x, int y) {
     if (!gas.isAccessible(fluid, x, y)) return 0.0f;
-    int i = GasEngine::ci(x, y);
-    float vol = gas.availableVolume(fluid, x, y);
-    if (!(vol >= GAS_MIN_VOLUME)) return 0.0f;
-    float vap = gas.vaporAmount(i);
-    if (!(vap > GAS_MIN_AMOUNT)) return 0.0f;
-    return (vap / vol) * gas.config.referencePressurePa;
+    return gas.gasPartialPressurePa(GasEngine::ci(x, y), SUBSTANCE_WATER);
 }
 
 float localAmbientPressurePa(FluidEngine const &fluid, RigidBodyEngine const &rigid, GasEngine const &gas,
@@ -1454,7 +1449,7 @@ void runWaterPhaseValidation(FluidEngine &fluid, RigidBodyEngine &rigid,
         thermal.seedAmbient(fluid, rigid, gas);
         if (vacuum) {
             std::fill(gas.amount.begin(), gas.amount.end(), 0.0f);
-            std::fill(gas.waterVapor.begin(), gas.waterVapor.end(), 0.0f);
+            for (int i = 0; i < GW * GH; ++i) gas.clearGasComposition(i);
             std::fill(gas.heat.begin(), gas.heat.end(), 0.0f);
             gas.currentAmount = gas.expectedAmount = gas.amountError = 0.0;
             gas.currentWaterVapor = gas.expectedWaterVapor = 0.0;
@@ -1519,7 +1514,7 @@ void runWaterPhaseValidation(FluidEngine &fluid, RigidBodyEngine &rigid,
             float f = fluid.fill[static_cast<size_t>(i)];
             float h = fluid.liquidComponentAmount(i, SUBSTANCE_HONEY);
             float ga = gas.amount[static_cast<size_t>(i)];
-            float gv = gas.waterVapor[static_cast<size_t>(i)];
+            float gv = gas.vaporAmount(i);
             float lh = fluid.liquidHeat[static_cast<size_t>(i)];
             float gh = gas.heat[static_cast<size_t>(i)];
             if (!std::isfinite(f) || !std::isfinite(h) || !std::isfinite(ga)
@@ -1561,7 +1556,7 @@ void runWaterPhaseValidation(FluidEngine &fluid, RigidBodyEngine &rigid,
     auto maxVaporTemp = [&]() {
         float t = 0.0f;
         for (int i = 0; i < GW * GH; ++i)
-            if (gas.waterVapor[static_cast<size_t>(i)] > GAS_MIN_AMOUNT)
+            if (gas.vaporAmount(i) > GAS_MIN_AMOUNT)
                 t = std::max(t, ThermalEngine::gasTempK(gas, i));
         return t;
     };
@@ -1653,8 +1648,8 @@ void runWaterPhaseValidation(FluidEngine &fluid, RigidBodyEngine &rigid,
         reset(GasBoundary::Sealed, true);
         for (int y = 45; y < 75; ++y) for (int x = 70; x < 130; ++x) {
             int i = GasEngine::ci(x, y);
-            gas.amount[static_cast<size_t>(i)] = 40.0f;
-            gas.waterVapor[static_cast<size_t>(i)] = 40.0f;
+            gas.clearGasComposition(i);
+            gas.addGasComponentAmount(i, SUBSTANCE_WATER, 40.0f);
             float C = ThermalEngine::gasCapacity(gas, i);
             gas.heat[static_cast<size_t>(i)] = energyFromTemp(C, Tb - 80.0f);
         }
@@ -1868,8 +1863,8 @@ void runWaterPhaseValidation(FluidEngine &fluid, RigidBodyEngine &rigid,
     // High-concentration vapor plus adjacent hot liquid.
     reset(GasBoundary::Sealed, true);
     int hv = GasEngine::ci(GW / 2, GH / 2 - 1);
-    gas.amount[static_cast<size_t>(hv)] = 47.0f;
-    gas.waterVapor[static_cast<size_t>(hv)] = 47.0f;
+    gas.clearGasComposition(hv);
+    gas.addGasComponentAmount(hv, SUBSTANCE_WATER, 47.0f);
     float hvC = ThermalEngine::gasCapacity(gas, hv);
     gas.heat[static_cast<size_t>(hv)] = energyFromTemp(hvC, Tb + 80.0f);
     gas.handleWorldEdit(fluid);
@@ -1898,10 +1893,16 @@ void runWaterPhaseValidation(FluidEngine &fluid, RigidBodyEngine &rigid,
             fluid.solid[static_cast<size_t>(FluidEngine::ci(x1, y))] = 1;
         }
     };
-    auto setGasCell = [&](int x, int y, float amount, float vapor, float tempK) {
+    auto setGasCell = [&](int x, int y, float cellAmount, float vapor, float tempK) {
         int i = GasEngine::ci(x, y);
-        gas.amount[static_cast<size_t>(i)] = amount;
-        gas.waterVapor[static_cast<size_t>(i)] = vapor;
+        float v = std::max(0.0f, vapor);
+        float tot = std::max(0.0f, cellAmount);
+        if (v > tot) tot = v;
+        float air = tot - v;
+        GasComponentView view;
+        if (v > kMinGasComponent) view.items[view.count++] = {SUBSTANCE_WATER, v};
+        if (air > kMinGasComponent) view.items[view.count++] = {SUBSTANCE_AIR, air};
+        (void)gas.tryCommitGasOccupancy(i, view);
         float C = ThermalEngine::gasCapacity(gas, i);
         gas.heat[static_cast<size_t>(i)] = energyFromTemp(C, tempK);
     };
@@ -2354,7 +2355,7 @@ void runWaterSolidPhaseDiagnostics(FluidEngine &fluid, RigidBodyEngine &rigid,
         gas.resetAmbient(fluid);
         std::fill(gas.amount.begin(), gas.amount.end(), 0.0f);
         std::fill(gas.heat.begin(), gas.heat.end(), 0.0f);
-        std::fill(gas.waterVapor.begin(), gas.waterVapor.end(), 0.0f);
+        for (int i = 0; i < GW * GH; ++i) gas.clearGasComposition(i);
         thermal.seedAmbient(fluid, rigid, gas);
         std::fill(gas.amount.begin(), gas.amount.end(), 0.0f);
         std::fill(gas.heat.begin(), gas.heat.end(), 0.0f);
@@ -2935,8 +2936,7 @@ void runWaterPhaseStabilityDiagnostics(FluidEngine &fluid, RigidBodyEngine &rigi
     resetSealedBox(wx0, wy0, wx1, wy1);
     for (int y = wy0 + 1; y < wy1; ++y) for (int x = wx0 + 1; x < wx1; ++x) {
         int i = GasEngine::ci(x, y);
-        gas.waterVapor[static_cast<size_t>(i)] = 0.45f;
-        gas.amount[static_cast<size_t>(i)] = std::max(gas.amount[static_cast<size_t>(i)], 1.45f);
+        gas.setGasComponentAmount(i, SUBSTANCE_WATER, 0.45f);
         float Cg = ThermalEngine::gasCapacity(gas, i);
         gas.heat[static_cast<size_t>(i)] = energyFromTemp(Cg, Tb - 25.0f);
     }
@@ -2988,8 +2988,7 @@ void runWaterPhaseStabilityDiagnostics(FluidEngine &fluid, RigidBodyEngine &rigi
     resetSealedBox(wx0, wy0, wx1, wy1);
     for (int y = wy0 + 1; y < wy1; ++y) for (int x = wx0 + 1; x < wx1; ++x) {
         int i = GasEngine::ci(x, y);
-        gas.waterVapor[static_cast<size_t>(i)] = 0.80f;
-        gas.amount[static_cast<size_t>(i)] = std::max(gas.amount[static_cast<size_t>(i)], 1.80f);
+        gas.setGasComponentAmount(i, SUBSTANCE_WATER, 0.80f);
         float Cg = ThermalEngine::gasCapacity(gas, i);
         gas.heat[static_cast<size_t>(i)] = energyFromTemp(Cg, 300.0f);
     }
@@ -3022,8 +3021,7 @@ void runWaterPhaseStabilityDiagnostics(FluidEngine &fluid, RigidBodyEngine &rigi
     setWallTemp(sx0, sy0, sx1, sy1, 250.0f);
     for (int y = sy0 + 1; y < sy1; ++y) for (int x = sx0 + 1; x < sx1; ++x) {
         int i = GasEngine::ci(x, y);
-        gas.waterVapor[static_cast<size_t>(i)] = 0.40f;
-        gas.amount[static_cast<size_t>(i)] = std::max(gas.amount[static_cast<size_t>(i)], 1.40f);
+        gas.setGasComponentAmount(i, SUBSTANCE_WATER, 0.40f);
         float Cg = ThermalEngine::gasCapacity(gas, i);
         gas.heat[static_cast<size_t>(i)] = energyFromTemp(Cg, Tb - 30.0f);
     }

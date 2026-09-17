@@ -11,8 +11,82 @@ constexpr float GAS_MIN_VOLUME = 1.0e-4f;
 constexpr float GAS_MIN_AMOUNT = 1.0e-8f;
 constexpr float GAS_REFERENCE_PRESSURE_PA = 101325.0f;
 
-// Future mixtures occupy the same cell and are transported together.
-// Amount is total cell-atmospheres. Water vapor is a component of amount.
+// Fixed-capacity gas composition. amount[] is total cell-atmospheres; these
+// slots say what that amount is. 4 covers Air + Water vapor plus two near-term
+// extra gases without per-cell heap objects.
+constexpr int kMaxGasComponents = 4;
+constexpr float kMinGasComponent = GAS_MIN_AMOUNT;
+
+struct GasComponent {
+    SubstanceId id = SUBSTANCE_NONE;
+    float amount = 0.0f;
+};
+
+struct GasComponentView {
+    GasComponent items[kMaxGasComponents]{};
+    int count = 0;
+};
+
+inline bool validGasComponentId(SubstanceId id) {
+    return validSubstance(id)
+        && id != SUBSTANCE_NONE
+        && supportsPhase(id, MatterPhase::Gas);
+}
+
+inline int findGasComponent(GasComponent const *items, int count, SubstanceId id) {
+    for (int n = 0; n < count; ++n)
+        if (items[n].id == id) return n;
+    return -1;
+}
+
+inline float gasPayloadAmount(GasComponent const *items, int count, SubstanceId id) {
+    int n = findGasComponent(items, count, id);
+    return n >= 0 ? items[n].amount : 0.0f;
+}
+
+inline float gasPayloadSum(GasComponent const *items, int count) {
+    float s = 0.0f;
+    for (int n = 0; n < count; ++n) s += items[n].amount;
+    return s;
+}
+
+// Merge id into a fixed payload. Returns the amount that did not fit (overflow).
+inline float addGasPayload(GasComponent *items, int &count, SubstanceId id, float amount) {
+    if (!validGasComponentId(id) || !(amount > kMinGasComponent)) return 0.0f;
+    int n = findGasComponent(items, count, id);
+    if (n >= 0) {
+        items[n].amount += amount;
+        return 0.0f;
+    }
+    if (count >= kMaxGasComponents) return amount;
+    items[count++] = {id, amount};
+    return 0.0f;
+}
+
+inline void compactGasPayload(GasComponent *items, int &count) {
+    int w = 0;
+    for (int n = 0; n < count; ++n) {
+        if (items[n].amount > kMinGasComponent && validGasComponentId(items[n].id))
+            items[w++] = items[n];
+    }
+    for (int n = w; n < count; ++n) items[n] = {};
+    count = w;
+}
+
+inline void scaleGasPayload(GasComponent *items, int count, float frac) {
+    for (int n = 0; n < count; ++n) items[n].amount *= frac;
+}
+
+inline void copyGasPayload(GasComponent *dst, int &dstCount,
+    GasComponent const *src, int srcCount)
+{
+    dstCount = srcCount;
+    for (int n = 0; n < srcCount; ++n) dst[n] = src[n];
+    for (int n = srcCount; n < kMaxGasComponents; ++n) dst[n] = {};
+}
+
+// Compatibility labels only. Authoritative storage is SubstanceId slots:
+// Air = SUBSTANCE_AIR, water vapor = SUBSTANCE_WATER + MatterPhase::Gas.
 enum class GasSpecies : uint8_t { Air = 0, WaterVapor = 1 };
 constexpr int GAS_SPECIES_COUNT = 2;
 

@@ -111,14 +111,28 @@ float ThermalEngine::wallCapacity(FluidEngine const &fluid, int index) {
 
 float ThermalEngine::gasCapacity(GasEngine const &gas, int index) {
     if (index < 0 || index >= GW * GH) return 0.0f;
-    float air = gas.airAmount(index);
-    float vap = gas.vaporAmount(index);
+    if (!(gas.amount[static_cast<size_t>(index)] > GAS_MIN_AMOUNT)) return 0.0f;
+    GasComponentView view = gas.gasComponents(index);
+    if (view.count <= 0) return 0.0f;
+    if (view.count == 1 && view.items[0].id == SUBSTANCE_AIR)
+        return thermalCapacity(gasMassKg(view.items[0].amount),
+            thermalForSubstance(SUBSTANCE_AIR).specificHeat);
     float cap = 0.0f;
-    if (air > GAS_MIN_AMOUNT)
-        cap += thermalCapacity(gasMassKg(air), thermalForSubstance(SUBSTANCE_AIR).specificHeat);
-    if (vap > GAS_MIN_AMOUNT) {
-        float mass = static_cast<float>(gasAmountToMassKg(SUBSTANCE_WATER, vap, 4.0));
-        cap += thermalCapacity(mass, gasPhaseSpecificHeat(SUBSTANCE_WATER));
+    for (int n = 0; n < view.count; ++n) {
+        SubstanceId id = view.items[n].id;
+        float amt = view.items[n].amount;
+        if (!(amt > GAS_MIN_AMOUNT) || !validGasComponentId(id)) continue;
+        float mass = 0.0f;
+        if (id == SUBSTANCE_AIR)
+            mass = gasMassKg(amt);
+        else {
+            mass = static_cast<float>(gasAmountToMassKg(id, amt, 4.0));
+            // Numerical safety only: missing molar/density data uses Air's
+            // reference mass scale. Does not relabel the component as Air.
+            if (!(mass > 0.0f) || !std::isfinite(mass))
+                mass = gasMassKg(amt);
+        }
+        cap += thermalCapacity(mass, gasPhaseSpecificHeat(id));
     }
     return cap;
 }
