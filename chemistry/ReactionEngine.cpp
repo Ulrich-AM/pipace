@@ -1109,6 +1109,58 @@ void runReactionEngineSanityCheck() {
         "heat=" + std::to_string(pGas.heat[0]));
     (void)heatBefore;
 
+    GasEngine liveG;
+    liveG.volume[0] = 1.0f;
+    GasComponentView liveMix{};
+    liveMix.count = 2;
+    liveMix.items[0] = {SUBSTANCE_WATER, 0.4f};
+    liveMix.items[1] = {SUBSTANCE_AIR, 0.6f};
+    (void)liveG.tryCommitGasOccupancy(0, liveMix);
+    float capLive = ThermalEngine::gasCapacity(liveG, 0);
+    liveG.heat[0] = energyFromTemp(capLive, AMBIENT_TEMPERATURE_K);
+    liveG.recomputePressure();
+    float liveCold = liveG.gasPartialPressurePaFromCurrentState(0, SUBSTANCE_WATER);
+    float cachedCold = liveG.gasPartialPressurePa(0, SUBSTANCE_WATER);
+    float airAmt = liveG.gasComponentAmount(0, SUBSTANCE_AIR);
+    float vapAmt = liveG.gasComponentAmount(0, SUBSTANCE_WATER);
+    liveG.heat[0] = energyFromTemp(capLive, 400.0f);
+    float liveHotStale = liveG.gasPartialPressurePaFromCurrentState(0, SUBSTANCE_WATER);
+    float cachedStale = liveG.gasPartialPressurePa(0, SUBSTANCE_WATER);
+    emit("live_water_partial_pressure_rises_with_T",
+        liveHotStale > liveCold * 1.2f && liveCold > 0.0f,
+        "cold=" + std::to_string(liveCold) + " hot=" + std::to_string(liveHotStale));
+    emit("live_water_partial_pressure_ignores_stale_cache",
+        std::abs(cachedStale - cachedCold) < 1.0f && liveHotStale > cachedStale * 1.2f,
+        "cached=" + std::to_string(cachedStale) + " live=" + std::to_string(liveHotStale));
+
+    float TsatQ = 350.0f;
+    double PsatQ = saturationVaporPressurePa(SUBSTANCE_WATER, TsatQ);
+    float prefQ = liveG.config.referencePressurePa;
+    float volQ = 1.0f;
+    float satAmt = gasAmountFromPressureAtm(static_cast<float>(PsatQ / static_cast<double>(prefQ)), volQ, TsatQ);
+    float pBack = gasPressureAtmFromState(satAmt, volQ, TsatQ) * prefQ;
+    emit("saturation_amount_round_trips_to_Psat",
+        std::isfinite(pBack) && std::abs(pBack - static_cast<float>(PsatQ))
+            <= 0.02f * static_cast<float>(PsatQ) + 1.0f,
+        "Psat=" + std::to_string(PsatQ) + " Pback=" + std::to_string(pBack)
+            + " satAmt=" + std::to_string(satAmt));
+    float satHot = gasAmountFromPressureAtm(static_cast<float>(PsatQ / static_cast<double>(prefQ)),
+        volQ, 2.0f * TsatQ);
+    emit("hotter_gas_needs_less_saturation_vapor",
+        satAmt > GAS_MIN_AMOUNT && satHot < satAmt
+            && std::abs(satHot / satAmt - 0.5f) <= 0.02f,
+        "sat=" + std::to_string(satAmt) + " satHot=" + std::to_string(satHot));
+    double excessQ = static_cast<double>(vapAmt) - static_cast<double>(satAmt);
+    if (excessQ < 0.0) excessQ = 0.0;
+    excessQ = std::min(excessQ, static_cast<double>(vapAmt));
+    emit("condensation_excess_never_exceeds_water_vapor",
+        excessQ >= 0.0 && excessQ <= static_cast<double>(vapAmt) + 1.0e-9,
+        "vap=" + std::to_string(vapAmt) + " excess=" + std::to_string(excessQ));
+    emit("condensation_leaves_nonwater_components",
+        std::abs(liveG.gasComponentAmount(0, SUBSTANCE_AIR) - airAmt) < 1.0e-8f
+            && std::abs(liveG.gasComponentAmount(0, SUBSTANCE_WATER) - vapAmt) < 1.0e-8f,
+        "air=" + std::to_string(airAmt) + " vap=" + std::to_string(vapAmt));
+
     FluidEngine cF;
     RigidBodyEngine cR;
     GasEngine cG;

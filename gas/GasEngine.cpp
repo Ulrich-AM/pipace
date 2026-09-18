@@ -59,6 +59,8 @@ float GasEngine::cellTemperatureK(int index) const {
     if (index < 0 || index >= GW * GH) return AMBIENT_TEMPERATURE_K;
     float a = amount[static_cast<size_t>(index)];
     if (!(a > GAS_MIN_AMOUNT)) return AMBIENT_TEMPERATURE_K;
+    // TODO: honor FluidConfig.cellsPerMeter when user-selectable scale exists.
+    // Current world is 4 cells/m; ThermalEngine::gasCapacity uses the same default.
     float cap = gasMixtureThermalCapacity(gasComponents(index), 4.0f);
     if (cap < MIN_THERMAL_CAPACITY) return AMBIENT_TEMPERATURE_K;
     return tempFromEnergy(heat[static_cast<size_t>(index)], cap);
@@ -398,6 +400,19 @@ float GasEngine::gasPartialPressurePa(int index, SubstanceId id) const {
     float frac = gasComponentFraction(index, id);
     if (!(frac > 0.0f)) return 0.0f;
     return pressurePa(index) * frac;
+}
+
+float GasEngine::gasPartialPressurePaFromCurrentState(int index, SubstanceId id) const {
+    if (index < 0 || index >= GW * GH) return 0.0f;
+    float vol = volume[static_cast<size_t>(index)];
+    float a = amount[static_cast<size_t>(index)];
+    if (!(vol >= GAS_MIN_VOLUME) || !(a > GAS_MIN_AMOUNT)) return 0.0f;
+    float frac = gasComponentFraction(index, id);
+    if (!(frac > 0.0f)) return 0.0f;
+    float pAtm = gasPressureAtmFromState(a, vol, cellTemperatureK(index));
+    float pPa = pAtm * frac * config.referencePressurePa;
+    if (!std::isfinite(pPa) || pPa < 0.0f) return 0.0f;
+    return pPa;
 }
 
 double GasEngine::sumWaterVapor() const {
