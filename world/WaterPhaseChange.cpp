@@ -147,7 +147,7 @@ float gasAmountRoomForPressureAtm(GasEngine const &gas, int i, float vol, float 
 
 float vaporPartialPressurePa(FluidEngine const &fluid, GasEngine const &gas, int x, int y) {
     if (!gas.isAccessible(fluid, x, y)) return 0.0f;
-    return gas.gasPartialPressurePa(GasEngine::ci(x, y), SUBSTANCE_WATER);
+    return gas.gasPartialPressurePaFromCurrentState(GasEngine::ci(x, y), SUBSTANCE_WATER);
 }
 
 float localAmbientPressurePa(FluidEngine const &fluid, RigidBodyEngine const &rigid, GasEngine const &gas,
@@ -1038,8 +1038,13 @@ WaterPhaseTickStats stepWaterPhaseChange(FluidEngine &fluid, RigidBodyEngine &ri
                 }
                 continue;
             }
-            double excessAmt = (Pv - Psat) / static_cast<double>(pref) * static_cast<double>(vol);
-            if (!(excessAmt > GAS_MIN_AMOUNT)) continue;
+            // Water partial P depends on the Water component amount at T.
+            // Invert Psat to a Water-vapor amount; do not use isothermal (ΔP/Pref)*V.
+            float psatAtm = static_cast<float>(Psat / static_cast<double>(pref));
+            float satAmt = gasAmountFromPressureAtm(psatAtm, vol, Tgas);
+            double excessAmt = static_cast<double>(vap) - static_cast<double>(satAmt);
+            if (!(excessAmt > GAS_MIN_AMOUNT) || !std::isfinite(excessAmt)) continue;
+            excessAmt = std::min(excessAmt, static_cast<double>(vap));
             double mAvail = gasAmountToMassKg(SUBSTANCE_WATER, vap, cpm);
             double mExcess = gasAmountToMassKg(SUBSTANCE_WATER, excessAmt, cpm);
             double mWant = std::min({mAvail, mExcess, mRateFill});

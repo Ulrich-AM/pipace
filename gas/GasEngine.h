@@ -92,7 +92,10 @@ struct GasEngine {
     float takeGasComponentAmount(int index, SubstanceId id, float da);
     bool tryCommitGasOccupancy(int index, GasComponentView const &view);
     void clearGasComposition(int index);
+    // Cached total * mole fraction. Solver / GASP / rigid forces.
     float gasPartialPressurePa(int index, SubstanceId id) const;
+    // Live amount/volume/T. Water phase change must not wait on pressure[].
+    float gasPartialPressurePaFromCurrentState(int index, SubstanceId id) const;
 
     // Compatibility wrappers over generic composition. Water vapor is
     // SUBSTANCE_WATER + MatterPhase::Gas; Air is SUBSTANCE_AIR. Not a second store.
