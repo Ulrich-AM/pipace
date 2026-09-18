@@ -1,4 +1,5 @@
 #include "chemistry/ReactionMatterAccess.h"
+#include "chemistry/ReactionRegistry.h"
 
 #include "fluid/FluidTypes.h"
 
@@ -35,6 +36,28 @@ bool reactionCatalystPresent(FluidEngine const &fluid, GasEngine const &gas, int
     if (fluid.liquidComponentAmount(index, catalyst) > kMinLiquidComponent) return true;
     if (gas.gasComponentAmount(index, catalyst) > kMinGasComponent) return true;
     return false;
+}
+
+bool reactionCellHasRequiredReactants(FluidEngine const &fluid, GasEngine const &gas, int index,
+    ReactionDefinition const &def)
+{
+    if (!validReaction(def.id)) return false;
+    if (index < 0 || index >= GW * GH) return false;
+    bool any = false;
+    for (int n = 0; n < def.reactantCount && n < kMaxReactionParticipants; ++n) {
+        ReactionParticipant const &p = def.reactants[n];
+        if (!reactionParticipantUsed(p)) continue;
+        any = true;
+        bool ok = false;
+        if (p.requiredPhase == MatterPhase::Gas || p.requiredPhase == MatterPhase::None) {
+            if (gas.gasComponentAmount(index, p.substance) > kMinGasComponent) ok = true;
+        }
+        if (!ok && (p.requiredPhase == MatterPhase::Liquid || p.requiredPhase == MatterPhase::None)) {
+            if (fluid.liquidComponentAmount(index, p.substance) > kMinLiquidComponent) ok = true;
+        }
+        if (!ok) return false;
+    }
+    return any;
 }
 
 bool reactionReadLiquidOccupancy(FluidEngine const &fluid, int index, LiquidComponentView &out) {

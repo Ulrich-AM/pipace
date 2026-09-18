@@ -294,6 +294,65 @@ inline float gasMixtureThermalCapacity(GasComponentView const &view, float cells
     return cap;
 }
 
+// Amount-fraction mixture of referenceGasDensityKgM3. Pure-component fast path.
+// Missing/invalid density uses Air's tabulated rho as a numerical fallback only;
+// it does not relabel the substance as Air.
+inline float gasMixtureReferenceDensityKgM3(GasComponentView const &view) {
+    float airRho = AIR_DENSITY_KG_M3;
+    if (!(airRho > 0.0f) || !std::isfinite(airRho)) airRho = 1.204f;
+    auto rhoOf = [&](SubstanceId id) {
+        double rho = referenceGasDensityKgM3(id);
+        if (rho > 0.0 && std::isfinite(rho)) return static_cast<float>(rho);
+        return airRho;
+    };
+    if (view.count <= 0) return airRho;
+    if (view.count == 1) return rhoOf(view.items[0].id);
+    float tot = 0.0f;
+    for (int n = 0; n < view.count; ++n) {
+        if (view.items[n].amount > GAS_MIN_AMOUNT && validGasComponentId(view.items[n].id))
+            tot += view.items[n].amount;
+    }
+    if (!(tot > GAS_MIN_AMOUNT)) return airRho;
+    float rho = 0.0f;
+    for (int n = 0; n < view.count; ++n) {
+        SubstanceId id = view.items[n].id;
+        float amt = view.items[n].amount;
+        if (!(amt > GAS_MIN_AMOUNT) || !validGasComponentId(id)) continue;
+        rho += (amt / tot) * rhoOf(id);
+    }
+    if (!(rho > 0.0f) || !std::isfinite(rho)) return airRho;
+    return rho;
+}
+
+// Amount-fraction mixture of thermal.conductivity. Pure-component fast path.
+// Missing/invalid k uses Air conductivity as a numerical fallback only.
+inline float gasMixtureConductivity(GasComponentView const &view) {
+    float airK = thermalForSubstance(SUBSTANCE_AIR).conductivity;
+    if (!(airK > 0.0f) || !std::isfinite(airK)) airK = 0.026f;
+    auto kOf = [&](SubstanceId id) {
+        float k = thermalForSubstance(id).conductivity;
+        if (k > 0.0f && std::isfinite(k)) return k;
+        return airK;
+    };
+    if (view.count <= 0) return airK;
+    if (view.count == 1) return kOf(view.items[0].id);
+    float tot = 0.0f;
+    for (int n = 0; n < view.count; ++n) {
+        if (view.items[n].amount > GAS_MIN_AMOUNT && validGasComponentId(view.items[n].id))
+            tot += view.items[n].amount;
+    }
+    if (!(tot > GAS_MIN_AMOUNT)) return airK;
+    float k = 0.0f;
+    for (int n = 0; n < view.count; ++n) {
+        SubstanceId id = view.items[n].id;
+        float amt = view.items[n].amount;
+        if (!(amt > GAS_MIN_AMOUNT) || !validGasComponentId(id)) continue;
+        k += (amt / tot) * kOf(id);
+    }
+    if (!(k > 0.0f) || !std::isfinite(k)) return airK;
+    return k;
+}
+
 // Closed accounting only. Does not mutate FluidEngine / GasEngine / rigid storage.
 inline PhaseTransferResult convertPhaseAmount(SubstanceId id, MatterPhase from, MatterPhase to,
     double sourceAmount, double cellsPerMeter)

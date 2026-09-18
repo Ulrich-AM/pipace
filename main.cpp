@@ -188,7 +188,9 @@ void applySimQuality(int level) {
     applyFluidQualityKnobs(engine.config, level);
     applyThermalQualityKnobs(thermal.config, level);
     engine.residualConsolidationEnabled = true;
-    gas.config.simMode = (level <= 0) ? GasSimMode::Off : GasSimMode::Full;
+    // Auto/Low may drop to Half, but never silently disable player-facing gases.
+    // Settings → Gas Off remains the explicit Off path.
+    gas.config.simMode = (level <= 0) ? GasSimMode::Half : GasSimMode::Full;
 }
 
 void setQualityPreset(QualityPreset preset) {

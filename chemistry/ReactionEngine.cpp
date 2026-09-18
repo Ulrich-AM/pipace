@@ -390,6 +390,7 @@ bool tryReactCell(FluidEngine &fluid, RigidBodyEngine &rigid, GasEngine &gas,
     if (index < 0 || index >= GW * GH) return false;
     size_t i = static_cast<size_t>(index);
     if (fluid.solid[i] || fluid.dynamicSolid[i]) return false;
+    if (!reactionCellHasRequiredReactants(fluid, gas, index, def)) return false;
     bool hasLiquid = fluid.fill[i] > kMinLiquidComponent;
     bool hasGas = gas.amount[i] > GAS_MIN_AMOUNT;
     if (!hasLiquid && !hasGas) return false;
@@ -464,7 +465,8 @@ void ReactionEngine::simulationTick(FluidEngine &fluid, RigidBodyEngine &rigid, 
     int nTable = reactionTableSize();
     ReactionDefinition const *table = builtinReactionTable();
     // Gas-only mixtures can sit outside FluidEngine's liquid solve region.
-    // Full-grid scan at 200x120; empty cells return immediately.
+    // Full-grid scan at 200x120; ambient Air is skipped by reactant prefilter
+    // before temperature / inventory work.
     int x0 = 0;
     int y0 = 0;
     int x1 = GW - 1;
@@ -476,6 +478,7 @@ void ReactionEngine::simulationTick(FluidEngine &fluid, RigidBodyEngine &rigid, 
             continue;
         for (int r = 0; r < nTable; ++r) {
             if (table[r].id == REACTION_NONE) continue;
+            if (!reactionCellHasRequiredReactants(fluid, gas, index, table[r])) continue;
             (void)tryReactCell(fluid, rigid, gas, thermal, index, table[r], dt);
         }
     }
@@ -838,6 +841,45 @@ void runReactionEngineSanityCheck() {
             && ge.gasComponentAmount(gi, SUBSTANCE_OXYGEN) <= kMinGasComponent,
         "dom=" + std::to_string(dom) + " air=" + std::to_string(ge.airAmount(gi))
             + " water=" + std::to_string(ge.vaporAmount(gi)));
+
+    GasComponentView airView{};
+    airView.count = 1;
+    airView.items[0] = {SUBSTANCE_AIR, 1.0f};
+    GasComponentView h2View{};
+    h2View.count = 1;
+    h2View.items[0] = {SUBSTANCE_HYDROGEN, 1.0f};
+    GasComponentView o2View{};
+    o2View.count = 1;
+    o2View.items[0] = {SUBSTANCE_OXYGEN, 1.0f};
+    float rhoAir = gasMixtureReferenceDensityKgM3(airView);
+    float rhoH2 = gasMixtureReferenceDensityKgM3(h2View);
+    float rhoO2 = gasMixtureReferenceDensityKgM3(o2View);
+    emit("mixture_density_air_reference",
+        nearRel(rhoAir, AIR_DENSITY_KG_M3), "rhoAir=" + std::to_string(rhoAir));
+    emit("mixture_density_hydrogen_lighter",
+        rhoH2 > 0.0f && rhoH2 < rhoAir * 0.5f, "rhoH2=" + std::to_string(rhoH2));
+    emit("mixture_density_oxygen_heavier",
+        rhoO2 > rhoAir, "rhoO2=" + std::to_string(rhoO2));
+    float kAir = gasMixtureConductivity(airView);
+    float kH2 = gasMixtureConductivity(h2View);
+    emit("mixture_conductivity_hydrogen_faster",
+        kH2 > kAir * 2.0f, "kH2=" + std::to_string(kH2) + " kAir=" + std::to_string(kAir));
+
+    FluidEngine fluid;
+    int airIdx = 20;
+    ge.volume[static_cast<size_t>(airIdx)] = 1.0f;
+    bool airCommitted = ge.tryCommitGasOccupancy(airIdx, airView);
+    emit("ambient_air_fails_h2o2_prefilter",
+        airCommitted && !reactionCellHasRequiredReactants(fluid, ge, airIdx, h2o2), "");
+    GasComponentView fuelView{};
+    fuelView.count = 2;
+    fuelView.items[0] = {SUBSTANCE_HYDROGEN, 0.5f};
+    fuelView.items[1] = {SUBSTANCE_OXYGEN, 0.25f};
+    int fuelIdx = 21;
+    ge.volume[static_cast<size_t>(fuelIdx)] = 1.0f;
+    bool fuelCommitted = ge.tryCommitGasOccupancy(fuelIdx, fuelView);
+    emit("h2o2_cell_passes_prefilter",
+        fuelCommitted && reactionCellHasRequiredReactants(fluid, ge, fuelIdx, h2o2), "");
 
     out << "summary\t" << (failed == 0 ? "PASS" : "FAIL") << '\t' << passed << " passed, "
         << failed << " failed\n";

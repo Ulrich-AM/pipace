@@ -174,7 +174,7 @@ Performance pass (2026-09-12) landed sparse flux/pressure/surface lists, pressur
 
 Remaining headroom:
 
-- Quality presets (Low / Medium / High / Auto) change cost knobs only: pressure iters, CFL substeps, limiter passes, surface tension, spray, gas rate, sim Hz, flat render. Auto drops Low after several overloaded ticks.
+- Quality presets (Low / Medium / High / Auto) change cost knobs only: pressure iters, CFL substeps, limiter passes, surface tension, spray, gas rate, sim Hz, flat render. Auto drops Low after several overloaded ticks. Low/Auto-Low use `GasSimMode::Half`; they never silently set `GasSimMode::Off`. Settings → Gas Off remains explicit.
 - Connectivity-aware residual / splash redeposit (correctness)
 - Broader multithreading on **larger grids** (pressure lists ≥20k cells/phase); do not force 200×120 onto many cores
 - Avoid guessing; use `--benchmark` and stage timings
