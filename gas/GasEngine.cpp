@@ -55,6 +55,15 @@ float GasEngine::pressurePa(int index) const {
     return pressureAtm(index) * config.referencePressurePa;
 }
 
+float GasEngine::cellTemperatureK(int index) const {
+    if (index < 0 || index >= GW * GH) return AMBIENT_TEMPERATURE_K;
+    float a = amount[static_cast<size_t>(index)];
+    if (!(a > GAS_MIN_AMOUNT)) return AMBIENT_TEMPERATURE_K;
+    float cap = gasMixtureThermalCapacity(gasComponents(index), 4.0f);
+    if (cap < MIN_THERMAL_CAPACITY) return AMBIENT_TEMPERATURE_K;
+    return tempFromEnergy(heat[static_cast<size_t>(index)], cap);
+}
+
 float GasEngine::cellU(int x, int y) const {
     if (x < 0 || x >= GW || y < 0 || y >= GH) return 0.0f;
     return 0.5f * (u[static_cast<size_t>(ui(x, y))] + u[static_cast<size_t>(ui(x + 1, y))]);
@@ -386,11 +395,9 @@ bool GasEngine::tryCommitGasOccupancy(int index, GasComponentView const &view) {
 
 float GasEngine::gasPartialPressurePa(int index, SubstanceId id) const {
     if (index < 0 || index >= GW * GH) return 0.0f;
-    float vol = volume[static_cast<size_t>(index)];
-    if (!(vol >= GAS_MIN_VOLUME)) return 0.0f;
-    float amt = gasComponentAmount(index, id);
-    if (!(amt > GAS_MIN_AMOUNT)) return 0.0f;
-    return (amt / vol) * config.referencePressurePa;
+    float frac = gasComponentFraction(index, id);
+    if (!(frac > 0.0f)) return 0.0f;
+    return pressurePa(index) * frac;
 }
 
 double GasEngine::sumWaterVapor() const {
@@ -507,8 +514,12 @@ void GasEngine::sleepAll() {
 void GasEngine::recomputePressure() {
     for (int i = 0; i < GW * GH; ++i) {
         float vol = volume[static_cast<size_t>(i)];
-        if (vol < GAS_MIN_VOLUME) pressure[static_cast<size_t>(i)] = 0.0f;
-        else pressure[static_cast<size_t>(i)] = amount[static_cast<size_t>(i)] / vol;
+        float a = amount[static_cast<size_t>(i)];
+        if (vol < GAS_MIN_VOLUME || !(a > GAS_MIN_AMOUNT)) {
+            pressure[static_cast<size_t>(i)] = 0.0f;
+            continue;
+        }
+        pressure[static_cast<size_t>(i)] = gasPressureAtmFromState(a, vol, cellTemperatureK(i));
     }
 }
 
@@ -1111,20 +1122,15 @@ void GasEngine::applyPressureBrush(FluidEngine &fluid, int cx, int cy, int brush
             volume[static_cast<size_t>(i)] = vol;
             if (vol < GAS_MIN_VOLUME) continue;
             float a = amount[static_cast<size_t>(i)];
-            float p = a / vol;
+            float T = cellTemperatureK(i);
+            float p = gasPressureAtmFromState(a, vol, T);
             float np = std::clamp(p + dAtm, 0.0f, maxAtm);
-            float na = np * vol;
+            float na = gasAmountFromPressureAtm(np, vol, T);
             float da = na - a;
             if (std::abs(da) <= GAS_MIN_AMOUNT) continue;
-            float capOld = (a > GAS_MIN_AMOUNT)
-                ? gasMixtureThermalCapacity(gasComponents(i), fluid.config.cellsPerMeter)
-                : 0.0f;
-            float t = (a > GAS_MIN_AMOUNT && capOld >= MIN_THERMAL_CAPACITY)
-                ? tempFromEnergy(heat[static_cast<size_t>(i)], capOld)
-                : AMBIENT_TEMPERATURE_K;
             if (da > 0.0f) {
                 float capAdd = thermalCapacity(gasMassKg(da), thermalForSubstance(substanceForGasSpecies()).specificHeat);
-                heat[static_cast<size_t>(i)] += energyFromTemp(capAdd, t);
+                heat[static_cast<size_t>(i)] += energyFromTemp(capAdd, AMBIENT_TEMPERATURE_K);
             } else if (a > GAS_MIN_AMOUNT) {
                 heat[static_cast<size_t>(i)] *= (na / a);
             }
@@ -1142,7 +1148,7 @@ void GasEngine::applyPressureBrush(FluidEngine &fluid, int cx, int cy, int brush
                 heat[static_cast<size_t>(i)] = 0.0f;
                 na = 0.0f;
             }
-            pressure[static_cast<size_t>(i)] = na / vol;
+            pressure[static_cast<size_t>(i)] = gasPressureAtmFromState(na, vol, cellTemperatureK(i));
             net += static_cast<double>(na - a);
             wakeChunkAtCell(x, y);
             wakeThermalAt(x, y);
@@ -1169,10 +1175,11 @@ void GasEngine::applyGasBrush(FluidEngine &fluid, int cx, int cy, int brushRadiu
             volume[static_cast<size_t>(i)] = vol;
             if (vol < GAS_MIN_VOLUME) continue;
             float a = amount[static_cast<size_t>(i)];
-            float p = a / vol;
-            float np = std::clamp(p + dAtm, 0.0f, maxAtm);
-            float na = np * vol;
-            float da = na - a;
+            float T = cellTemperatureK(i);
+            float p = gasPressureAtmFromState(a, vol, T);
+            if (p >= maxAtm - 1.0e-6f) continue;
+            float room = gasAmountFromPressureAtm(maxAtm, vol, T) - a;
+            float da = std::min(dAtm * vol, std::max(0.0f, room));
             if (!(da > GAS_MIN_AMOUNT) || !std::isfinite(da)) continue;
             GasComponentView cur = gasComponents(i);
             GasComponent add[1] = {{gasId, da}};
@@ -1185,6 +1192,7 @@ void GasEngine::applyGasBrush(FluidEngine &fluid, int cx, int cy, int brushRadiu
             heat[static_cast<size_t>(i)] += energyFromTemp(capAdd, AMBIENT_TEMPERATURE_K);
             if (!(heat[static_cast<size_t>(i)] >= 0.0f) || !std::isfinite(heat[static_cast<size_t>(i)]))
                 heat[static_cast<size_t>(i)] = 0.0f;
+            float na = a + da;
             amount[static_cast<size_t>(i)] = na;
             clampSpecies(i);
             if (amount[static_cast<size_t>(i)] <= GAS_MIN_AMOUNT) {
@@ -1193,7 +1201,7 @@ void GasEngine::applyGasBrush(FluidEngine &fluid, int cx, int cy, int brushRadiu
                 heat[static_cast<size_t>(i)] = 0.0f;
                 na = 0.0f;
             }
-            pressure[static_cast<size_t>(i)] = (vol > GAS_MIN_VOLUME) ? (na / vol) : 0.0f;
+            pressure[static_cast<size_t>(i)] = gasPressureAtmFromState(na, vol, cellTemperatureK(i));
             net += static_cast<double>(na - a);
             wakeAt(x, y);
         }
@@ -1236,6 +1244,7 @@ void GasEngine::simulationTick(FluidEngine &fluid) {
         return;
     }
     if (config.simMode == GasSimMode::Half && (fluid.tickNo & 1u) != 0u) {
+        recomputePressure();
         lastStepMs = 0.0;
         return;
     }

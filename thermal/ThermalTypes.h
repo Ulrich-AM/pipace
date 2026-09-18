@@ -22,8 +22,9 @@
 // gasConductivityScale (~400): enough that a hot wall warms adjacent air in seconds,
 // far below the solid scale. Hot-air transport is mainly buoyancy-driven convection.
 //
-// Gas pressure remains isothermal (amount/volume). Path for P∝T/T_amb is documented
-// in ThermalEngine; it is not enabled in this update.
+// Gas pressure is a one-way reference-state ideal-gas coupling in GasEngine:
+//   P_atm = (amount / volume) * (T / AMBIENT_TEMPERATURE_K)
+// Thermal energy is not converted into compressive work. PdV / shocks later.
 //
 // Melting/boiling/latent live on PhaseProperties (copied from thermal authoring
 // at registry build). No phase-change solver yet.

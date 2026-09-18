@@ -1075,6 +1075,87 @@ void runReactionEngineSanityCheck() {
         "nT=" + std::to_string(ThermalEngine::gasTempK(propG, pi1))
             + " nWater=" + std::to_string(propG.gasComponentAmount(pi1, SUBSTANCE_WATER)));
 
+    auto nearAtm = [&](float a, float b) {
+        return std::isfinite(a) && std::isfinite(b) && std::abs(a - b) <= 0.05f * std::max(1.0f, std::abs(b)) + 0.02f;
+    };
+    float pAmb = gasPressureAtmFromState(1.0f, 1.0f, AMBIENT_TEMPERATURE_K);
+    emit("pressure_ambient_air_1atm", nearAtm(pAmb, 1.0f), "P=" + std::to_string(pAmb));
+    float pHot = gasPressureAtmFromState(1.0f, 1.0f, 2.0f * AMBIENT_TEMPERATURE_K);
+    emit("pressure_doubles_with_T", nearAtm(pHot, 2.0f * pAmb), "P2T=" + std::to_string(pHot));
+    float pAmt = gasPressureAtmFromState(2.0f, 1.0f, AMBIENT_TEMPERATURE_K);
+    emit("pressure_doubles_with_amount", nearAtm(pAmt, 2.0f * pAmb), "P2a=" + std::to_string(pAmt));
+    float pVol = gasPressureAtmFromState(1.0f, 0.5f, AMBIENT_TEMPERATURE_K);
+    emit("pressure_doubles_with_half_volume", nearAtm(pVol, 2.0f * pAmb), "PhalfV=" + std::to_string(pVol));
+
+    GasEngine pGas;
+    pGas.volume[0] = 1.0f;
+    GasComponentView vapView{};
+    vapView.count = 1;
+    vapView.items[0] = {SUBSTANCE_WATER, 0.4f};
+    (void)pGas.tryCommitGasOccupancy(0, vapView);
+    float capV = ThermalEngine::gasCapacity(pGas, 0);
+    pGas.heat[0] = energyFromTemp(capV, AMBIENT_TEMPERATURE_K);
+    pGas.recomputePressure();
+    float pVapCold = pGas.gasPartialPressurePa(0, SUBSTANCE_WATER);
+    float heatBefore = pGas.heat[0];
+    pGas.heat[0] = energyFromTemp(capV, 400.0f);
+    pGas.recomputePressure();
+    float pVapHot = pGas.gasPartialPressurePa(0, SUBSTANCE_WATER);
+    emit("water_partial_pressure_rises_with_T",
+        pVapHot > pVapCold * 1.2f && pVapCold > 0.0f,
+        "cold=" + std::to_string(pVapCold) + " hot=" + std::to_string(pVapHot));
+    emit("pressure_recompute_does_not_modify_heat",
+        std::abs(pGas.heat[0] - energyFromTemp(capV, 400.0f)) <= 1.0e-3f,
+        "heat=" + std::to_string(pGas.heat[0]));
+    (void)heatBefore;
+
+    FluidEngine cF;
+    RigidBodyEngine cR;
+    GasEngine cG;
+    ThermalEngine cT;
+    ReactionEngine cRx;
+    cF.config.walledBorders = true;
+    cG.config.simMode = GasSimMode::Off;
+    cG.config.boundary = GasBoundary::Sealed;
+    cT.config.enabled = false;
+    cG.resetAmbient(cF);
+    int ciComb = FluidEngine::ci(70, 70);
+    GasComponentView combView{};
+    combView.count = 2;
+    combView.items[0] = {SUBSTANCE_HYDROGEN,
+        static_cast<float>(molesToStorageAmount(SUBSTANCE_HYDROGEN, MatterPhase::Gas, 2.0, cpm))};
+    combView.items[1] = {SUBSTANCE_OXYGEN,
+        static_cast<float>(molesToStorageAmount(SUBSTANCE_OXYGEN, MatterPhase::Gas, 1.0, cpm))};
+    (void)cG.tryCommitGasOccupancy(ciComb, combView);
+    float capC = ThermalEngine::gasCapacity(cG, ciComb);
+    cG.heat[static_cast<size_t>(ciComb)] = energyFromTemp(capC, 900.0f);
+    cG.recomputePressure();
+    float pBefore = cG.pressureAtm(ciComb);
+    float TBefore = cG.cellTemperatureK(ciComb);
+    for (int n = 0; n < 30; ++n)
+        cRx.simulationTick(cF, cR, cG, cT, PHYSICS_DT);
+    cG.recomputePressure();
+    float pAfter = cG.pressureAtm(ciComb);
+    float TAfter = cG.cellTemperatureK(ciComb);
+    float heatAfter = cG.heat[static_cast<size_t>(ciComb)];
+    float pEq = gasPressureAtmFromState(cG.amount[static_cast<size_t>(ciComb)],
+        cG.volume[static_cast<size_t>(ciComb)], TAfter);
+    emit("combustion_pressure_matches_equation",
+        TAfter > TBefore + 200.0f && nearAtm(pAfter, pEq) && pAfter > pBefore,
+        "T0=" + std::to_string(TBefore) + " T1=" + std::to_string(TAfter)
+            + " P0=" + std::to_string(pBefore) + " P1=" + std::to_string(pAfter)
+            + " Peq=" + std::to_string(pEq));
+    cG.recomputePressure();
+    emit("combustion_pressure_does_not_spend_heat",
+        std::abs(cG.heat[static_cast<size_t>(ciComb)] - heatAfter) <= 1.0e-3f,
+        "h=" + std::to_string(heatAfter));
+
+    emit("idle_reaction_glow_fast_path",
+        !ReactionEngine().hasVisibleActivity(), "");
+    cRx.clearActivity();
+    emit("scene_load_clears_reaction_glow",
+        !cRx.hasVisibleActivity() && cRx.activity[static_cast<size_t>(ciComb)] <= kActivityEps, "");
+
     out << "summary\t" << (failed == 0 ? "PASS" : "FAIL") << '\t' << passed << " passed, "
         << failed << " failed\n";
 }

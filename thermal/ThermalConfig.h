@@ -18,7 +18,8 @@ struct ThermalConfig {
     // reservoir at AMBIENT_TEMPERATURE_K (FluidConfig::walledBorders == false).
     float gasConductivityScale = 400.0f;
     float heatToolWatts = 2.5e6f;     // sandbox watts at strength 1, per covered cell
-    bool coupleGasPressureToTemperature = false; // documented path; keep off
+    // Unused: GasEngine now always uses P ∝ T/T_amb. Kept so old notes still compile.
+    bool coupleGasPressureToTemperature = true;
 };
 
 inline void applyThermalQualityKnobs(ThermalConfig &c, int level) {

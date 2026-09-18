@@ -342,6 +342,7 @@ void handleMenuCommand(ui::MenuCmd cmd) {
             engine.loadTestScene(static_cast<int>(cmd) - static_cast<int>(MenuCmd::Scene1) + 1);
             gas.resetAmbient(engine);
             thermal.seedAmbient(engine, rigid, gas);
+            reactions.clearActivity();
             shell.log(ui::tr("log_fluid_scene"));
             break;
         case MenuCmd::Rigid1: case MenuCmd::Rigid2: case MenuCmd::Rigid3: case MenuCmd::Rigid4: case MenuCmd::Rigid5:
@@ -354,6 +355,7 @@ void handleMenuCommand(ui::MenuCmd cmd) {
             rigid.loadTestScene(engine, static_cast<int>(cmd) - static_cast<int>(MenuCmd::Rigid1) + 1);
             gas.resetAmbient(engine);
             thermal.seedAmbient(engine, rigid, gas);
+            reactions.clearActivity();
             shell.log(ui::tr("log_rigid_scene"));
             break;
         case MenuCmd::Gas1: case MenuCmd::Gas2: case MenuCmd::Gas3: case MenuCmd::Gas4:
@@ -361,6 +363,7 @@ void handleMenuCommand(ui::MenuCmd cmd) {
             if (gas.config.simMode == GasSimMode::Off) gas.config.simMode = GasSimMode::Full;
             gas.loadTestScene(engine, rigid, static_cast<int>(cmd) - static_cast<int>(MenuCmd::Gas1) + 1);
             thermal.seedAmbient(engine, rigid, gas);
+            reactions.clearActivity();
             shell.log(ui::tr("log_gas_scene"));
             break;
     }
@@ -755,7 +758,8 @@ void fillWorldPixels() {
             look.glowingLiquids = false;
             look.outlines = false;
         }
-        float const *reactionGlow = (debugView == DebugView::Normal) ? reactions.activity.data() : nullptr;
+        float const *reactionGlow = (debugView == DebugView::Normal && reactions.hasVisibleActivity())
+            ? reactions.activity.data() : nullptr;
         GasEngine const *identityGas = (debugView == DebugView::Normal) ? &gas : nullptr;
         worldRenderer.paintNormal(engine, rigid, look, reactionGlow, identityGas);
         if (debugView == DebugView::Temperature) {
@@ -1043,6 +1047,7 @@ void worldTick() {
     thermal.simulationTick(engine, rigid, gas, PHYSICS_DT);
     stepWaterPhaseChange(engine, rigid, gas, thermal, PHYSICS_DT);
     reactions.simulationTick(engine, rigid, gas, thermal, PHYSICS_DT);
+    gas.recomputePressure();
     adaptAutoQuality(FluidEngine::elapsedMs(tickStart));
 }
 

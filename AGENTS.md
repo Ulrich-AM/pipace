@@ -100,7 +100,8 @@ is a 4-slot SoA (`gasCompId` / `gasCompAmt` / `gasCompCount`). Air is an explici
 `SUBSTANCE_AIR` component. Hydrogen and Oxygen are player-facing gases
 (`SUBSTANCE_HYDROGEN` / `SUBSTANCE_OXYGEN`) painted from the Gases category.
 Water vapor is `SUBSTANCE_WATER` + `MatterPhase::Gas`.
-Do not infer missing gas as Air. Pressure still uses total `amount`.
+Do not infer missing gas as Air. Pressure is `P = (amount/volume)*(T/T_amb)` with
+`T_amb = AMBIENT_TEMPERATURE_K`; `pressure[]` is the cached result.
 
 Solver unit liquid is `sandboxReferenceLiquid()` (currently SUBSTANCE_WATER's fluid
 table: relative density 1.0). That is a reference, not “all liquid is water”.
