@@ -10,6 +10,12 @@ using ReactionId = uint16_t;
 constexpr ReactionId REACTION_NONE = 0;
 constexpr ReactionId REACTION_HYDROGEN_COMBUSTION = 1;
 
+// How participating matter is arranged in the world. Do not infer from names.
+enum class ReactionTopology : uint8_t {
+    HomogeneousCell = 0, // all participants share one liquid/gas cell
+    SolidGasSurface      // one rigid solid pixel + adjacent gas cell (4-neighbor face)
+};
+
 // Fixed participant slots. Covers 2 H2 + O2 -> 2 H2O with room for extras.
 // No per-cell or per-definition heap.
 constexpr int kMaxReactionParticipants = 8;
@@ -58,9 +64,12 @@ struct ReactionDefinition {
     uint8_t productCount = 0;
     ReactionConditions conditions{};
     float energyChangeJPerExtent = 0.0f;
+    ReactionTopology topology = ReactionTopology::HomogeneousCell;
     // Authorable first-order cap. Not Arrhenius kinetics. <= 0 means the
     // engine default (see ReactionEngine). Extent 1 consumes the written
     // coefficients in one second at this rate when matter allows.
+    // HomogeneousCell: per occupied cell. SolidGasSurface: per exposed
+    // 4-neighbor interface face (more exposed faces may react faster).
     float maxExtentPerSecond = 0.0f;
 };
 

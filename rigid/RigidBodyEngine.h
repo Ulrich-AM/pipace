@@ -48,6 +48,29 @@ struct RigidBodyEngine {
         MaterialId material, float temperatureK);
     void finalizeMaskEdits(FluidEngine &fluid);
     void refreshMassProperties(int bodyIndex);
+    // After chemistry: refresh remain-only mass, then connectivity for mask clears.
+    void finalizeChemistryEdits(FluidEngine &fluid);
+
+    // World cell -> rigid source pixel (center sample, rotated bodies OK).
+    // Static FluidEngine walls are never chemistry solids.
+    struct SourcePixel {
+        bool valid = false;
+        uint32_t bodyId = 0;
+        int bodyIndex = -1;
+        int localIndex = -1;
+        int worldX = 0;
+        int worldY = 0;
+        MaterialId material = MATERIAL_EMPTY;
+        SubstanceId substance = SUBSTANCE_NONE;
+        float fraction = 0.0f;
+        float heatJ = 0.0f;
+    };
+    SourcePixel resolveSourcePixel(FluidEngine const &fluid, int worldX, int worldY) const;
+    bool sourcePixelStillValid(SourcePixel const &site) const;
+    // Transactional remain/heat write. bodyId is the stable identity.
+    // newFraction below the removal epsilon clears the mask pixel so
+    // ensurePixelState cannot restore it. Does not rebuild mass/occupancy.
+    bool commitSourcePixelState(uint32_t bodyId, int localIndex, float newFraction, float newHeatJ);
     void eraseDisc(int cx, int cy, int brushRadius, FluidEngine &fluid,
         BrushShape shape = BrushShape::Circle, bool strictBodies = false,
         std::vector<uint32_t> *strokeSeen = nullptr);

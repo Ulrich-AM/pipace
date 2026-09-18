@@ -210,6 +210,7 @@ bool produce(Inventory &inv, SubstanceId id, float amount) {
 
 bool participantStorageOk(ReactionParticipant const &p, bool synthetic) {
     if (!reactionParticipantUsed(p)) return true;
+    if (p.requiredPhase == MatterPhase::Plasma) return false;
     if (synthetic) {
         if (p.requiredPhase == MatterPhase::Solid || p.requiredPhase == MatterPhase::Plasma)
             return false;
@@ -218,7 +219,55 @@ bool participantStorageOk(ReactionParticipant const &p, bool synthetic) {
     return reactionPhaseStorageSupported(p.substance, p.requiredPhase);
 }
 
+bool surfaceTopologyShapeOk(ReactionDefinition const &def) {
+    if (def.topology != ReactionTopology::SolidGasSurface) return false;
+    SubstanceId solidId = SUBSTANCE_NONE;
+    int solidReactants = 0;
+    int gasReactants = 0;
+    int gasProducts = 0;
+    auto note = [&](ReactionParticipant const &p, bool product) {
+        if (!reactionParticipantUsed(p)) return true;
+        if (p.requiredPhase == MatterPhase::Plasma) return false;
+        if (p.requiredPhase == MatterPhase::Liquid) return false;
+        if (p.requiredPhase == MatterPhase::Solid) {
+            if (product) return false;
+            if (solidId != SUBSTANCE_NONE && solidId != p.substance) return false;
+            solidId = p.substance;
+            ++solidReactants;
+            return true;
+        }
+        if (p.requiredPhase != MatterPhase::Gas) return false;
+        if (product) ++gasProducts;
+        else ++gasReactants;
+        return true;
+    };
+    for (int n = 0; n < def.reactantCount && n < kMaxReactionParticipants; ++n)
+        if (!note(def.reactants[n], false)) return false;
+    for (int n = 0; n < def.productCount && n < kMaxReactionParticipants; ++n)
+        if (!note(def.products[n], true)) return false;
+    return solidReactants == 1 && solidId != SUBSTANCE_NONE && gasReactants >= 1 && gasProducts >= 1;
+}
+
+bool homogeneousTopologyShapeOk(ReactionDefinition const &def) {
+    if (def.topology != ReactionTopology::HomogeneousCell) return false;
+    auto ok = [](ReactionParticipant const &p) {
+        if (!reactionParticipantUsed(p)) return true;
+        return p.requiredPhase != MatterPhase::Solid && p.requiredPhase != MatterPhase::Plasma;
+    };
+    for (int n = 0; n < def.reactantCount && n < kMaxReactionParticipants; ++n)
+        if (!ok(def.reactants[n])) return false;
+    for (int n = 0; n < def.productCount && n < kMaxReactionParticipants; ++n)
+        if (!ok(def.products[n])) return false;
+    return true;
+}
+
 bool reactionStorageOk(ReactionDefinition const &def, bool synthetic) {
+    if (def.topology == ReactionTopology::SolidGasSurface) {
+        if (!surfaceTopologyShapeOk(def)) return false;
+        if (synthetic) return false;
+    } else if (!homogeneousTopologyShapeOk(def)) {
+        return false;
+    }
     for (int n = 0; n < def.reactantCount && n < kMaxReactionParticipants; ++n)
         if (reactionParticipantUsed(def.reactants[n]) && !participantStorageOk(def.reactants[n], synthetic))
             return false;
@@ -226,6 +275,23 @@ bool reactionStorageOk(ReactionDefinition const &def, bool synthetic) {
         if (reactionParticipantUsed(def.products[n]) && !participantStorageOk(def.products[n], synthetic))
             return false;
     return def.reactantCount > 0 && def.productCount > 0;
+}
+
+float limitingGasExtent(ReactionDefinition const &def, Inventory const &gas) {
+    float extent = 1.0e30f;
+    bool any = false;
+    for (int n = 0; n < def.reactantCount && n < kMaxReactionParticipants; ++n) {
+        ReactionParticipant const &p = def.reactants[n];
+        if (!reactionParticipantUsed(p)) continue;
+        if (p.requiredPhase == MatterPhase::Solid || p.requiredPhase == MatterPhase::Plasma)
+            continue;
+        any = true;
+        float e = availableExtent(p, gas);
+        if (!(e > kExtentEps)) return 0.0f;
+        extent = std::min(extent, e);
+    }
+    if (!any || !std::isfinite(extent) || extent <= kExtentEps) return 0.0f;
+    return extent;
 }
 
 float limitingExtent(ReactionDefinition const &def, Inventory const &liquid, Inventory const &gas) {
@@ -393,6 +459,7 @@ float planExtent(ReactionDefinition const &def, Inventory const &inv, float dt) 
 float tryReactCell(FluidEngine &fluid, RigidBodyEngine &rigid, GasEngine &gas,
     ThermalEngine &thermal, int index, ReactionDefinition const &def, float dt)
 {
+    if (def.topology != ReactionTopology::HomogeneousCell) return 0.0f;
     if (!validReaction(def.id)) return 0.0f;
     if (!reactionStorageOk(def, false)) return 0.0f;
     if (index < 0 || index >= GW * GH) return 0.0f;
@@ -463,6 +530,248 @@ float tryReactCell(FluidEngine &fluid, RigidBodyEngine &rigid, GasEngine &gas,
     return extent;
 }
 
+constexpr int kSurfDx[4] = {-1, 1, 0, 0};
+constexpr int kSurfDy[4] = {0, 0, -1, 1};
+constexpr float kSolidRemainEps = 1.0e-4f;
+
+struct SolidReactionInventory {
+    SubstanceId substance = SUBSTANCE_NONE;
+    float fraction = 0.0f;
+    float heat = 0.0f;
+    float cellsPerMeter = 4.0f;
+    RigidBodyEngine::SourcePixel site{};
+};
+
+ReactionParticipant const *solidReactantOf(ReactionDefinition const &def) {
+    for (int n = 0; n < def.reactantCount && n < kMaxReactionParticipants; ++n) {
+        if (reactionParticipantUsed(def.reactants[n])
+            && def.reactants[n].requiredPhase == MatterPhase::Solid)
+            return &def.reactants[n];
+    }
+    return nullptr;
+}
+
+float availableSolidExtent(ReactionParticipant const &p, SolidReactionInventory const &solid) {
+    if (p.substance != solid.substance) return 0.0f;
+    if (!(p.coefficient > 0.0f) || !(solid.fraction > kSolidRemainEps)) return 0.0f;
+    double moles = storageAmountToMoles(p.substance, MatterPhase::Solid, solid.fraction, solid.cellsPerMeter);
+    if (!(moles > 0.0) || !std::isfinite(moles)) return 0.0f;
+    return static_cast<float>(moles / static_cast<double>(p.coefficient));
+}
+
+float fractionForSolidExtent(ReactionParticipant const &p, SolidReactionInventory const &solid, float extent) {
+    float n = p.coefficient * extent;
+    if (!(n > 0.0f) || !std::isfinite(n)) return 0.0f;
+    double frac = molesToStorageAmount(p.substance, MatterPhase::Solid, n, solid.cellsPerMeter);
+    if (!(frac > 0.0) || !std::isfinite(frac)) return 0.0f;
+    return static_cast<float>(frac);
+}
+
+bool applyInterfaceHeat(Inventory &gas, SolidReactionInventory &solid, bool usesSolid, float q) {
+    if (!std::isfinite(q) || q == 0.0f) return true;
+    float wG = std::max(0.0f, gas.heat);
+    float wS = usesSolid ? std::max(0.0f, solid.heat) : 0.0f;
+    if (q < 0.0f) {
+        float need = -q;
+        float have = wG + wS;
+        if (need > have + 1.0e-5f) return false;
+        if (have <= 1.0e-12f) return !(need > kExtentEps);
+        gas.heat -= need * (wG / have);
+        if (usesSolid) solid.heat -= need * (wS / have);
+    } else {
+        float have = wG + wS;
+        if (have > 1.0e-12f) {
+            gas.heat += q * (wG / have);
+            if (usesSolid) solid.heat += q * (wS / have);
+        } else {
+            float n = 1.0f + (usesSolid ? 1.0f : 0.0f);
+            gas.heat += q / n;
+            if (usesSolid) solid.heat += q / n;
+        }
+    }
+    if (gas.heat < 0.0f) {
+        if (gas.heat < -1.0e-5f) return false;
+        gas.heat = 0.0f;
+    }
+    if (usesSolid && solid.heat < 0.0f) {
+        if (solid.heat < -1.0e-5f) return false;
+        solid.heat = 0.0f;
+    }
+    return true;
+}
+
+bool applySurfaceExtent(ReactionDefinition const &def, SolidReactionInventory &solid, Inventory &gas, float extent) {
+    if (!(extent > kExtentEps) || !std::isfinite(extent)) return false;
+    if (!surfaceTopologyShapeOk(def)) return false;
+    bool syntheticGas = gas.allowUnregisteredIds;
+    if (!syntheticGas && !reactionMolarDataOk(def, false)) return false;
+    ReactionParticipant const *solidP = solidReactantOf(def);
+    if (!solidP || solidP->substance != solid.substance) return false;
+    Inventory trialG = gas;
+    SolidReactionInventory trialS = solid;
+    for (int n = 0; n < def.reactantCount && n < kMaxReactionParticipants; ++n) {
+        ReactionParticipant const &p = def.reactants[n];
+        if (!reactionParticipantUsed(p) || p.requiredPhase == MatterPhase::Solid) continue;
+        float take = storageForExtent(p, trialG, extent);
+        if (!(take > 0.0f)) return false;
+        if (!consume(trialG, p.substance, take)) return false;
+    }
+    float takeFrac = 0.0f;
+    if (syntheticGas && !substanceHasMolarMass(trialS.substance)) {
+        takeFrac = solidP->coefficient * extent;
+    } else {
+        takeFrac = fractionForSolidExtent(*solidP, trialS, extent);
+    }
+    if (!(takeFrac > 0.0f) || takeFrac > trialS.fraction + 1.0e-6f) return false;
+    float oldFrac = trialS.fraction;
+    if (!(oldFrac > 0.0f)) return false;
+    float consumedRatio = std::min(1.0f, takeFrac / oldFrac);
+    float oldHeat = trialS.heat;
+    float carried = oldHeat * consumedRatio;
+    if (!std::isfinite(carried) || carried < 0.0f) carried = 0.0f;
+    trialS.fraction = oldFrac - takeFrac;
+    if (trialS.fraction < 0.0f) trialS.fraction = 0.0f;
+    if (trialS.fraction <= kSolidRemainEps) {
+        trialS.fraction = 0.0f;
+        carried = std::max(0.0f, oldHeat);
+        trialS.heat = 0.0f;
+    } else {
+        trialS.heat = oldHeat - carried;
+        if (trialS.heat < 0.0f) trialS.heat = 0.0f;
+    }
+    trialG.heat += carried;
+    for (int n = 0; n < def.productCount && n < kMaxReactionParticipants; ++n) {
+        ReactionParticipant const &p = def.products[n];
+        if (!reactionParticipantUsed(p)) continue;
+        float add = storageForExtent(p, trialG, extent);
+        if (!(add > 0.0f)) return false;
+        if (!produce(trialG, p.substance, add)) return false;
+    }
+    bool usesSolid = trialS.fraction > kSolidRemainEps;
+    float q = reactionHeatReleasedJ(def, extent);
+    if (!applyInterfaceHeat(trialG, trialS, usesSolid, q)) return false;
+    if (trialG.heat < 0.0f || trialS.heat < 0.0f || trialS.fraction < 0.0f) return false;
+    if (!std::isfinite(trialG.heat) || !std::isfinite(trialS.heat)) return false;
+    solid = trialS;
+    gas = trialG;
+    return true;
+}
+
+float planSurfaceExtent(ReactionDefinition const &def, SolidReactionInventory const &solid,
+    Inventory const &gas, float dt)
+{
+    if (!surfaceTopologyShapeOk(def)) return 0.0f;
+    bool syntheticGas = gas.allowUnregisteredIds;
+    if (!syntheticGas) {
+        if (!reactionStorageOk(def, false)) return 0.0f;
+        if (!reactionMolarDataOk(def, false)) return 0.0f;
+    }
+    ReactionParticipant const *solidP = solidReactantOf(def);
+    if (!solidP) return 0.0f;
+    Inventory emptyL{};
+    emptyL.maxFill = 1.0f;
+    emptyL.cellsPerMeter = gas.cellsPerMeter;
+    float extent = limitingGasExtent(def, gas);
+    float eSolid = (syntheticGas && !substanceHasMolarMass(solid.substance))
+        ? (solidP->coefficient > 0.0f ? solid.fraction / solidP->coefficient : 0.0f)
+        : availableSolidExtent(*solidP, solid);
+    extent = std::min(extent, eSolid);
+    extent = rateLimit(def, dt, extent);
+    extent = heatLimit(def, participatingHeat(false, true, emptyL, gas) + std::max(0.0f, solid.heat), extent);
+    if (!(extent > kExtentEps)) return 0.0f;
+    for (int attempt = 0; attempt < 8; ++attempt) {
+        SolidReactionInventory trialS = solid;
+        Inventory trialG = gas;
+        if (applySurfaceExtent(def, trialS, trialG, extent)) return extent;
+        extent *= 0.5f;
+        if (!(extent > kExtentEps)) return 0.0f;
+    }
+    return 0.0f;
+}
+
+float liveGasPressurePa(GasEngine const &gas, int index) {
+    if (index < 0 || index >= GW * GH) return 0.0f;
+    float vol = gas.volume[static_cast<size_t>(index)];
+    float a = gas.amount[static_cast<size_t>(index)];
+    float T = gas.cellTemperatureK(index);
+    float atm = gasPressureAtmFromState(a, vol, T);
+    float p = atm * gas.config.referencePressurePa;
+    if (!std::isfinite(p) || p < 0.0f) return 0.0f;
+    return p;
+}
+
+float tryReactSolidGasSurface(FluidEngine &fluid, RigidBodyEngine &rigid, GasEngine &gas,
+    ThermalEngine &thermal, int gasIndex, int nx, int ny, ReactionDefinition const &def, float dt)
+{
+    if (def.topology != ReactionTopology::SolidGasSurface) return 0.0f;
+    if (!reactionStorageOk(def, false)) return 0.0f;
+    if (gasIndex < 0 || gasIndex >= GW * GH) return 0.0f;
+    size_t gi = static_cast<size_t>(gasIndex);
+    if (fluid.solid[gi] || fluid.dynamicSolid[gi]) return 0.0f;
+    int gx = gasIndex % GW, gy = gasIndex / GW;
+    if (!gas.isAccessible(fluid, gx, gy)) return 0.0f;
+    if (!reactionCellHasRequiredGasReactants(fluid, gas, gasIndex, def)) return 0.0f;
+    if (!reactionCatalystPresent(fluid, gas, gasIndex, def.conditions.catalyst)) return 0.0f;
+    RigidBodyEngine::SourcePixel site = rigid.resolveSourcePixel(fluid, nx, ny);
+    if (!site.valid) return 0.0f;
+    ReactionParticipant const *solidP = solidReactantOf(def);
+    if (!solidP || site.substance != solidP->substance) return 0.0f;
+    if (!(site.fraction > kSolidRemainEps)) return 0.0f;
+
+    float Tgas = ThermalEngine::gasTempK(gas, gasIndex);
+    float Tsol = AMBIENT_TEMPERATURE_K;
+    int bi = rigid.indexOfId(site.bodyId);
+    if (bi >= 0 && bi < static_cast<int>(rigid.bodies.size()))
+        Tsol = ThermalEngine::rigidPixelTempK(rigid.bodies[static_cast<size_t>(bi)], site.localIndex);
+    float T = Tgas;
+    if (std::isfinite(Tsol) && Tsol > T) T = Tsol;
+    if (!(T > 0.0f) || !std::isfinite(T)) return 0.0f;
+    float P = liveGasPressurePa(gas, gasIndex);
+    if (!std::isfinite(P)) return 0.0f;
+    if (!reactionConditionsMatch(def.conditions, T, P)) return 0.0f;
+
+    GasComponentView gasView;
+    if (!reactionReadGasOccupancy(gas, gasIndex, gasView)) return 0.0f;
+    Inventory gasInv = fromGasView(gasView, gas.amount[gi], gas.heat[gi], false, fluid.config.cellsPerMeter);
+    SolidReactionInventory solidInv;
+    solidInv.substance = site.substance;
+    solidInv.fraction = site.fraction;
+    solidInv.heat = site.heatJ;
+    solidInv.cellsPerMeter = fluid.config.cellsPerMeter;
+    solidInv.site = site;
+    float extent = planSurfaceExtent(def, solidInv, gasInv, dt);
+    if (!(extent > kExtentEps)) return 0.0f;
+    SolidReactionInventory committedS = solidInv;
+    Inventory committedG = gasInv;
+    if (!applySurfaceExtent(def, committedS, committedG, extent)) return 0.0f;
+    if (committedS.fraction < 0.0f || committedG.heat < 0.0f || committedS.heat < 0.0f) return 0.0f;
+
+    if (!rigid.sourcePixelStillValid(site)) return 0.0f;
+    GasComponentView nextG = toGasView(committedG);
+    float oldGas = gas.amount[gi];
+    float oldVap = gas.vaporAmount(gasIndex);
+    float oldHeat = gas.heat[gi];
+    if (!reactionCommitGasOccupancy(gas, gasIndex, nextG)) return 0.0f;
+    if (!rigid.commitSourcePixelState(site.bodyId, site.localIndex, committedS.fraction, committedS.heat)) {
+        (void)reactionCommitGasOccupancy(gas, gasIndex, gasView);
+        gas.heat[gi] = oldHeat;
+        return 0.0f;
+    }
+    gas.expectedAmount += static_cast<double>(gas.amount[gi] - oldGas);
+    gas.expectedWaterVapor += static_cast<double>(gas.vaporAmount(gasIndex) - oldVap);
+    if (gas.amount[gi] > GAS_MIN_AMOUNT)
+        gas.heat[gi] = committedG.heat;
+    else
+        gas.heat[gi] = 0.0f;
+    if (!(gas.heat[gi] >= 0.0f) || !std::isfinite(gas.heat[gi]))
+        gas.heat[gi] = 0.0f;
+    gas.wakeAt(gx, gy);
+    thermal.wakeCell(gx, gy);
+    thermal.wakeCell(nx, ny);
+    fluid.wakeChunkAtCell(gx, gy);
+    return extent;
+}
+
 } // namespace
 
 ReactionEngine::ReactionEngine()
@@ -519,6 +828,11 @@ void ReactionEngine::simulationTick(FluidEngine &fluid, RigidBodyEngine &rigid, 
     if (reactionCount() <= 0) return;
     int nTable = reactionTableSize();
     ReactionDefinition const *table = builtinReactionTable();
+    bool anySurface = false;
+    for (int r = 0; r < nTable; ++r) {
+        if (table[r].id == REACTION_NONE) continue;
+        if (table[r].topology == ReactionTopology::SolidGasSurface) anySurface = true;
+    }
     // Gas-only mixtures can sit outside FluidEngine's liquid solve region.
     // Full-grid scan at 200x120; ambient Air is skipped by reactant prefilter
     // before temperature / inventory work.
@@ -529,6 +843,7 @@ void ReactionEngine::simulationTick(FluidEngine &fluid, RigidBodyEngine &rigid, 
             continue;
         for (int r = 0; r < nTable; ++r) {
             if (table[r].id == REACTION_NONE) continue;
+            if (table[r].topology != ReactionTopology::HomogeneousCell) continue;
             if (!reactionCellHasRequiredReactants(fluid, gas, index, table[r])) continue;
             float extent = tryReactCell(fluid, rigid, gas, thermal, index, table[r], dt);
             if (!(extent > kExtentEps)) continue;
@@ -539,6 +854,34 @@ void ReactionEngine::simulationTick(FluidEngine &fluid, RigidBodyEngine &rigid, 
             heatReleasedLastTick += q;
         }
     }
+    if (!anySurface) return;
+    bool chemistryEdited = false;
+    constexpr int sdx[4] = {-1, 1, 0, 0};
+    constexpr int sdy[4] = {0, 0, -1, 1};
+    for (int y = 0; y < GH; ++y) for (int x = 0; x < GW; ++x) {
+        int index = FluidEngine::ci(x, y);
+        if (gas.amount[static_cast<size_t>(index)] < GAS_MIN_AMOUNT) continue;
+        if (fluid.solid[static_cast<size_t>(index)] || fluid.dynamicSolid[static_cast<size_t>(index)])
+            continue;
+        for (int r = 0; r < nTable; ++r) {
+            if (table[r].id == REACTION_NONE) continue;
+            if (table[r].topology != ReactionTopology::SolidGasSurface) continue;
+            if (!reactionCellHasRequiredGasReactants(fluid, gas, index, table[r])) continue;
+            for (int n = 0; n < 4; ++n) {
+                int nx = x + sdx[n], ny = y + sdy[n];
+                if (!FluidEngine::inside(nx, ny)) continue;
+                float extent = tryReactSolidGasSurface(fluid, rigid, gas, thermal, index, nx, ny, table[r], dt);
+                if (!(extent > kExtentEps)) continue;
+                chemistryEdited = true;
+                float q = std::abs(reactionHeatReleasedJ(table[r], extent));
+                addActivity(index, q);
+                ++reactedCellsLastTick;
+                extentLastTick += extent;
+                heatReleasedLastTick += q;
+            }
+        }
+    }
+    if (chemistryEdited) rigid.finalizeChemistryEdits(fluid);
 }
 
 void runReactionEngineSanityCheck() {
@@ -1207,6 +1550,228 @@ void runReactionEngineSanityCheck() {
     cRx.clearActivity();
     emit("scene_load_clears_reaction_glow",
         !cRx.hasVisibleActivity() && cRx.activity[static_cast<size_t>(ciComb)] <= kActivityEps, "");
+
+    emit("hydrogen_combustion_homogeneous_topology",
+        h2o2.topology == ReactionTopology::HomogeneousCell, "");
+    emit("solid_storage_supported_for_rigid_water",
+        reactionPhaseStorageSupported(SUBSTANCE_WATER, MatterPhase::Solid)
+            && !reactionPhaseStorageSupported(SUBSTANCE_AIR, MatterPhase::Solid), "");
+    emit("wood_solid_storage_without_molar_mass",
+        reactionPhaseStorageSupported(SUBSTANCE_WOOD, MatterPhase::Solid)
+            && !substanceHasMolarMass(SUBSTANCE_WOOD), "");
+
+    ReactionDefinition surfRx{};
+    surfRx.id = 99;
+    surfRx.internalName = "diag_ice_h2_cycle";
+    surfRx.topology = ReactionTopology::SolidGasSurface;
+    surfRx.reactants[0] = {SUBSTANCE_WATER, MatterPhase::Solid, 1.0f};
+    surfRx.reactants[1] = {SUBSTANCE_HYDROGEN, MatterPhase::Gas, 1.0f};
+    surfRx.products[0] = {SUBSTANCE_WATER, MatterPhase::Gas, 1.0f};
+    surfRx.products[1] = {SUBSTANCE_HYDROGEN, MatterPhase::Gas, 1.0f};
+    surfRx.reactantCount = 2;
+    surfRx.productCount = 2;
+    surfRx.energyChangeJPerExtent = 0.0f;
+    surfRx.maxExtentPerSecond = 1.0e6f;
+    emit("surface_topology_water_h2_ok",
+        surfaceTopologyShapeOk(surfRx) && reactionStorageOk(surfRx, false)
+            && reactionMolarDataOk(surfRx, false), "");
+    ReactionDefinition surfProdSolid = surfRx;
+    surfProdSolid.products[0].requiredPhase = MatterPhase::Solid;
+    emit("surface_rejects_solid_product",
+        !surfaceTopologyShapeOk(surfProdSolid) && !reactionStorageOk(surfProdSolid, false), "");
+    ReactionDefinition surfTwoSolid = surfRx;
+    surfTwoSolid.reactants[2] = {SUBSTANCE_WOOD, MatterPhase::Solid, 1.0f};
+    surfTwoSolid.reactantCount = 3;
+    emit("surface_rejects_two_solid_reactants",
+        !surfaceTopologyShapeOk(surfTwoSolid) && !reactionStorageOk(surfTwoSolid, false), "");
+
+    double f0 = 0.40;
+    double molS = storageAmountToMoles(SUBSTANCE_WATER, MatterPhase::Solid, f0, cpm);
+    double fBack = molesToStorageAmount(SUBSTANCE_WATER, MatterPhase::Solid, molS, cpm);
+    emit("solid_fraction_mole_round_trip",
+        molS > 0.0 && nearRel(f0, fBack),
+        "f0=" + std::to_string(f0) + " f1=" + std::to_string(fBack) + " mol=" + std::to_string(molS));
+
+    SolidReactionInventory tinyS;
+    tinyS.substance = SUBSTANCE_WATER;
+    tinyS.fraction = 0.002f;
+    tinyS.heat = 2.0e5f;
+    tinyS.cellsPerMeter = cpm;
+    Inventory hugeH2{};
+    hugeH2.gas = true;
+    hugeH2.maxFill = 1.0e6f;
+    hugeH2.cellsPerMeter = cpm;
+    hugeH2.items[0] = {SUBSTANCE_HYDROGEN,
+        static_cast<float>(molesToStorageAmount(SUBSTANCE_HYDROGEN, MatterPhase::Gas, 50.0, cpm))};
+    hugeH2.count = 1;
+    hugeH2.heat = 1.0e5f;
+    recountFill(hugeH2);
+    float eSolidLim = planSurfaceExtent(surfRx, tinyS, hugeH2, 1.0f);
+    float eSolidAvail = availableSolidExtent(*solidReactantOf(surfRx), tinyS);
+    float eGasAvail = limitingGasExtent(surfRx, hugeH2);
+    emit("insufficient_solid_limits_extent",
+        eSolidLim > kExtentEps && eSolidLim <= eSolidAvail + 1.0e-5f
+            && eGasAvail > eSolidAvail * 2.0f,
+        "e=" + std::to_string(eSolidLim) + " solidAvail=" + std::to_string(eSolidAvail)
+            + " gasAvail=" + std::to_string(eGasAvail));
+
+    Inventory slotG{};
+    slotG.gas = true;
+    slotG.allowUnregisteredIds = true;
+    slotG.maxFill = 1.0e9f;
+    slotG.cellsPerMeter = cpm;
+    slotG.items[0] = {kA, 2.0f};
+    slotG.items[1] = {kB, 2.0f};
+    slotG.items[2] = {static_cast<SubstanceId>(200), 2.0f};
+    slotG.items[3] = {static_cast<SubstanceId>(201), 2.0f};
+    slotG.count = 4;
+    slotG.heat = 10.0f;
+    recountFill(slotG);
+    ReactionDefinition slotRx = surfRx;
+    slotRx.reactants[1] = {kA, MatterPhase::Gas, 1.0f};
+    slotRx.products[0] = {kC, MatterPhase::Gas, 1.0f};
+    slotRx.products[1] = {kA, MatterPhase::Gas, 1.0f};
+    SolidReactionInventory slotS = tinyS;
+    slotS.fraction = 1.0f;
+    Inventory slotGTrial = slotG;
+    SolidReactionInventory slotSTrial = slotS;
+    bool slotApplied = applySurfaceExtent(slotRx, slotSTrial, slotGTrial, 0.1f);
+    emit("gas_slot_failure_leaves_solid",
+        !slotApplied && near(slotSTrial.fraction, slotS.fraction)
+            && near(amountOf(slotGTrial, kA), amountOf(slotG, kA)),
+        "frac=" + std::to_string(slotSTrial.fraction));
+
+    FluidEngine sF;
+    RigidBodyEngine sR;
+    GasEngine sG;
+    ThermalEngine sT;
+    sF.config.walledBorders = true;
+    sG.config.simMode = GasSimMode::Off;
+    sG.config.boundary = GasBoundary::Sealed;
+    sT.config.enabled = false;
+    sG.resetAmbient(sF);
+    int iceX = 40, iceY = 40;
+    int gasX = 41, gasY = 40;
+    std::vector<int> iceCells{FluidEngine::ci(iceX, iceY)};
+    sR.addSameMaterialWorldCells(sF, iceCells, MATERIAL_WATER_SOLID, AMBIENT_TEMPERATURE_K);
+    RigidBodyEngine::SourcePixel iceSite = sR.resolveSourcePixel(sF, iceX, iceY);
+    emit("resolve_rigid_source_pixel",
+        iceSite.valid && iceSite.substance == SUBSTANCE_WATER
+            && iceSite.localIndex >= 0 && iceSite.bodyId != 0
+            && iceSite.fraction > 0.9f,
+        "id=" + std::to_string(iceSite.bodyId) + " li=" + std::to_string(iceSite.localIndex)
+            + " f=" + std::to_string(iceSite.fraction));
+
+    int wallI = FluidEngine::ci(10, 10);
+    sF.solid[static_cast<size_t>(wallI)] = 1;
+    RigidBodyEngine::SourcePixel wallSite = sR.resolveSourcePixel(sF, 10, 10);
+    emit("static_wall_rejected_as_reaction_solid",
+        !wallSite.valid && sR.bodyAtCell(10, 10) < 0, "");
+
+    std::vector<int> block;
+    for (int y = 50; y <= 52; ++y) for (int x = 50; x <= 52; ++x)
+        block.push_back(FluidEngine::ci(x, y));
+    sR.addSameMaterialWorldCells(sF, block, MATERIAL_WOOD, AMBIENT_TEMPERATURE_K);
+    bool interiorHit = false;
+    bool edgeHit = false;
+    for (int y = 48; y <= 54; ++y) for (int x = 48; x <= 54; ++x) {
+        if (sR.bodyAtCell(x, y) >= 0) continue;
+        for (int n = 0; n < 4; ++n) {
+            int nx = x + kSurfDx[n], ny = y + kSurfDy[n];
+            RigidBodyEngine::SourcePixel sp = sR.resolveSourcePixel(sF, nx, ny);
+            if (!sp.valid || sp.substance != SUBSTANCE_WOOD) continue;
+            if (nx == 51 && ny == 51) interiorHit = true;
+            if (nx == 50 || nx == 52 || ny == 50 || ny == 52) edgeHit = true;
+        }
+    }
+    emit("interior_rigid_pixel_not_surface_candidate",
+        !interiorHit && edgeHit, edgeHit ? "edge exposed" : "no edge");
+
+    int gIdx = FluidEngine::ci(gasX, gasY);
+    sG.volume[static_cast<size_t>(gIdx)] = 1.0f;
+    GasComponentView h2Only{};
+    h2Only.count = 1;
+    h2Only.items[0] = {SUBSTANCE_HYDROGEN,
+        static_cast<float>(molesToStorageAmount(SUBSTANCE_HYDROGEN, MatterPhase::Gas, 8.0, cpm))};
+    (void)sG.tryCommitGasOccupancy(gIdx, h2Only);
+    float capSurfH2 = ThermalEngine::gasCapacity(sG, gIdx);
+    sG.heat[static_cast<size_t>(gIdx)] = energyFromTemp(capSurfH2, AMBIENT_TEMPERATURE_K);
+    iceSite = sR.resolveSourcePixel(sF, iceX, iceY);
+    float massBefore = sR.totalSolidMass();
+    float fracBefore = iceSite.fraction;
+    float iceHeat0 = iceSite.heatJ;
+    float gasHeat0 = sG.heat[static_cast<size_t>(gIdx)];
+    surfRx.maxExtentPerSecond = 0.02f;
+    float ePart = tryReactSolidGasSurface(sF, sR, sG, sT, gIdx, iceX, iceY, surfRx, 1.0f);
+    sR.finalizeChemistryEdits(sF);
+    iceSite = sR.resolveSourcePixel(sF, iceX, iceY);
+    float massAfter = sR.totalSolidMass();
+    bool maskStill = iceSite.valid && iceSite.material == MATERIAL_WATER_SOLID;
+    emit("partial_solid_consumption",
+        ePart > kExtentEps && iceSite.valid && iceSite.fraction < fracBefore - 1.0e-6f
+            && iceSite.fraction > kSolidRemainEps && maskStill && massAfter < massBefore
+            && iceSite.fraction >= 0.0f && sG.heat[static_cast<size_t>(gIdx)] >= 0.0f,
+        "e=" + std::to_string(ePart) + " f0=" + std::to_string(fracBefore)
+            + " f1=" + std::to_string(iceSite.fraction) + " dm=" + std::to_string(massBefore - massAfter));
+
+    float heat1 = (iceSite.valid ? iceSite.heatJ : 0.0f) + sG.heat[static_cast<size_t>(gIdx)];
+    float heat0 = iceHeat0 + gasHeat0;
+    emit("zero_dh_surface_conserves_sensible_heat",
+        ePart > kExtentEps && std::abs(heat1 - heat0) <= 0.02f * std::max(1.0f, std::abs(heat0)) + 1.0f
+            && heat1 >= 0.0f,
+        "H0=" + std::to_string(heat0) + " H1=" + std::to_string(heat1));
+
+    ReactionDefinition surfExo = surfRx;
+    surfExo.energyChangeJPerExtent = -4000.0f;
+    surfExo.maxExtentPerSecond = 0.02f;
+    iceSite = sR.resolveSourcePixel(sF, iceX, iceY);
+    float hPart0 = (iceSite.valid ? iceSite.heatJ : 0.0f) + sG.heat[static_cast<size_t>(gIdx)];
+    float eExo = tryReactSolidGasSurface(sF, sR, sG, sT, gIdx, iceX, iceY, surfExo, 1.0f);
+    sR.finalizeChemistryEdits(sF);
+    iceSite = sR.resolveSourcePixel(sF, iceX, iceY);
+    float hPart1 = (iceSite.valid ? iceSite.heatJ : 0.0f) + sG.heat[static_cast<size_t>(gIdx)];
+    float qExo = reactionHeatReleasedJ(surfExo, eExo);
+    emit("exothermic_surface_adds_reaction_heat",
+        eExo > kExtentEps && std::abs((hPart1 - hPart0) - qExo) <= 0.05f * std::max(1.0f, std::abs(qExo)) + 2.0f
+            && hPart1 > hPart0,
+        "dH=" + std::to_string(hPart1 - hPart0) + " q=" + std::to_string(qExo));
+
+    if (iceSite.valid) {
+        int biKeep = sR.indexOfId(iceSite.bodyId);
+        if (biKeep >= 0) {
+            RigidBody &bKeep = sR.bodies[static_cast<size_t>(biKeep)];
+            if (iceSite.localIndex < static_cast<int>(bKeep.solidRemain.size()))
+                bKeep.solidRemain[static_cast<size_t>(iceSite.localIndex)] = 5.0e-4f;
+        }
+    }
+    h2Only.items[0].amount = static_cast<float>(molesToStorageAmount(SUBSTANCE_HYDROGEN, MatterPhase::Gas, 8.0, cpm));
+    (void)sG.tryCommitGasOccupancy(gIdx, h2Only);
+    sG.heat[static_cast<size_t>(gIdx)] = energyFromTemp(ThermalEngine::gasCapacity(sG, gIdx), AMBIENT_TEMPERATURE_K);
+    surfRx.maxExtentPerSecond = 1.0e6f;
+    float eFull = tryReactSolidGasSurface(sF, sR, sG, sT, gIdx, iceX, iceY, surfRx, 1.0f);
+    sR.finalizeChemistryEdits(sF);
+    RigidBodyEngine::SourcePixel gone = sR.resolveSourcePixel(sF, iceX, iceY);
+    bool maskGone = sR.worldCellMaterial(iceX, iceY) == MATERIAL_EMPTY;
+    bool occupantGone = sR.bodyAtCell(iceX, iceY) < 0;
+    emit("full_solid_pixel_removed",
+        eFull > kExtentEps && !gone.valid && maskGone && occupantGone,
+        "e=" + std::to_string(eFull) + " mat=" + std::to_string(sR.worldCellMaterial(iceX, iceY)));
+    RigidBodyEngine::SourcePixel stillGone = sR.resolveSourcePixel(sF, iceX, iceY);
+    emit("consumed_solid_does_not_respawn",
+        !stillGone.valid && sR.bodyAtCell(iceX, iceY) < 0, "");
+
+    bool noNeg = true;
+    for (RigidBody const &b : sR.bodies) {
+        for (int li : b.occupiedLocal) {
+            if (li < static_cast<int>(b.solidRemain.size()) && b.solidRemain[static_cast<size_t>(li)] < -1.0e-6f)
+                noNeg = false;
+            if (li < static_cast<int>(b.heat.size()) && b.heat[static_cast<size_t>(li)] < -1.0e-4f)
+                noNeg = false;
+        }
+    }
+    for (float a : sG.amount) if (a < -1.0e-6f) noNeg = false;
+    for (float h : sG.heat) if (h < -1.0e-4f) noNeg = false;
+    emit("surface_no_negative_mass_or_heat", noNeg, "");
 
     out << "summary\t" << (failed == 0 ? "PASS" : "FAIL") << '\t' << passed << " passed, "
         << failed << " failed\n";

@@ -12,7 +12,7 @@ Long-term architecture (cooperating systems, not one universal solver):
 |---|---|
 | **Physics engines** (liquid / solid / gas) | How does matter with these properties move? |
 | **SACE** (Somewhat Accurate Calculator for Elements) | What is this substance, what can it become, what properties should new substances have? |
-| **Chemistry** (`ReactionDefinition` / `ReactionEngine`) | What reactions are possible, and a conservative local execute step. First player-facing reaction: `2 H2(g) + O2(g) -> 2 H2O(g)` (ignition gate ~850 K). |
+| **Chemistry** (`ReactionDefinition` / `ReactionEngine`) | What reactions are possible, and a conservative local execute step. First player-facing reaction: `2 H2(g) + O2(g) -> 2 H2O(g)` (ignition gate ~850 K, `HomogeneousCell`). `SolidGasSurface` topology is implemented for a later C(s)+O2 path; no Carbon/CO2 yet. |
 | **World state** | Where is it, how much, temperature/pressure/phase/local conditions? |
 | **Rendering** | How should the current state be drawn? |
 

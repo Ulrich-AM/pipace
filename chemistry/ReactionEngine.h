@@ -11,7 +11,8 @@ struct ThermalEngine;
 // Local, conservative reaction execution. Scans liquid and gas-occupied cells.
 // Physical reactions convert storage -> mass -> moles using chemical.molarMass.
 // Extent 1 is one mole of the written reaction. Synthetic inventories keep a
-// diagnostic unit path. Liquid and gas stay separate; solid/plasma still skip.
+// diagnostic unit path. HomogeneousCell stays liquid/gas in one cell.
+// SolidGasSurface uses one rigid source pixel plus an adjacent gas cell.
 //
 // activity[] is rendering feedback only (recent local reaction intensity).
 // It is not chemistry state and is not advected with gas.
