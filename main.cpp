@@ -188,9 +188,7 @@ void applySimQuality(int level) {
     applyFluidQualityKnobs(engine.config, level);
     applyThermalQualityKnobs(thermal.config, level);
     engine.residualConsolidationEnabled = true;
-    // Auto/Low may drop to Half, but never silently disable player-facing gases.
-    // Settings → Gas Off remains the explicit Off path.
-    gas.config.simMode = (level <= 0) ? GasSimMode::Half : GasSimMode::Full;
+    applyGasQualitySimMode(gas.config, level);
 }
 
 void setQualityPreset(QualityPreset preset) {
@@ -238,8 +236,8 @@ void handleMenuCommand(ui::MenuCmd cmd) {
             break;
         case MenuCmd::Pause: paused = !paused; break;
         case MenuCmd::Step: if (paused) worldTick(); break;
-        case MenuCmd::Clear: rigid.clear(); engine.clearWorld(); gas.resetAmbient(engine); thermal.seedAmbient(engine, rigid, gas); shell.log(ui::tr("log_cleared")); break;
-        case MenuCmd::Reset: rigid.clear(); engine.resetWorld(); gas.resetAmbient(engine); thermal.seedAmbient(engine, rigid, gas); shell.log(ui::tr("log_reset")); break;
+        case MenuCmd::Clear: rigid.clear(); engine.clearWorld(); gas.resetAmbient(engine); thermal.seedAmbient(engine, rigid, gas); reactions.clearActivity(); shell.log(ui::tr("log_cleared")); break;
+        case MenuCmd::Reset: rigid.clear(); engine.resetWorld(); gas.resetAmbient(engine); thermal.seedAmbient(engine, rigid, gas); reactions.clearActivity(); shell.log(ui::tr("log_reset")); break;
         case MenuCmd::Slosh: engine.addSloshImpulse(); break;
         case MenuCmd::WalledBorders:
             engine.config.walledBorders = !engine.config.walledBorders;
@@ -757,7 +755,8 @@ void fillWorldPixels() {
             look.glowingLiquids = false;
             look.outlines = false;
         }
-        worldRenderer.paintNormal(engine, rigid, look);
+        float const *reactionGlow = (debugView == DebugView::Normal) ? reactions.activity.data() : nullptr;
+        worldRenderer.paintNormal(engine, rigid, look, reactionGlow);
         for (int y = 0; y < GH; ++y) for (int x = 0; x < GW; ++x) {
             int i = FluidEngine::ci(x, y);
             if (engine.solid[i] || engine.dynamicSolid[i]) continue;
