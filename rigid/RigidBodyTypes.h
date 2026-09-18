@@ -174,7 +174,8 @@ struct RigidBody {
     std::vector<float> materialDamage; // 0 intact, 1 degraded substance (pixels remain)
     std::vector<float> moisture;       // absorbed liquid mass per pixel
     std::vector<float> heat;           // Joules per local source pixel
-    std::vector<float> solidRemain;    // 0..1 remaining solid fraction (ice partial melt)
+    std::vector<float> solidRemain;    // 0..1 remaining fraction of the solid source pixel
+                                       // (ice melt and chemistry share this; no second array)
     std::vector<StructuralBond> bondsRight; // (x,y) -> (x+1,y)
     std::vector<StructuralBond> bondsDown;  // (x,y) -> (x,y+1)
     std::vector<PixelRun> runs;
@@ -187,6 +188,7 @@ struct RigidBody {
     bool anchored = false;
     bool dormant = false; // UI "Sleeping": pinned until disturbed
     bool structureDirty = false;
+    bool massDirty = false; // remain changed without mask topology change
     bool moistureActive = false;
     float maxPenetration = 0.0f;
     float cachedFriction = 0.42f;

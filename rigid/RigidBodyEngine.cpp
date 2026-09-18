@@ -276,6 +276,8 @@ void RigidBodyEngine::ensurePixelState(RigidBody &b) {
     if (b.solidRemain.size() == n) {
         for (int li : b.occupiedLocal) {
             if (li < 0 || li >= static_cast<int>(n)) continue;
+            // Uninitialized grown pixels start at 0. Intentionally consumed
+            // pixels must clear the mask first so they leave occupiedLocal.
             if (b.solidRemain[static_cast<size_t>(li)] <= 1.0e-8f)
                 b.solidRemain[static_cast<size_t>(li)] = 1.0f;
         }
@@ -898,6 +900,112 @@ void RigidBodyEngine::finalizeMaskEdits(FluidEngine &fluid)
     lastContacts.clear();
     pruneGrab();
     syncOccupancy(fluid);
+}
+
+constexpr float kRigidConsumedRemainEps = 1.0e-4f;
+
+RigidBodyEngine::SourcePixel RigidBodyEngine::resolveSourcePixel(FluidEngine const &fluid, int worldX, int worldY) const {
+    SourcePixel site;
+    site.worldX = worldX;
+    site.worldY = worldY;
+    if (!FluidEngine::inside(worldX, worldY)) return site;
+    int index = FluidEngine::ci(worldX, worldY);
+    if (fluid.solid[static_cast<size_t>(index)]) return site;
+    int bi = occupant[static_cast<size_t>(index)];
+    if (bi < 0 || bi >= static_cast<int>(bodies.size())) return site;
+    RigidBody const &b = bodies[static_cast<size_t>(bi)];
+    float lx, ly;
+    worldToLocal(b, static_cast<float>(worldX) + 0.5f, static_cast<float>(worldY) + 0.5f, lx, ly);
+    int ix = static_cast<int>(std::floor(lx));
+    int iy = static_cast<int>(std::floor(ly));
+    if (!maskOccupied(b, ix, iy)) return site;
+    int li = iy * b.maskW + ix;
+    if (li < 0 || li >= static_cast<int>(b.mask.size())) return site;
+    MaterialId mat = b.mask[static_cast<size_t>(li)];
+    if (mat == MATERIAL_EMPTY) return site;
+    float remain = 1.0f;
+    if (li < static_cast<int>(b.solidRemain.size()))
+        remain = std::max(0.0f, b.solidRemain[static_cast<size_t>(li)]);
+    if (!(remain > kRigidConsumedRemainEps)) return site;
+    float heat = 0.0f;
+    if (li < static_cast<int>(b.heat.size()))
+        heat = std::max(0.0f, b.heat[static_cast<size_t>(li)]);
+    site.valid = true;
+    site.bodyId = b.id;
+    site.bodyIndex = bi;
+    site.localIndex = li;
+    site.material = mat;
+    site.substance = substanceForMaterialId(mat);
+    site.fraction = remain;
+    site.heatJ = heat;
+    return site;
+}
+
+bool RigidBodyEngine::sourcePixelStillValid(SourcePixel const &site) const {
+    if (!site.valid || site.bodyId == 0) return false;
+    int bi = indexOfId(site.bodyId);
+    if (bi < 0 || bi >= static_cast<int>(bodies.size())) return false;
+    RigidBody const &b = bodies[static_cast<size_t>(bi)];
+    int li = site.localIndex;
+    if (li < 0 || li >= static_cast<int>(b.mask.size())) return false;
+    MaterialId mat = b.mask[static_cast<size_t>(li)];
+    if (mat == MATERIAL_EMPTY) return false;
+    if (substanceForMaterialId(mat) != site.substance) return false;
+    float remain = 1.0f;
+    if (li < static_cast<int>(b.solidRemain.size()))
+        remain = std::max(0.0f, b.solidRemain[static_cast<size_t>(li)]);
+    return remain > kRigidConsumedRemainEps;
+}
+
+bool RigidBodyEngine::commitSourcePixelState(uint32_t bodyId, int localIndex, float newFraction, float newHeatJ) {
+    int bi = indexOfId(bodyId);
+    if (bi < 0 || bi >= static_cast<int>(bodies.size())) return false;
+    RigidBody &b = bodies[static_cast<size_t>(bi)];
+    if (localIndex < 0 || localIndex >= static_cast<int>(b.mask.size())) return false;
+    if (b.mask[static_cast<size_t>(localIndex)] == MATERIAL_EMPTY) return false;
+    if (b.solidRemain.size() != b.mask.size() || b.heat.size() != b.mask.size())
+        ensurePixelState(b);
+    if (localIndex >= static_cast<int>(b.solidRemain.size()) || localIndex >= static_cast<int>(b.heat.size()))
+        return false;
+    if (!std::isfinite(newFraction) || newFraction < 0.0f) newFraction = 0.0f;
+    if (!std::isfinite(newHeatJ) || newHeatJ < 0.0f) newHeatJ = 0.0f;
+    if (newFraction <= kRigidConsumedRemainEps) {
+        b.mask[static_cast<size_t>(localIndex)] = MATERIAL_EMPTY;
+        b.solidRemain[static_cast<size_t>(localIndex)] = 0.0f;
+        b.heat[static_cast<size_t>(localIndex)] = 0.0f;
+        b.structureDirty = true;
+    } else {
+        b.solidRemain[static_cast<size_t>(localIndex)] = newFraction;
+        b.heat[static_cast<size_t>(localIndex)] = newHeatJ;
+        b.massDirty = true;
+    }
+    if (b.anchored) {
+        b.vx = b.vy = b.omega = 0.0f;
+        b.sleeping = true;
+    } else if (b.dormant) {
+        wakeDormant(b);
+    } else {
+        b.sleeping = false;
+        b.quietTicks = 0;
+    }
+    return true;
+}
+
+void RigidBodyEngine::finalizeChemistryEdits(FluidEngine &fluid) {
+    bool anyStructure = false;
+    for (size_t i = 0; i < bodies.size(); ++i) {
+        if (bodies[i].structureDirty) {
+            anyStructure = true;
+            continue;
+        }
+        if (!bodies[i].massDirty) continue;
+        refreshMassProperties(static_cast<int>(i));
+        bodies[i].massDirty = false;
+    }
+    if (anyStructure) {
+        for (RigidBody &b : bodies) b.massDirty = false;
+        finalizeMaskEdits(fluid);
+    }
 }
 
 int RigidBodyEngine::bodyAtCell(int x, int y) const {

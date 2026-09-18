@@ -15,6 +15,7 @@ ReactionDefinition makeNoneReaction() {
     r.reactantCount = 0;
     r.productCount = 0;
     r.energyChangeJPerExtent = 0.0f;
+    r.topology = ReactionTopology::HomogeneousCell;
     return r;
 }
 
@@ -40,6 +41,7 @@ ReactionDefinition makeHydrogenCombustion() {
     r.conditions.minTemperatureValid = true;
     r.conditions.minTemperatureK = 850.0f;
     r.energyChangeJPerExtent = -483600.0f;
+    r.topology = ReactionTopology::HomogeneousCell;
     // 1.0 mol/s/cell was a first-pass correctness cap. A 1-atm stoichiometric
     // H2/O2 cell holds ~0.2 mol of written reaction, so 1 mol/s burned for
     // several ticks before neighbors reached 850 K by conduction. 4 mol/s/cell
