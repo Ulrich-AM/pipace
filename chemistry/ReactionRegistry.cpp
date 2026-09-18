@@ -40,7 +40,13 @@ ReactionDefinition makeHydrogenCombustion() {
     r.conditions.minTemperatureValid = true;
     r.conditions.minTemperatureK = 850.0f;
     r.energyChangeJPerExtent = -483600.0f;
-    r.maxExtentPerSecond = 1.0f;
+    // 1.0 mol/s/cell was a first-pass correctness cap. A 1-atm stoichiometric
+    // H2/O2 cell holds ~0.2 mol of written reaction, so 1 mol/s burned for
+    // several ticks before neighbors reached 850 K by conduction. 4 mol/s/cell
+    // still cannot eat a large cloud in one 30 Hz tick (~0.13 mol/tick) while
+    // dumping heat fast enough for thermal transport to ignite adjacent mix.
+    // Ignition threshold stays 850 K.
+    r.maxExtentPerSecond = 4.0f;
     return r;
 }
 

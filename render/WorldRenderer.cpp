@@ -272,7 +272,8 @@ void WorldRenderer::ensureSize() {
     }
 }
 
-void WorldRenderer::paintNormal(FluidEngine &fluid, RigidBodyEngine const &rigid, WorldLook const &look) {
+void WorldRenderer::paintNormal(FluidEngine &fluid, RigidBodyEngine const &rigid, WorldLook const &look,
+    float const *reactionActivity) {
     ensureSize();
     WorldRenderStyle const style = look.style;
     bool const useHysteresis = needsHysteresis(style);
@@ -467,6 +468,59 @@ void WorldRenderer::paintNormal(FluidEngine &fluid, RigidBodyEngine const &rigid
             fluid.pixels[static_cast<size_t>(index)] = mixToward(fluid.pixels[static_cast<size_t>(index)],
                 glowR[static_cast<size_t>(index)], glowG[static_cast<size_t>(index)], glowB[static_cast<size_t>(index)],
                 std::min(1.0f, u * u * (1.20f + 0.45f * u)));
+        }
+    }
+
+    if (reactionActivity) {
+        constexpr float kHaloRadius = 3.0f;
+        constexpr float kSeedMin = 0.02f;
+        std::fill(glowDist.begin(), glowDist.end(), 1.0e9f);
+        workQueue.clear();
+        for (int y = 0; y < GH; ++y) for (int x = 0; x < GW; ++x) {
+            int i = FluidEngine::ci(x, y);
+            if (fluid.solid[i] || fluid.dynamicSolid[i]) continue;
+            float a = reactionActivity[static_cast<size_t>(i)];
+            if (!(a > kSeedMin)) continue;
+            glowDist[static_cast<size_t>(i)] = 0.0f;
+            float core = std::clamp(a / 1.5f, 0.0f, 1.0f);
+            glowR[static_cast<size_t>(i)] = static_cast<uint8_t>(clampByte(static_cast<int>(std::lround(core * 255.0f))));
+            workQueue.push_back(i);
+        }
+        for (size_t head = 0; head < workQueue.size(); ++head) {
+            int i = workQueue[head];
+            int x = i % GW, y = i / GW;
+            float d = glowDist[static_cast<size_t>(i)];
+            uint8_t seed = glowR[static_cast<size_t>(i)];
+            for (int oy = -1; oy <= 1; ++oy) for (int ox = -1; ox <= 1; ++ox) {
+                if (ox == 0 && oy == 0) continue;
+                int nx = x + ox, ny = y + oy;
+                if (!FluidEngine::inside(nx, ny)) continue;
+                int ni = FluidEngine::ci(nx, ny);
+                if (fluid.solid[ni] || fluid.dynamicSolid[ni]) continue;
+                float nd = d + ((ox != 0 && oy != 0) ? 1.41421356f : 1.0f);
+                if (nd > kHaloRadius || nd >= glowDist[static_cast<size_t>(ni)]) continue;
+                glowDist[static_cast<size_t>(ni)] = nd;
+                glowR[static_cast<size_t>(ni)] = seed;
+                workQueue.push_back(ni);
+            }
+        }
+        for (int y = 0; y < GH; ++y) for (int x = 0; x < GW; ++x) {
+            int index = FluidEngine::ci(x, y);
+            float d = glowDist[static_cast<size_t>(index)];
+            if (d > kHaloRadius) continue;
+            if (fluid.solid[index] || fluid.dynamicSolid[index]) continue;
+            float core = glowR[static_cast<size_t>(index)] / 255.0f;
+            float falloff = 1.0f - d / kHaloRadius;
+            falloff = falloff * falloff;
+            float mix = (d <= 0.0f)
+                ? (0.18f + 0.42f * core)
+                : (0.05f + 0.16f * core) * falloff;
+            if (mix <= 0.01f) continue;
+            int cr = static_cast<int>(std::lround(150.0f + 80.0f * core));
+            int cg = static_cast<int>(std::lround(195.0f + 50.0f * core));
+            int cb = 255;
+            fluid.pixels[static_cast<size_t>(index)] =
+                mixToward(fluid.pixels[static_cast<size_t>(index)], cr, cg, cb, mix);
         }
     }
 

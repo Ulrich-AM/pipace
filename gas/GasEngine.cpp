@@ -975,31 +975,33 @@ void GasEngine::integrateVelocity(FluidEngine const &fluid, float dt) {
                     && (chunkActivity[static_cast<size_t>(cT)] || chunkSolveMask[static_cast<size_t>(cT)]))
                 || (cB >= 0 && cB < CHUNK_W * CHUNK_H
                     && (chunkActivity[static_cast<size_t>(cB)] || chunkSolveMask[static_cast<size_t>(cB)]));
-            if (live && buoy > 1.0e-8f) {
-                float Tface = 0.5f * (gasT(iT) + gasT(iB));
-                float dT = std::clamp(Tface - AMBIENT_TEMPERATURE_K, -400.0f, 400.0f);
-                float accel = -gravity * buoy * (dT / AMBIENT_TEMPERATURE_K);
-                accel = std::clamp(accel, -3.0f * gravity, 3.0f * gravity);
-                vel += accel * dt;
-            }
-            float compScale = config.compositionBuoyancyScale;
-            if (compScale > 1.0e-8f) {
-                auto ambientAir = [&](int idx) {
-                    return gasCompCount[static_cast<size_t>(idx)] == 1
-                        && gasCompId[static_cast<size_t>(compositionSlot(idx, 0))] == SUBSTANCE_AIR;
-                };
-                if (!(ambientAir(iT) && ambientAir(iB))) {
-                    float rhoAir = AIR_DENSITY_KG_M3;
-                    float rhoT = gasMixtureReferenceDensityKgM3(gasComponents(iT));
-                    float rhoB = gasMixtureReferenceDensityKgM3(gasComponents(iB));
-                    float rhoFace = 0.5f * (rhoT + rhoB);
-                    if (rhoAir > 1.0e-8f && rhoFace > 0.0f && std::isfinite(rhoFace)) {
-                        float ratio = rhoFace / rhoAir;
-                        if (!std::isfinite(ratio)) ratio = 1.0f;
-                        ratio = std::clamp(ratio, 0.05f, 8.0f);
-                        float accel = gravity * compScale * (ratio - 1.0f);
-                        accel = std::clamp(accel, -2.0f * gravity, 2.0f * gravity);
-                        vel += accel * dt;
+            if (live) {
+                if (buoy > 1.0e-8f) {
+                    float Tface = 0.5f * (gasT(iT) + gasT(iB));
+                    float dT = std::clamp(Tface - AMBIENT_TEMPERATURE_K, -400.0f, 400.0f);
+                    float accel = -gravity * buoy * (dT / AMBIENT_TEMPERATURE_K);
+                    accel = std::clamp(accel, -3.0f * gravity, 3.0f * gravity);
+                    vel += accel * dt;
+                }
+                float compScale = config.compositionBuoyancyScale;
+                if (compScale > 1.0e-8f) {
+                    auto ambientAir = [&](int idx) {
+                        return gasCompCount[static_cast<size_t>(idx)] == 1
+                            && gasCompId[static_cast<size_t>(compositionSlot(idx, 0))] == SUBSTANCE_AIR;
+                    };
+                    if (!(ambientAir(iT) && ambientAir(iB))) {
+                        float rhoAir = AIR_DENSITY_KG_M3;
+                        float rhoT = gasMixtureReferenceDensityKgM3(gasComponents(iT));
+                        float rhoB = gasMixtureReferenceDensityKgM3(gasComponents(iB));
+                        float rhoFace = 0.5f * (rhoT + rhoB);
+                        if (rhoAir > 1.0e-8f && rhoFace > 0.0f && std::isfinite(rhoFace)) {
+                            float ratio = rhoFace / rhoAir;
+                            if (!std::isfinite(ratio)) ratio = 1.0f;
+                            ratio = std::clamp(ratio, 0.05f, 8.0f);
+                            float accel = gravity * compScale * (ratio - 1.0f);
+                            accel = std::clamp(accel, -2.0f * gravity, 2.0f * gravity);
+                            vel += accel * dt;
+                        }
                     }
                 }
             }

@@ -9,7 +9,8 @@ struct FluidEngine;
 struct RigidBodyEngine;
 
 struct WorldRenderer {
-    void paintNormal(FluidEngine &fluid, RigidBodyEngine const &rigid, WorldLook const &look);
+    void paintNormal(FluidEngine &fluid, RigidBodyEngine const &rigid, WorldLook const &look,
+        float const *reactionActivity = nullptr);
     void ensureSize();
 
     std::vector<uint8_t> visualLiquid;

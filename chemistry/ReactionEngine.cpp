@@ -12,13 +12,21 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <fstream>
 #include <string>
+#include <vector>
+
+constexpr float kExtentEps = 1.0e-8f;
+constexpr float kActivityHeatRefJ = 4.0e4f;
+constexpr float kActivityMax = 1.5f;
+constexpr float kActivityEps = 1.0e-4f;
+constexpr float kActivityDecayPerSec = 6.0f; // ~0.17 s e-fold; gone by ~0.5 s
 
 namespace {
 
-constexpr float kExtentEps = 1.0e-8f;
 constexpr float kDefaultMaxExtentPerSecond = 1.0f;
+
 
 struct Inventory {
     LiquidComponent items[kMaxLiquidComponents]{};
@@ -382,19 +390,19 @@ float planExtent(ReactionDefinition const &def, Inventory const &inv, float dt) 
     return inv.gas ? planExtent(def, other, inv, dt) : planExtent(def, inv, other, dt);
 }
 
-bool tryReactCell(FluidEngine &fluid, RigidBodyEngine &rigid, GasEngine &gas,
+float tryReactCell(FluidEngine &fluid, RigidBodyEngine &rigid, GasEngine &gas,
     ThermalEngine &thermal, int index, ReactionDefinition const &def, float dt)
 {
-    if (!validReaction(def.id)) return false;
-    if (!reactionStorageOk(def, false)) return false;
-    if (index < 0 || index >= GW * GH) return false;
+    if (!validReaction(def.id)) return 0.0f;
+    if (!reactionStorageOk(def, false)) return 0.0f;
+    if (index < 0 || index >= GW * GH) return 0.0f;
     size_t i = static_cast<size_t>(index);
-    if (fluid.solid[i] || fluid.dynamicSolid[i]) return false;
-    if (!reactionCellHasRequiredReactants(fluid, gas, index, def)) return false;
+    if (fluid.solid[i] || fluid.dynamicSolid[i]) return 0.0f;
+    if (!reactionCellHasRequiredReactants(fluid, gas, index, def)) return 0.0f;
     bool hasLiquid = fluid.fill[i] > kMinLiquidComponent;
     bool hasGas = gas.amount[i] > GAS_MIN_AMOUNT;
-    if (!hasLiquid && !hasGas) return false;
-    if (!reactionCatalystPresent(fluid, gas, index, def.conditions.catalyst)) return false;
+    if (!hasLiquid && !hasGas) return 0.0f;
+    if (!reactionCatalystPresent(fluid, gas, index, def.conditions.catalyst)) return 0.0f;
 
     int x = index % GW, y = index / GW;
     float T = 0.0f;
@@ -406,33 +414,33 @@ bool tryReactCell(FluidEngine &fluid, RigidBodyEngine &rigid, GasEngine &gas,
     if (!(T > 0.0f) || !std::isfinite(T))
         T = ThermalEngine::sampleTemperatureK(fluid, rigid, gas, x, y);
     float P = gas.pressurePa(index);
-    if (!std::isfinite(T) || !std::isfinite(P)) return false;
-    if (!reactionConditionsMatch(def.conditions, T, P)) return false;
+    if (!std::isfinite(T) || !std::isfinite(P)) return 0.0f;
+    if (!reactionConditionsMatch(def.conditions, T, P)) return 0.0f;
 
     LiquidComponentView liquidView;
     GasComponentView gasView;
-    if (!reactionReadLiquidOccupancy(fluid, index, liquidView)) return false;
-    if (!reactionReadGasOccupancy(gas, index, gasView)) return false;
+    if (!reactionReadLiquidOccupancy(fluid, index, liquidView)) return 0.0f;
+    if (!reactionReadGasOccupancy(gas, index, gasView)) return 0.0f;
     Inventory liquidInv = fromView(liquidView, fluid.fill[i], fluid.liquidHeat[i], false,
         fluid.config.cellsPerMeter);
     Inventory gasInv = fromGasView(gasView, gas.amount[i], gas.heat[i], false,
         fluid.config.cellsPerMeter);
     float extent = planExtent(def, liquidInv, gasInv, dt);
-    if (!(extent > kExtentEps)) return false;
+    if (!(extent > kExtentEps)) return 0.0f;
     Inventory committedL = liquidInv;
     Inventory committedG = gasInv;
-    if (!applyExtent(def, committedL, committedG, extent)) return false;
+    if (!applyExtent(def, committedL, committedG, extent)) return 0.0f;
 
     LiquidComponentView nextL = toView(committedL);
     GasComponentView nextG = toGasView(committedG);
     float oldFill = fluid.fill[i];
     float oldGas = gas.amount[i];
     float oldVap = gas.vaporAmount(index);
-    if (!reactionCommitLiquidOccupancy(fluid, index, nextL)) return false;
+    if (!reactionCommitLiquidOccupancy(fluid, index, nextL)) return 0.0f;
     if (!reactionCommitGasOccupancy(gas, index, nextG)) {
         (void)reactionCommitLiquidOccupancy(fluid, index, liquidView);
         fluid.fill[i] = oldFill;
-        return false;
+        return 0.0f;
     }
     fluid.expectedVolume += static_cast<double>(fluid.fill[i] - oldFill);
     gas.expectedAmount += static_cast<double>(gas.amount[i] - oldGas);
@@ -452,26 +460,69 @@ bool tryReactCell(FluidEngine &fluid, RigidBodyEngine &rigid, GasEngine &gas,
     fluid.wakeChunkAtCell(x, y);
     gas.wakeAt(x, y);
     thermal.wakeCell(x, y);
-    return true;
+    return extent;
 }
 
 } // namespace
 
+ReactionEngine::ReactionEngine()
+    : activity(static_cast<size_t>(GW * GH), 0.0f)
+{
+    activityCells.reserve(256);
+}
+
+void ReactionEngine::clearActivity() {
+    std::fill(activity.begin(), activity.end(), 0.0f);
+    activityCells.clear();
+    reactedCellsLastTick = 0;
+    extentLastTick = 0.0f;
+    heatReleasedLastTick = 0.0f;
+}
+
+void ReactionEngine::decayActivity(float dt) {
+    if (activityCells.empty()) return;
+    float factor = 0.0f;
+    if (dt > 0.0f && std::isfinite(dt))
+        factor = std::exp(-kActivityDecayPerSec * dt);
+    int w = 0;
+    for (int index : activityCells) {
+        if (index < 0 || index >= GW * GH) continue;
+        float &a = activity[static_cast<size_t>(index)];
+        a *= factor;
+        if (a > kActivityEps) {
+            activityCells[static_cast<size_t>(w++)] = index;
+        } else {
+            a = 0.0f;
+        }
+    }
+    activityCells.resize(static_cast<size_t>(w));
+}
+
+void ReactionEngine::addActivity(int index, float heatJ) {
+    if (index < 0 || index >= GW * GH) return;
+    float add = std::abs(heatJ) / kActivityHeatRefJ;
+    if (!(add > 0.0f) || !std::isfinite(add)) return;
+    add = std::min(add, 1.0f);
+    float &a = activity[static_cast<size_t>(index)];
+    if (a <= kActivityEps) activityCells.push_back(index);
+    a = std::min(kActivityMax, a + add);
+}
+
 void ReactionEngine::simulationTick(FluidEngine &fluid, RigidBodyEngine &rigid, GasEngine &gas,
     ThermalEngine &thermal, float dt)
 {
-    if (reactionCount() <= 0) return;
+    reactedCellsLastTick = 0;
+    extentLastTick = 0.0f;
+    heatReleasedLastTick = 0.0f;
     if (!(dt > 0.0f) || !std::isfinite(dt)) return;
+    decayActivity(dt);
+    if (reactionCount() <= 0) return;
     int nTable = reactionTableSize();
     ReactionDefinition const *table = builtinReactionTable();
     // Gas-only mixtures can sit outside FluidEngine's liquid solve region.
     // Full-grid scan at 200x120; ambient Air is skipped by reactant prefilter
     // before temperature / inventory work.
-    int x0 = 0;
-    int y0 = 0;
-    int x1 = GW - 1;
-    int y1 = GH - 1;
-    for (int y = y0; y <= y1; ++y) for (int x = x0; x <= x1; ++x) {
+    for (int y = 0; y < GH; ++y) for (int x = 0; x < GW; ++x) {
         int index = FluidEngine::ci(x, y);
         if (fluid.fill[static_cast<size_t>(index)] < kMinLiquidComponent
             && gas.amount[static_cast<size_t>(index)] < GAS_MIN_AMOUNT)
@@ -479,7 +530,13 @@ void ReactionEngine::simulationTick(FluidEngine &fluid, RigidBodyEngine &rigid, 
         for (int r = 0; r < nTable; ++r) {
             if (table[r].id == REACTION_NONE) continue;
             if (!reactionCellHasRequiredReactants(fluid, gas, index, table[r])) continue;
-            (void)tryReactCell(fluid, rigid, gas, thermal, index, table[r], dt);
+            float extent = tryReactCell(fluid, rigid, gas, thermal, index, table[r], dt);
+            if (!(extent > kExtentEps)) continue;
+            float q = std::abs(reactionHeatReleasedJ(table[r], extent));
+            addActivity(index, q);
+            ++reactedCellsLastTick;
+            extentLastTick += extent;
+            heatReleasedLastTick += q;
         }
     }
 }
@@ -880,6 +937,143 @@ void runReactionEngineSanityCheck() {
     bool fuelCommitted = ge.tryCommitGasOccupancy(fuelIdx, fuelView);
     emit("h2o2_cell_passes_prefilter",
         fuelCommitted && reactionCellHasRequiredReactants(fluid, ge, fuelIdx, h2o2), "");
+
+    emit("hydrogen_combustion_rate_scale",
+        h2o2.maxExtentPerSecond == 4.0f && h2o2.conditions.minTemperatureK == 850.0f, "");
+
+    GasConfig qOff;
+    qOff.simMode = GasSimMode::Off;
+    applyGasQualitySimMode(qOff, 0);
+    applyGasQualitySimMode(qOff, 1);
+    applyGasQualitySimMode(qOff, 2);
+    emit("explicit_gas_off_survives_auto_quality", qOff.simMode == GasSimMode::Off, "");
+    GasConfig qOn;
+    qOn.simMode = GasSimMode::Full;
+    applyGasQualitySimMode(qOn, 0);
+    emit("quality_low_sets_half_when_enabled", qOn.simMode == GasSimMode::Half, "");
+
+    FluidEngine worldF;
+    RigidBodyEngine worldR;
+    GasEngine worldG;
+    worldG.resetAmbient(worldF);
+    int hx = 8, hy = 8;
+    int hi = FluidEngine::ci(hx, hy);
+    GasComponentView sleepH2{};
+    sleepH2.count = 1;
+    sleepH2.items[0] = {SUBSTANCE_HYDROGEN, 1.0f};
+    bool h2Set = worldG.tryCommitGasOccupancy(hi, sleepH2);
+    float capH2 = ThermalEngine::gasCapacity(worldG, hi);
+    worldG.heat[static_cast<size_t>(hi)] = energyFromTemp(capH2, AMBIENT_TEMPERATURE_K);
+    std::fill(worldG.u.begin(), worldG.u.end(), 0.0f);
+    std::fill(worldG.v.begin(), worldG.v.end(), 0.0f);
+    std::fill(worldG.chunkActivity.begin(), worldG.chunkActivity.end(), uint8_t{0});
+    std::fill(worldG.chunkSolveMask.begin(), worldG.chunkSolveMask.end(), uint8_t{0});
+    std::fill(worldG.chunkQuietTicks.begin(), worldG.chunkQuietTicks.end(), uint8_t{255});
+    int farC = ((GH - 8) / CHUNK) * CHUNK_W + ((GW - 8) / CHUNK);
+    worldG.chunkActivity[static_cast<size_t>(farC)] = 1;
+    worldG.config.simMode = GasSimMode::Full;
+    worldF.tickNo = 0;
+    worldG.simulationTick(worldF);
+    float vSleep = worldG.v[static_cast<size_t>(GasEngine::vi(hx, hy))];
+    float vSleepB = worldG.v[static_cast<size_t>(GasEngine::vi(hx, hy + 1))];
+    emit("sleeping_composition_buoyancy_frozen",
+        h2Set && std::abs(vSleep) < 1.0e-5f && std::abs(vSleepB) < 1.0e-5f,
+        "vT=" + std::to_string(vSleep) + " vB=" + std::to_string(vSleepB));
+
+    FluidEngine actF;
+    RigidBodyEngine actR;
+    GasEngine actG;
+    ThermalEngine actT;
+    ReactionEngine actRx;
+    actG.resetAmbient(actF);
+    actT.seedAmbient(actF, actR, actG);
+    int ax = 40, ay = 40;
+    int ai = FluidEngine::ci(ax, ay);
+    GasComponentView stoichView{};
+    stoichView.count = 2;
+    stoichView.items[0] = {SUBSTANCE_HYDROGEN,
+        static_cast<float>(molesToStorageAmount(SUBSTANCE_HYDROGEN, MatterPhase::Gas, 2.0, cpm))};
+    stoichView.items[1] = {SUBSTANCE_OXYGEN,
+        static_cast<float>(molesToStorageAmount(SUBSTANCE_OXYGEN, MatterPhase::Gas, 1.0, cpm))};
+    bool stoichSet = actG.tryCommitGasOccupancy(ai, stoichView);
+    float capFuel = ThermalEngine::gasCapacity(actG, ai);
+    actG.heat[static_cast<size_t>(ai)] = energyFromTemp(capFuel, 293.15f);
+    actT.wakeCell(ax, ay);
+    actRx.simulationTick(actF, actR, actG, actT, PHYSICS_DT);
+    emit("activity_zero_without_reaction",
+        stoichSet && actRx.reactedCellsLastTick == 0 && actRx.activity[static_cast<size_t>(ai)] <= kActivityEps
+            && actRx.extentLastTick <= kExtentEps, "");
+    emit("cold_h2o2_still_does_not_react",
+        ThermalEngine::gasTempK(actG, ai) < 400.0f
+            && actG.gasComponentAmount(ai, SUBSTANCE_WATER) <= kMinGasComponent, "");
+
+    capFuel = ThermalEngine::gasCapacity(actG, ai);
+    actG.heat[static_cast<size_t>(ai)] = energyFromTemp(capFuel, 900.0f);
+    actT.wakeCell(ax, ay);
+    actRx.simulationTick(actF, actR, actG, actT, PHYSICS_DT);
+    emit("activity_positive_on_extent",
+        actRx.reactedCellsLastTick > 0 && actRx.extentLastTick > kExtentEps
+            && actRx.heatReleasedLastTick > 0.0f
+            && actRx.activity[static_cast<size_t>(ai)] > kActivityEps,
+        "e=" + std::to_string(actRx.extentLastTick)
+            + " a=" + std::to_string(actRx.activity[static_cast<size_t>(ai)]));
+
+    float aHot = actRx.activity[static_cast<size_t>(ai)];
+    GasComponentView airOnly{};
+    airOnly.count = 1;
+    airOnly.items[0] = {SUBSTANCE_AIR, 1.0f};
+    (void)actG.tryCommitGasOccupancy(ai, airOnly);
+    actRx.simulationTick(actF, actR, actG, actT, PHYSICS_DT);
+    float aAfter = actRx.activity[static_cast<size_t>(ai)];
+    emit("activity_decays_toward_zero",
+        aHot > kActivityEps && aAfter < aHot && aAfter > 0.0f,
+        "a0=" + std::to_string(aHot) + " a1=" + std::to_string(aAfter));
+
+    FluidEngine propF;
+    RigidBodyEngine propR;
+    GasEngine propG;
+    ThermalEngine propT;
+    ReactionEngine propRx;
+    propF.config.walledBorders = true;
+    propG.config.simMode = GasSimMode::Off;
+    propG.config.boundary = GasBoundary::Sealed;
+    propT.config.enabled = true;
+    propT.config.intervalTicks = 1;
+    propG.resetAmbient(propF);
+    propT.seedAmbient(propF, propR, propG);
+    int px = 60, py = 60;
+    int pi0 = FluidEngine::ci(px, py);
+    int pi1 = FluidEngine::ci(px + 1, py);
+    auto fillStoich = [&](int index) {
+        GasComponentView v{};
+        v.count = 2;
+        v.items[0] = {SUBSTANCE_HYDROGEN,
+            static_cast<float>(molesToStorageAmount(SUBSTANCE_HYDROGEN, MatterPhase::Gas, 2.0, cpm))};
+        v.items[1] = {SUBSTANCE_OXYGEN,
+            static_cast<float>(molesToStorageAmount(SUBSTANCE_OXYGEN, MatterPhase::Gas, 1.0, cpm))};
+        (void)propG.tryCommitGasOccupancy(index, v);
+        float cap = ThermalEngine::gasCapacity(propG, index);
+        propG.heat[static_cast<size_t>(index)] = energyFromTemp(cap, AMBIENT_TEMPERATURE_K);
+    };
+    fillStoich(pi0);
+    fillStoich(pi1);
+    float cap0 = ThermalEngine::gasCapacity(propG, pi0);
+    propG.heat[static_cast<size_t>(pi0)] = energyFromTemp(cap0, 900.0f);
+    propT.wakeCell(px, py);
+    propT.wakeCell(px + 1, py);
+    bool neighborIgnited = false;
+    for (int n = 0; n < 90; ++n) {
+        propT.simulationTick(propF, propR, propG, PHYSICS_DT);
+        propRx.simulationTick(propF, propR, propG, propT, PHYSICS_DT);
+        if (propG.gasComponentAmount(pi1, SUBSTANCE_WATER) > kMinGasComponent) {
+            neighborIgnited = true;
+            break;
+        }
+    }
+    emit("ignition_propagates_by_heat",
+        neighborIgnited && ThermalEngine::gasTempK(propG, pi0) > 500.0f,
+        "nT=" + std::to_string(ThermalEngine::gasTempK(propG, pi1))
+            + " nWater=" + std::to_string(propG.gasComponentAmount(pi1, SUBSTANCE_WATER)));
 
     out << "summary\t" << (failed == 0 ? "PASS" : "FAIL") << '\t' << passed << " passed, "
         << failed << " failed\n";

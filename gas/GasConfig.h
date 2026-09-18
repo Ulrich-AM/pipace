@@ -34,3 +34,11 @@ struct GasConfig {
     // Ambient gas identity is GasSpecies::Air -> SUBSTANCE_AIR + MatterPhase::Gas.
     // Authoritative thermal: thermalForSubstance(substanceForGasSpecies()).
 };
+
+// Quality presets never silently disable player-facing gases. Low/Auto-Low use
+// Half; Medium/High use Full. Settings → Gas Off stays Off until the user
+// picks Half/Full (or a gas scene turns simulation back on).
+inline void applyGasQualitySimMode(GasConfig &c, int level) {
+    if (c.simMode == GasSimMode::Off) return;
+    c.simMode = (level <= 0) ? GasSimMode::Half : GasSimMode::Full;
+}
