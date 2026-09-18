@@ -2,6 +2,7 @@
 
 #include "fluid/DiagOutput.h"
 #include "fluid/FluidEngine.h"
+#include "gas/GasEngine.h"
 #include "rigid/RigidBodyEngine.h"
 
 #include <algorithm>
@@ -273,7 +274,7 @@ void WorldRenderer::ensureSize() {
 }
 
 void WorldRenderer::paintNormal(FluidEngine &fluid, RigidBodyEngine const &rigid, WorldLook const &look,
-    float const *reactionActivity) {
+    float const *reactionActivity, GasEngine const *gas) {
     ensureSize();
     WorldRenderStyle const style = look.style;
     bool const useHysteresis = needsHysteresis(style);
@@ -468,6 +469,34 @@ void WorldRenderer::paintNormal(FluidEngine &fluid, RigidBodyEngine const &rigid
             fluid.pixels[static_cast<size_t>(index)] = mixToward(fluid.pixels[static_cast<size_t>(index)],
                 glowR[static_cast<size_t>(index)], glowG[static_cast<size_t>(index)], glowB[static_cast<size_t>(index)],
                 std::min(1.0f, u * u * (1.20f + 0.45f * u)));
+        }
+    }
+
+    if (gas) {
+        constexpr float kGasTintMax = 0.25f;
+        for (int y = 0; y < GH; ++y) for (int x = 0; x < GW; ++x) {
+            int index = FluidEngine::ci(x, y);
+            if (fluid.solid[index] || fluid.dynamicSolid[index]) continue;
+            if (visualLiquid[static_cast<size_t>(index)]) continue;
+            if (gas->amount[static_cast<size_t>(index)] > GAS_MIN_AMOUNT) {
+                SubstanceId id = gas->dominantGasSubstance(index);
+                if (id != SUBSTANCE_NONE && id != SUBSTANCE_AIR && id != SUBSTANCE_WATER) {
+                    float frac = std::clamp(gas->gasComponentFraction(index, id), 0.0f, 1.0f);
+                    float mix = kGasTintMax * frac;
+                    if (mix >= 0.01f) {
+                        SubstanceVisualMetadata const &vis = substanceDef(id).visual;
+                        if (vis.valid)
+                            fluid.pixels[static_cast<size_t>(index)] =
+                                mixToward(fluid.pixels[static_cast<size_t>(index)],
+                                    vis.colorR, vis.colorG, vis.colorB, mix);
+                    }
+                }
+            }
+            float vap = gas->vaporAmount(index);
+            if (vap < 0.04f) continue;
+            float t = std::clamp(vap / 0.55f, 0.0f, 0.16f);
+            fluid.pixels[static_cast<size_t>(index)] =
+                mixToward(fluid.pixels[static_cast<size_t>(index)], 188, 198, 206, t);
         }
     }
 

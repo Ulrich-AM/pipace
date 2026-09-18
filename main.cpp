@@ -756,22 +756,25 @@ void fillWorldPixels() {
             look.outlines = false;
         }
         float const *reactionGlow = (debugView == DebugView::Normal) ? reactions.activity.data() : nullptr;
-        worldRenderer.paintNormal(engine, rigid, look, reactionGlow);
-        for (int y = 0; y < GH; ++y) for (int x = 0; x < GW; ++x) {
-            int i = FluidEngine::ci(x, y);
-            if (engine.solid[i] || engine.dynamicSolid[i]) continue;
-            if (engine.fill[static_cast<size_t>(i)] >= MIN_RENDER_FILL) continue;
-            float vap = gas.vaporAmount(i);
-            if (vap < 0.04f) continue;
-            float t = std::clamp(vap / 0.55f, 0.0f, 0.16f);
-            uint32_t dst = engine.pixels[static_cast<size_t>(i)];
-            int r = static_cast<int>((dst >> 16) & 255);
-            int gch = static_cast<int>((dst >> 8) & 255);
-            int b = static_cast<int>(dst & 255);
-            r = static_cast<int>(std::lround(r + (188 - r) * t));
-            gch = static_cast<int>(std::lround(gch + (198 - gch) * t));
-            b = static_cast<int>(std::lround(b + (206 - b) * t));
-            engine.pixels[static_cast<size_t>(i)] = rgb(r, gch, b);
+        GasEngine const *identityGas = (debugView == DebugView::Normal) ? &gas : nullptr;
+        worldRenderer.paintNormal(engine, rigid, look, reactionGlow, identityGas);
+        if (debugView == DebugView::Temperature) {
+            for (int y = 0; y < GH; ++y) for (int x = 0; x < GW; ++x) {
+                int i = FluidEngine::ci(x, y);
+                if (engine.solid[i] || engine.dynamicSolid[i]) continue;
+                if (engine.fill[static_cast<size_t>(i)] >= MIN_RENDER_FILL) continue;
+                float vap = gas.vaporAmount(i);
+                if (vap < 0.04f) continue;
+                float t = std::clamp(vap / 0.55f, 0.0f, 0.16f);
+                uint32_t dst = engine.pixels[static_cast<size_t>(i)];
+                int r = static_cast<int>((dst >> 16) & 255);
+                int gch = static_cast<int>((dst >> 8) & 255);
+                int b = static_cast<int>(dst & 255);
+                r = static_cast<int>(std::lround(r + (188 - r) * t));
+                gch = static_cast<int>(std::lround(gch + (198 - gch) * t));
+                b = static_cast<int>(std::lround(b + (206 - b) * t));
+                engine.pixels[static_cast<size_t>(i)] = rgb(r, gch, b);
+            }
         }
     } else {
     float pressureScale = 0.0f, divergenceScale = 0.0f;
