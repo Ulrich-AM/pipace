@@ -136,9 +136,13 @@ float coolSurfaceBonus(FluidEngine const &fluid, RigidBodyEngine const &rigid, G
 
 float gasCellPressureAtm(GasEngine const &gas, int i, float vol) {
     if (!(vol >= GAS_MIN_VOLUME)) return 0.0f;
-    float amt = gas.amount[static_cast<size_t>(i)];
-    if (!(amt > 0.0f) || !std::isfinite(amt)) return 0.0f;
-    return amt / vol;
+    return gasPressureAtmFromState(gas.amount[static_cast<size_t>(i)], vol, gas.cellTemperatureK(i));
+}
+
+float gasAmountRoomForPressureAtm(GasEngine const &gas, int i, float vol, float maxAtm) {
+    if (!(vol >= GAS_MIN_VOLUME)) return 0.0f;
+    float capAmt = gasAmountFromPressureAtm(maxAtm, vol, gas.cellTemperatureK(i));
+    return capAmt - gas.amount[static_cast<size_t>(i)];
 }
 
 float vaporPartialPressurePa(FluidEngine const &fluid, GasEngine const &gas, int x, int y) {
@@ -179,9 +183,8 @@ int findVaporDest(FluidEngine const &fluid, RigidBodyEngine const &rigid, GasEng
         int i = GasEngine::ci(x, y);
         float vol = gas.availableVolume(fluid, x, y);
         if (vol < GAS_MIN_VOLUME) return 0.0f;
-        float amt = gas.amount[static_cast<size_t>(i)];
-        float thermo = vol * maxAtm - amt;
-        float safety = vol * kSolverSafetyAtm - amt;
+        float thermo = gasAmountRoomForPressureAtm(gas, i, vol, maxAtm);
+        float safety = gasAmountRoomForPressureAtm(gas, i, vol, kSolverSafetyAtm);
         return std::min(thermo, safety);
     };
     int best = -1;
@@ -233,7 +236,8 @@ int findVaporDest(FluidEngine const &fluid, RigidBodyEngine const &rigid, GasEng
             float vol = gas.availableVolume(fluid, x, y);
             if (vol < GAS_MIN_VOLUME) return;
             float amt = gas.amount[static_cast<size_t>(GasEngine::ci(x, y))];
-            if (amt >= vol * kSolverSafetyAtm - GAS_MIN_AMOUNT) anySafety = true;
+            if (amt >= gasAmountFromPressureAtm(kSolverSafetyAtm, vol, gas.cellTemperatureK(GasEngine::ci(x, y)))
+                - GAS_MIN_AMOUNT) anySafety = true;
         };
         probe(sx, sy);
         for (int n = 0; n < 4; ++n) probe(sx + kDx[n], sy + kDy[n]);
@@ -945,8 +949,8 @@ WaterPhaseTickStats stepWaterPhaseChange(FluidEngine &fluid, RigidBodyEngine &ri
                 continue;
             }
             double vaporWant = massKgToGasAmount(SUBSTANCE_WATER, mWant, cpm);
-            float roomThermo = vol * maxAtm - gas.amount[static_cast<size_t>(dest)];
-            float roomSafety = vol * kSolverSafetyAtm - gas.amount[static_cast<size_t>(dest)];
+            float roomThermo = gasAmountRoomForPressureAtm(gas, dest, vol, maxAtm);
+            float roomSafety = gasAmountRoomForPressureAtm(gas, dest, vol, kSolverSafetyAtm);
             float room = std::min(roomThermo, roomSafety);
             if (room <= GAS_MIN_AMOUNT) {
                 ++st.blockedBoil;

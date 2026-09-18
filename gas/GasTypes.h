@@ -2,14 +2,50 @@
 
 #include "fluid/FluidTypes.h"
 
-// Pressure remains isothermal in this update: 1.0 amount in 1.0 available cell
-// volume = 1 atmosphere. Gas cells also store thermal energy (see thermal/).
-// Coupling P ∝ T/T_amb is reserved; ThermalConfig::coupleGasPressureToTemperature
-// is off so the existing flow solver stays stable.
+// Gas pressure is a reference-state ideal-gas approximation:
+//   P_atm = (amount / volume) * (T / Tref)
+// amount is conserved cell-atmospheres at Tref = AMBIENT_TEMPERATURE_K.
+// At ambient T the old isothermal P = amount/volume is recovered.
+//
+// This is one-way coupling: thermal energy -> temperature -> pressure.
+// There is no PdV work, no adiabatic compression heating, and no acoustic
+// shock solver. Pressure is derived from state and does not modify heat.
 // Pressure in the solver is stored in atmospheres; convert with referencePressurePa.
 constexpr float GAS_MIN_VOLUME = 1.0e-4f;
 constexpr float GAS_MIN_AMOUNT = 1.0e-8f;
 constexpr float GAS_REFERENCE_PRESSURE_PA = 101325.0f;
+constexpr float GAS_PRESSURE_TREF_K = AMBIENT_TEMPERATURE_K;
+// Solver safety cap, atmospheres. Comfortably above brush max (8) and ordinary
+// sealed-room / hot-combustion overpressure. Not a gameplay limiter.
+constexpr float GAS_MAX_PRESSURE_ATM = 64.0f;
+
+inline float gasPressureAtmFromState(float amount, float volume, float temperatureK) {
+    if (!(amount > GAS_MIN_AMOUNT) || !(volume >= GAS_MIN_VOLUME)) return 0.0f;
+    if (!std::isfinite(amount) || !std::isfinite(volume)) return 0.0f;
+    float T = temperatureK;
+    if (!(T > 0.0f) || !std::isfinite(T)) T = GAS_PRESSURE_TREF_K;
+    T = std::clamp(T, MIN_SAFE_TEMPERATURE_K, MAX_SAFE_TEMPERATURE_K);
+    float tRef = GAS_PRESSURE_TREF_K;
+    if (!(tRef > 1.0f) || !std::isfinite(tRef)) tRef = 293.15f;
+    float p = (amount / volume) * (T / tRef);
+    if (!std::isfinite(p) || p < 0.0f) return 0.0f;
+    if (p > GAS_MAX_PRESSURE_ATM) return GAS_MAX_PRESSURE_ATM;
+    return p;
+}
+
+inline float gasAmountFromPressureAtm(float pressureAtm, float volume, float temperatureK) {
+    if (!(volume >= GAS_MIN_VOLUME) || !std::isfinite(volume)) return 0.0f;
+    if (!(pressureAtm > 0.0f) || !std::isfinite(pressureAtm)) return 0.0f;
+    float T = temperatureK;
+    if (!(T > 0.0f) || !std::isfinite(T)) T = GAS_PRESSURE_TREF_K;
+    T = std::clamp(T, MIN_SAFE_TEMPERATURE_K, MAX_SAFE_TEMPERATURE_K);
+    float tRef = GAS_PRESSURE_TREF_K;
+    if (!(tRef > 1.0f) || !std::isfinite(tRef)) tRef = 293.15f;
+    float p = std::min(pressureAtm, GAS_MAX_PRESSURE_ATM);
+    float a = p * volume * (tRef / T);
+    if (!std::isfinite(a) || a < 0.0f) return 0.0f;
+    return a;
+}
 
 // Fixed-capacity gas composition. amount[] is total cell-atmospheres; these
 // slots say what that amount is. 4 covers Air + Water vapor plus two near-term

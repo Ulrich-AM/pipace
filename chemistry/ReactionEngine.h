@@ -27,6 +27,7 @@ struct ReactionEngine {
     void simulationTick(FluidEngine &fluid, RigidBodyEngine &rigid, GasEngine &gas,
         ThermalEngine &thermal, float dt);
     void clearActivity();
+    bool hasVisibleActivity() const { return !activityCells.empty(); }
 
 private:
     std::vector<int> activityCells;

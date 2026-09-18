@@ -19,7 +19,7 @@ struct GasEngine {
     std::vector<float> heat;       // Joules associated with amount
     std::vector<float> heatNext;
     std::vector<float> volume;     // available gas volume in the cell, 0..1
-    std::vector<float> pressure;   // derived atmospheres (amount / volume)
+    std::vector<float> pressure;   // cached atmospheres from amount, volume, T
     std::vector<float> u;          // MAC horizontal, cells/s
     std::vector<float> v;          // MAC vertical, cells/s
     std::vector<float> fluxU;
@@ -61,6 +61,8 @@ struct GasEngine {
 
     float pressurePa(int index) const;
     float pressureAtm(int index) const { return index >= 0 && index < GW * GH ? pressure[static_cast<size_t>(index)] : 0.0f; }
+    float cellTemperatureK(int index) const;
+    void recomputePressure();
     float cellU(int x, int y) const;
     float cellV(int x, int y) const;
     bool isAccessible(FluidEngine const &fluid, int x, int y) const;
@@ -121,7 +123,6 @@ private:
     void scaleGasComposition(int index, float frac);
     void syncAmountFromComposition(int index);
     void rebuildVolumes(FluidEngine const &fluid, bool &volumeChanged, bool fullGrid = true);
-    void recomputePressure();
     float relocateAmount(FluidEngine const &fluid, int x, int y, GasComponentView parcel,
         float leftoverHeatPerAmount = 0.0f, float maxAtm = 0.0f);
     void wakeThermalAt(int x, int y);

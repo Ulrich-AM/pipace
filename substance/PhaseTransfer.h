@@ -21,8 +21,11 @@
 //   liquid density         FluidProperties.density, relative to water = 1.0
 //   liquid mass            fill * densityRel * 1000 kg/m³ * V
 //                          full water cell = 1 * 1 * 1000 * 0.015625 = 15.625 kg
-//   GasEngine amount       conserved "cell-atmospheres". 1.0 amount in 1.0 available
-//                          volume = 1 atm (isothermal P = amount / volume).
+//   GasEngine amount       conserved "cell-atmospheres" at Tref = AMBIENT_TEMPERATURE_K.
+//                          Pressure is P_atm = (amount / volume) * (T / Tref).
+//                          At ambient T this matches 1.0 amount in 1.0 volume = 1 atm.
+//                          There is no PdV work; pressure is derived and does not
+//                          modify thermal energy.
 //                          1.0 ≈ one cell of 1 atm of the stored gas species.
 //                          Generic composition: amount[] is total cell-atmospheres;
 //                          per-cell SubstanceId slots (Air, Water vapor, …) sum to amount.
