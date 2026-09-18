@@ -512,7 +512,7 @@ bool ThermalEngine::resolveNode(FluidEngine &fluid, RigidBodyEngine &rigid, GasE
     if (gas.amount[static_cast<size_t>(i)] > GAS_MIN_AMOUNT) {
         energy = &gas.heat[static_cast<size_t>(i)];
         cap = gasCapacity(gas, i);
-        k = thermalForSubstance(substanceForGasSpecies()).conductivity;
+        k = gasMixtureConductivity(gas.gasComponents(i));
         isGas = true;
         return cap > MIN_THERMAL_CAPACITY;
     }

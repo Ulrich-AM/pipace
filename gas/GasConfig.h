@@ -27,6 +27,10 @@ struct GasConfig {
     // 1.0 is physical β=1/Tamb in cell units. Default 4 so a heat-tool patch rises
     // across several cells in a couple of seconds. 0 disables buoyancy.
     float buoyancyScale = 4.0f;
+    // Boussinesq composition term (y down): v += g * compositionBuoyancyScale * (rhoMix/rhoAir - 1) * dt.
+    // Hydrogen (rhoMix << rhoAir) rises; Oxygen sinks slightly; Air is ~0.
+    // Bounded; not a compressible density solver. 0 disables the composition term.
+    float compositionBuoyancyScale = 1.0f;
     // Ambient gas identity is GasSpecies::Air -> SUBSTANCE_AIR + MatterPhase::Gas.
     // Authoritative thermal: thermalForSubstance(substanceForGasSpecies()).
 };
