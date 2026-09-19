@@ -281,12 +281,8 @@ void ShellState::applyPalette(PaletteId id, Tool &tool, MaterialId &drawMaterial
 
 void ShellState::applyCategory(Category cat, Tool &tool, MaterialId &drawMaterial) {
     category = cat;
-    if (cat == Category::Tools) {
-        enableBrushEdit(tool, drawMaterial);
-        if (isPlaceablePalette(contentPalette))
-            palette = contentPalette;
+    if (cat == Category::Tools)
         return;
-    }
     if (elementCount() <= 0)
         return;
     bool openWindow = (cat != Category::Energy);
@@ -751,7 +747,8 @@ void drawShell(HDC dc, ShellState &shell, View const &view) {
         if (shell.editTool == EditTool::Grab) propLine(tr("prop_tool_grab"));
         else if (shell.editTool == EditTool::Brush) propLine(tr("prop_tool_brush"));
         else if (shell.editTool == EditTool::Touch) propLine(tr("prop_tool_touch"));
-        else propLine(tr("prop_tool_eraser"));
+        else if (shell.editTool == EditTool::Heat) propLine(tr("prop_tool_heat"));
+        else if (shell.editTool == EditTool::Erase) propLine(tr("prop_tool_eraser"));
         propLine(tr("prop_tool_window_hint"));
     } else if (shell.category == Category::Energy) {
         propLine(tr("prop_tool_heat"));
