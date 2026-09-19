@@ -90,10 +90,12 @@ inline MaterialVisual visualForSubstance(SubstanceId id) {
         case SUBSTANCE_AIR: return kVisualVoid;
         case SUBSTANCE_HYDROGEN: return kVisualVoid;
         case SUBSTANCE_OXYGEN: return kVisualVoid;
+        case SUBSTANCE_CARBON_DIOXIDE: return kVisualVoid;
         case SUBSTANCE_WOOD: return visualForSolid(MATERIAL_WOOD);
         case SUBSTANCE_STONE: return visualForSolid(MATERIAL_STONE);
         case SUBSTANCE_GLASS: return visualForSolid(MATERIAL_GLASS);
         case SUBSTANCE_METAL: return visualForSolid(MATERIAL_METAL);
+        case SUBSTANCE_CARBON: return visualForSolid(MATERIAL_CARBON);
         default: return visualForSolid(MATERIAL_EMPTY);
     }
 }

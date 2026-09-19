@@ -561,6 +561,99 @@ SubstanceDefinition makeOxygen() {
     return s;
 }
 
+SubstanceDefinition makeCarbon() {
+    SubstanceDefinition s;
+
+    s.id = SUBSTANCE_CARBON;
+    s.internalName = "carbon";
+    s.displayName = "Carbon";
+    s.displayNameKey = "ins_mat_carbon";
+    s.classification = SubstanceClass::PureSubstance;
+    s.compositionKind = CompositionKind::PureChemical;
+    s.formulaHint = "C";
+
+    s.thermal.valid = true;
+    s.thermal.specificHeat = 710.0f;
+    s.thermal.conductivity = 80.0f;
+    s.thermal.meltingPointK = 0.0f;
+    s.thermal.boilingPointK = 0.0f;
+    s.thermal.latentFusion = 0.0f;
+    s.thermal.latentVapor = 0.0f;
+    s.thermal.expansionCoeff = 7.0e-6f;
+    s.thermal.softeningTempK = 0.0f;
+
+    s.phase.valid = true;
+    s.phase.solidCapable = true;
+    s.phase.liquidCapable = false;
+    s.phase.gasCapable = false;
+    copyPhaseTransitionFromThermal(s);
+
+    s.mechanical.valid = true;
+    s.mechanical.densityRel = 2.26f;
+    s.mechanical.friction = 0.42f;
+    s.mechanical.restitution = 0.05f;
+    s.mechanical.hardness = 0.55f;
+    s.mechanical.toughness = 0.18f;
+    s.mechanical.brittleness = 0.86f;
+    s.mechanical.tensileStrength = 0.22f;
+    s.mechanical.compressiveStrength = 0.70f;
+    s.mechanical.shearStrength = 0.20f;
+    s.mechanical.fractureToughness = 0.12f;
+
+    s.chemical.valid = true;
+    s.chemical.molarMass = 12.011f;
+    s.chemical.flammable = true;
+    s.chemical.oxidizer = false;
+
+    s.visual.valid = true;
+    s.visual.colorR = 45;
+    s.visual.colorG = 45;
+    s.visual.colorB = 50;
+
+    return s;
+}
+
+SubstanceDefinition makeCarbonDioxide() {
+    SubstanceDefinition s;
+
+    s.id = SUBSTANCE_CARBON_DIOXIDE;
+    s.internalName = "carbon_dioxide";
+    s.displayName = "Carbon Dioxide";
+    s.displayNameKey = "ins_mat_carbon_dioxide";
+    s.classification = SubstanceClass::PureSubstance;
+    s.compositionKind = CompositionKind::PureChemical;
+    s.formulaHint = "CO2";
+
+    s.thermal.valid = true;
+    s.thermal.specificHeat = 844.0f;
+    s.thermal.gasSpecificHeat = 844.0f;
+    s.thermal.conductivity = 0.0166f;
+    s.thermal.meltingPointK = 0.0f;
+    s.thermal.boilingPointK = 0.0f;
+    s.thermal.latentFusion = 0.0f;
+    s.thermal.latentVapor = 0.0f;
+    s.thermal.expansionCoeff = 1.0f / AMBIENT_TEMPERATURE_K;
+    s.thermal.softeningTempK = 0.0f;
+
+    s.phase.valid = true;
+    s.phase.solidCapable = false;
+    s.phase.liquidCapable = false;
+    s.phase.gasCapable = true;
+    copyPhaseTransitionFromThermal(s);
+
+    s.chemical.valid = true;
+    s.chemical.molarMass = 44.0095f;
+    s.chemical.flammable = false;
+    s.chemical.oxidizer = false;
+
+    s.visual.valid = true;
+    s.visual.colorR = 185;
+    s.visual.colorG = 185;
+    s.visual.colorB = 200;
+
+    return s;
+}
+
 } // namespace
 
 SubstanceDefinition const *builtinSubstanceTable() {
@@ -575,6 +668,8 @@ SubstanceDefinition const *builtinSubstanceTable() {
         makeAir(),
         makeHydrogen(),
         makeOxygen(),
+        makeCarbon(),
+        makeCarbonDioxide(),
     };
     return table;
 }
@@ -663,7 +758,7 @@ void runSubstanceRegistryDiagnostics() {
     emit("ids_unique", idsUnique, "");
     emit("names_unique", namesUnique, "");
     emit("table_index_matches_id", indexMatches, "");
-    emit("builtin_count", SUBSTANCE_COUNT == 10, std::to_string(SUBSTANCE_COUNT));
+    emit("builtin_count", SUBSTANCE_COUNT == 12, std::to_string(SUBSTANCE_COUNT));
     emit("none_is_slot_zero", table[SUBSTANCE_NONE].id == SUBSTANCE_NONE
         && std::strcmp(table[SUBSTANCE_NONE].internalName, "none") == 0, "");
     emit("none_no_fake_physics",
@@ -765,6 +860,24 @@ void runSubstanceRegistryDiagnostics() {
     emit("oxygen_oxidizer",
         oxygen.chemical.valid && oxygen.chemical.oxidizer && !oxygen.chemical.flammable
             && near(oxygen.chemical.molarMass, 31.998f), std::to_string(oxygen.chemical.molarMass));
+    SubstanceDefinition const &carbon = substanceDef(SUBSTANCE_CARBON);
+    emit("carbon_solid_only",
+        carbon.phase.solidCapable && !carbon.phase.liquidCapable && !carbon.phase.gasCapable
+            && hasMechanicalProperties(SUBSTANCE_CARBON)
+            && rigidMaterialForSubstance(SUBSTANCE_CARBON) == MATERIAL_CARBON
+            && substanceForMaterialId(MATERIAL_CARBON) == SUBSTANCE_CARBON, "");
+    emit("carbon_molar_mass",
+        carbon.chemical.valid && carbon.chemical.flammable && !carbon.chemical.oxidizer
+            && near(carbon.chemical.molarMass, 12.011f, 0.001f),
+        std::to_string(carbon.chemical.molarMass));
+    SubstanceDefinition const &co2 = substanceDef(SUBSTANCE_CARBON_DIOXIDE);
+    emit("co2_gas_only",
+        co2.phase.gasCapable && !co2.phase.liquidCapable && !co2.phase.solidCapable
+            && hasGasProperties(SUBSTANCE_CARBON_DIOXIDE), "");
+    emit("co2_molar_mass",
+        co2.chemical.valid && !co2.chemical.flammable && !co2.chemical.oxidizer
+            && near(co2.chemical.molarMass, 44.0095f, 0.001f),
+        std::to_string(co2.chemical.molarMass));
 
     emit("no_ice_or_steam_slots",
         substanceFromInternalName("ice") == SUBSTANCE_NONE

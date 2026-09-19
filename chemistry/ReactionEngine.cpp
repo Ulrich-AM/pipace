@@ -8,6 +8,7 @@
 #include "gas/GasEngine.h"
 #include "rigid/RigidBodyEngine.h"
 #include "substance/PhaseTransfer.h"
+#include "substance/SubstanceRegistry.h"
 #include "thermal/ThermalEngine.h"
 
 #include <algorithm>
@@ -1115,7 +1116,7 @@ void runReactionEngineSanityCheck() {
 
     ReactionDefinition const &h2o2 = reactionDef(REACTION_HYDROGEN_COMBUSTION);
     emit("hydrogen_combustion_registered",
-        reactionCount() == 1 && validReaction(REACTION_HYDROGEN_COMBUSTION)
+        reactionCount() == 2 && validReaction(REACTION_HYDROGEN_COMBUSTION)
             && reactionFromInternalName("hydrogen_combustion") == REACTION_HYDROGEN_COMBUSTION
             && h2o2.reactantCount == 2 && h2o2.productCount == 1
             && h2o2.reactants[0].substance == SUBSTANCE_HYDROGEN
@@ -1772,6 +1773,274 @@ void runReactionEngineSanityCheck() {
     for (float a : sG.amount) if (a < -1.0e-6f) noNeg = false;
     for (float h : sG.heat) if (h < -1.0e-4f) noNeg = false;
     emit("surface_no_negative_mass_or_heat", noNeg, "");
+
+    emit("carbon_id_appended",
+        SUBSTANCE_CARBON == 10 && SUBSTANCE_CARBON_DIOXIDE == 11 && SUBSTANCE_COUNT == 12
+            && substanceFromInternalName("carbon") == SUBSTANCE_CARBON
+            && substanceFromInternalName("carbon_dioxide") == SUBSTANCE_CARBON_DIOXIDE, "");
+    emit("carbon_maps_to_material",
+        rigidMaterialForSubstance(SUBSTANCE_CARBON) == MATERIAL_CARBON
+            && substanceForMaterialId(MATERIAL_CARBON) == SUBSTANCE_CARBON
+            && MATERIAL_CARBON == 6 && MATERIAL_COUNT == 7, "");
+    emit("carbon_solid_only_phases",
+        supportsPhase(SUBSTANCE_CARBON, MatterPhase::Solid)
+            && !supportsPhase(SUBSTANCE_CARBON, MatterPhase::Liquid)
+            && !supportsPhase(SUBSTANCE_CARBON, MatterPhase::Gas), "");
+    emit("co2_gas_only_phases",
+        supportsPhase(SUBSTANCE_CARBON_DIOXIDE, MatterPhase::Gas)
+            && !supportsPhase(SUBSTANCE_CARBON_DIOXIDE, MatterPhase::Liquid)
+            && !supportsPhase(SUBSTANCE_CARBON_DIOXIDE, MatterPhase::Solid), "");
+    emit("carbon_molar_mass_12",
+        nearRel(chemicalForSubstance(SUBSTANCE_CARBON).molarMass, 12.011),
+        std::to_string(chemicalForSubstance(SUBSTANCE_CARBON).molarMass));
+    emit("co2_molar_mass_44",
+        nearRel(chemicalForSubstance(SUBSTANCE_CARBON_DIOXIDE).molarMass, 44.0095),
+        std::to_string(chemicalForSubstance(SUBSTANCE_CARBON_DIOXIDE).molarMass));
+
+    ReactionDefinition const &cO2 = reactionDef(REACTION_CARBON_COMBUSTION);
+    emit("carbon_combustion_registered_surface",
+        validReaction(REACTION_CARBON_COMBUSTION)
+            && reactionFromInternalName("carbon_combustion") == REACTION_CARBON_COMBUSTION
+            && cO2.topology == ReactionTopology::SolidGasSurface
+            && cO2.reactantCount == 2 && cO2.productCount == 1
+            && cO2.reactants[0].substance == SUBSTANCE_CARBON
+            && cO2.reactants[0].requiredPhase == MatterPhase::Solid
+            && cO2.reactants[0].coefficient == 1.0f
+            && cO2.reactants[1].substance == SUBSTANCE_OXYGEN
+            && cO2.reactants[1].requiredPhase == MatterPhase::Gas
+            && cO2.reactants[1].coefficient == 1.0f
+            && cO2.products[0].substance == SUBSTANCE_CARBON_DIOXIDE
+            && cO2.products[0].requiredPhase == MatterPhase::Gas
+            && cO2.products[0].coefficient == 1.0f
+            && cO2.conditions.minTemperatureValid && cO2.conditions.minTemperatureK == 900.0f
+            && cO2.maxExtentPerSecond == 120.0f, "");
+    emit("carbon_combustion_mass_balanced",
+        reactionMassConservation(REACTION_CARBON_COMBUSTION) == ReactionMassConservation::Balanced, "");
+    emit("carbon_combustion_heat_released",
+        nearRel(reactionHeatReleasedJ(cO2, 1.0f), 393500.0),
+        std::to_string(reactionHeatReleasedJ(cO2, 1.0f)));
+    emit("ambient_air_fails_carbon_prefilter",
+        !reactionCellHasRequiredGasReactants(fluid, ge, airIdx, cO2), "");
+
+    GasComponentView co2View{};
+    co2View.count = 1;
+    co2View.items[0] = {SUBSTANCE_CARBON_DIOXIDE, 1.0f};
+    float rhoCO2 = gasMixtureReferenceDensityKgM3(co2View);
+    emit("co2_density_heavier_than_air",
+        rhoCO2 > rhoAir, "rhoCO2=" + std::to_string(rhoCO2) + " rhoAir=" + std::to_string(rhoAir));
+
+    SolidReactionInventory cInv;
+    cInv.substance = SUBSTANCE_CARBON;
+    cInv.fraction = static_cast<float>(molesToStorageAmount(SUBSTANCE_CARBON, MatterPhase::Solid, 1.0, cpm));
+    cInv.heat = 5.0e5f;
+    cInv.cellsPerMeter = cpm;
+    Inventory o2Inv{};
+    o2Inv.gas = true;
+    o2Inv.maxFill = 1.0e6f;
+    o2Inv.cellsPerMeter = cpm;
+    o2Inv.items[0] = {SUBSTANCE_OXYGEN,
+        static_cast<float>(molesToStorageAmount(SUBSTANCE_OXYGEN, MatterPhase::Gas, 1.0, cpm))};
+    o2Inv.count = 1;
+    o2Inv.heat = 1.0e5f;
+    recountFill(o2Inv);
+    SolidReactionInventory cStoich = cInv;
+    Inventory o2Stoich = o2Inv;
+    bool cOk = applySurfaceExtent(cO2, cStoich, o2Stoich, 1.0f);
+    double co2Mol = storageAmountToMoles(SUBSTANCE_CARBON_DIOXIDE, MatterPhase::Gas,
+        amountOf(o2Stoich, SUBSTANCE_CARBON_DIOXIDE), cpm);
+    double o2LeftMol = storageAmountToMoles(SUBSTANCE_OXYGEN, MatterPhase::Gas,
+        amountOf(o2Stoich, SUBSTANCE_OXYGEN), cpm);
+    double cLeftMol = storageAmountToMoles(SUBSTANCE_CARBON, MatterPhase::Solid, cStoich.fraction, cpm);
+    emit("carbon_stoich_1_1_1",
+        cOk && nearRel(co2Mol, 1.0) && o2LeftMol <= 1.0e-4 && cLeftMol <= 1.0e-4
+            && amountOf(o2Stoich, SUBSTANCE_AIR) <= kMinGasComponent,
+        "co2=" + std::to_string(co2Mol) + " o2=" + std::to_string(o2LeftMol)
+            + " c=" + std::to_string(cLeftMol));
+    float qC = reactionHeatReleasedJ(cO2, 1.0f);
+    emit("carbon_reaction_heat_into_matter",
+        cOk && std::abs((cStoich.heat + o2Stoich.heat) - (cInv.heat + o2Inv.heat + qC))
+            <= 0.02f * std::max(1.0f, std::abs(qC)) + 2.0f,
+        "H=" + std::to_string(cStoich.heat + o2Stoich.heat) + " q=" + std::to_string(qC));
+
+    SolidReactionInventory cEx = cInv;
+    cEx.fraction = static_cast<float>(molesToStorageAmount(SUBSTANCE_CARBON, MatterPhase::Solid, 2.0, cpm));
+    Inventory o2Lim = o2Inv;
+    bool cExOk = applySurfaceExtent(cO2, cEx, o2Lim, 1.0f);
+    double cRemainEx = storageAmountToMoles(SUBSTANCE_CARBON, MatterPhase::Solid, cEx.fraction, cpm);
+    emit("excess_carbon_remains_when_o2_limits",
+        cExOk && nearRel(cRemainEx, 1.0)
+            && storageAmountToMoles(SUBSTANCE_OXYGEN, MatterPhase::Gas, amountOf(o2Lim, SUBSTANCE_OXYGEN), cpm) <= 1.0e-4,
+        "cRemain=" + std::to_string(cRemainEx));
+
+    SolidReactionInventory cLim = cInv;
+    Inventory o2Ex{};
+    o2Ex.gas = true;
+    o2Ex.maxFill = 1.0e6f;
+    o2Ex.cellsPerMeter = cpm;
+    o2Ex.items[0] = {SUBSTANCE_OXYGEN,
+        static_cast<float>(molesToStorageAmount(SUBSTANCE_OXYGEN, MatterPhase::Gas, 2.0, cpm))};
+    o2Ex.count = 1;
+    o2Ex.heat = 1.0e5f;
+    recountFill(o2Ex);
+    bool o2ExOk = applySurfaceExtent(cO2, cLim, o2Ex, 1.0f);
+    double o2RemainEx = storageAmountToMoles(SUBSTANCE_OXYGEN, MatterPhase::Gas,
+        amountOf(o2Ex, SUBSTANCE_OXYGEN), cpm);
+    emit("excess_o2_remains_when_carbon_limits",
+        o2ExOk && nearRel(o2RemainEx, 1.0)
+            && storageAmountToMoles(SUBSTANCE_CARBON, MatterPhase::Solid, cLim.fraction, cpm) <= 1.0e-4,
+        "o2Remain=" + std::to_string(o2RemainEx));
+
+    FluidEngine cfF;
+    RigidBodyEngine cfR;
+    GasEngine cfG;
+    ThermalEngine cfT;
+    cfF.config.walledBorders = true;
+    cfG.config.simMode = GasSimMode::Off;
+    cfG.config.boundary = GasBoundary::Sealed;
+    cfT.config.enabled = false;
+    cfG.resetAmbient(cfF);
+    int cxC = 80, cyC = 40;
+    int gxC = 81, gyC = 40;
+    std::vector<int> carbonCell{FluidEngine::ci(cxC, cyC)};
+    cfR.addSameMaterialWorldCells(cfF, carbonCell, MATERIAL_CARBON, AMBIENT_TEMPERATURE_K);
+    int giC = FluidEngine::ci(gxC, gyC);
+    cfG.volume[static_cast<size_t>(giC)] = 1.0f;
+    GasComponentView o2Cell{};
+    o2Cell.count = 1;
+    o2Cell.items[0] = {SUBSTANCE_OXYGEN,
+        static_cast<float>(molesToStorageAmount(SUBSTANCE_OXYGEN, MatterPhase::Gas, 8.0, cpm))};
+    (void)cfG.tryCommitGasOccupancy(giC, o2Cell);
+    cfG.heat[static_cast<size_t>(giC)] = energyFromTemp(ThermalEngine::gasCapacity(cfG, giC), AMBIENT_TEMPERATURE_K);
+    float eCold = tryReactSolidGasSurface(cfF, cfR, cfG, cfT, giC, cxC, cyC, cO2, 1.0f);
+    emit("cold_carbon_oxygen_no_react",
+        eCold <= kExtentEps && cfR.resolveSourcePixel(cfF, cxC, cyC).fraction > 0.9f
+            && cfG.gasComponentAmount(giC, SUBSTANCE_CARBON_DIOXIDE) <= kMinGasComponent,
+        "e=" + std::to_string(eCold));
+
+    RigidBodyEngine::SourcePixel cSite = cfR.resolveSourcePixel(cfF, cxC, cyC);
+    if (cSite.valid) {
+        int biC = cfR.indexOfId(cSite.bodyId);
+        if (biC >= 0) {
+            RigidBody &bC = cfR.bodies[static_cast<size_t>(biC)];
+            float capCpx = ThermalEngine::rigidPixelCapacity(bC, cSite.localIndex);
+            if (cSite.localIndex < static_cast<int>(bC.heat.size()))
+                bC.heat[static_cast<size_t>(cSite.localIndex)] = energyFromTemp(capCpx, 950.0f);
+        }
+    }
+    float massC0 = cfR.totalSolidMass();
+    float fracC0 = cfR.resolveSourcePixel(cfF, cxC, cyC).fraction;
+    float o2Before = cfG.gasComponentAmount(giC, SUBSTANCE_OXYGEN);
+    float eHot = tryReactSolidGasSurface(cfF, cfR, cfG, cfT, giC, cxC, cyC, cO2, 1.0f);
+    cfR.finalizeChemistryEdits(cfF);
+    cSite = cfR.resolveSourcePixel(cfF, cxC, cyC);
+    emit("hot_carbon_oxygen_reacts",
+        eHot > kExtentEps && cSite.valid && cSite.fraction < fracC0
+            && cfG.gasComponentAmount(giC, SUBSTANCE_OXYGEN) < o2Before
+            && cfG.gasComponentAmount(giC, SUBSTANCE_CARBON_DIOXIDE) > kMinGasComponent
+            && cfR.totalSolidMass() < massC0,
+        "e=" + std::to_string(eHot) + " f=" + std::to_string(cSite.fraction)
+            + " co2=" + std::to_string(cfG.gasComponentAmount(giC, SUBSTANCE_CARBON_DIOXIDE)));
+    emit("carbon_fraction_and_o2_decrease",
+        cSite.valid && cSite.fraction < fracC0 && cSite.fraction >= 0.0f
+            && cfG.gasComponentAmount(giC, SUBSTANCE_OXYGEN) < o2Before
+            && cfG.gasComponentAmount(giC, SUBSTANCE_OXYGEN) >= 0.0f, "");
+    emit("co2_appears_in_gas",
+        cfG.gasComponentAmount(giC, SUBSTANCE_CARBON_DIOXIDE) > kMinGasComponent
+            && cfG.gasCompositionValid(giC), "");
+    emit("rigid_mass_decreases_with_carbon",
+        cfR.totalSolidMass() < massC0 && cfR.totalSolidMass() > 0.0f,
+        "m0=" + std::to_string(massC0) + " m1=" + std::to_string(cfR.totalSolidMass()));
+
+    if (cSite.valid) {
+        int biKeepC = cfR.indexOfId(cSite.bodyId);
+        if (biKeepC >= 0) {
+            RigidBody &bKeepC = cfR.bodies[static_cast<size_t>(biKeepC)];
+            if (cSite.localIndex < static_cast<int>(bKeepC.solidRemain.size()))
+                bKeepC.solidRemain[static_cast<size_t>(cSite.localIndex)] = 5.0e-4f;
+            float capHot = ThermalEngine::rigidPixelCapacity(bKeepC, cSite.localIndex);
+            if (cSite.localIndex < static_cast<int>(bKeepC.heat.size()))
+                bKeepC.heat[static_cast<size_t>(cSite.localIndex)] = energyFromTemp(capHot, 950.0f);
+        }
+    }
+    o2Cell.items[0].amount = static_cast<float>(molesToStorageAmount(SUBSTANCE_OXYGEN, MatterPhase::Gas, 8.0, cpm));
+    (void)cfG.tryCommitGasOccupancy(giC, o2Cell);
+    cfG.heat[static_cast<size_t>(giC)] = energyFromTemp(ThermalEngine::gasCapacity(cfG, giC), 950.0f);
+    float eGoneC = tryReactSolidGasSurface(cfF, cfR, cfG, cfT, giC, cxC, cyC, cO2, 1.0f);
+    cfR.finalizeChemistryEdits(cfF);
+    emit("consumed_carbon_pixel_removed",
+        eGoneC > kExtentEps && !cfR.resolveSourcePixel(cfF, cxC, cyC).valid
+            && cfR.worldCellMaterial(cxC, cyC) == MATERIAL_EMPTY
+            && cfR.bodyAtCell(cxC, cyC) < 0,
+        "e=" + std::to_string(eGoneC));
+    emit("consumed_carbon_does_not_respawn",
+        !cfR.resolveSourcePixel(cfF, cxC, cyC).valid && cfR.bodyAtCell(cxC, cyC) < 0, "");
+
+    FluidEngine blkF;
+    RigidBodyEngine blkR;
+    GasEngine blkG;
+    ThermalEngine blkT;
+    blkF.config.walledBorders = true;
+    blkG.config.simMode = GasSimMode::Off;
+    blkG.config.boundary = GasBoundary::Sealed;
+    blkT.config.enabled = false;
+    blkG.resetAmbient(blkF);
+    std::vector<int> cBlock;
+    for (int y = 30; y <= 32; ++y) for (int x = 30; x <= 32; ++x)
+        cBlock.push_back(FluidEngine::ci(x, y));
+    blkR.addSameMaterialWorldCells(blkF, cBlock, MATERIAL_CARBON, 950.0f);
+    int edgeGas = FluidEngine::ci(29, 31);
+    blkG.volume[static_cast<size_t>(edgeGas)] = 1.0f;
+    (void)blkG.tryCommitGasOccupancy(edgeGas, o2Cell);
+    blkG.heat[static_cast<size_t>(edgeGas)] = energyFromTemp(ThermalEngine::gasCapacity(blkG, edgeGas), 950.0f);
+    float eEdge = tryReactSolidGasSurface(blkF, blkR, blkG, blkT, edgeGas, 30, 31, cO2, 1.0f);
+    blkR.finalizeChemistryEdits(blkF);
+    RigidBodyEngine::SourcePixel interior = blkR.resolveSourcePixel(blkF, 31, 31);
+    RigidBodyEngine::SourcePixel edge = blkR.resolveSourcePixel(blkF, 30, 31);
+    bool interiorNeighbor = false;
+    constexpr int ndx[4] = {-1, 1, 0, 0};
+    constexpr int ndy[4] = {0, 0, -1, 1};
+    int egx = 29, egy = 31;
+    for (int n = 0; n < 4; ++n)
+        if (egx + ndx[n] == 31 && egy + ndy[n] == 31) interiorNeighbor = true;
+    emit("exposed_carbon_surface_reacts",
+        eEdge > kExtentEps && edge.valid && edge.fraction < 1.0f, "e=" + std::to_string(eEdge));
+    emit("interior_carbon_does_not_react",
+        !interiorNeighbor && interior.valid && interior.fraction > 0.99f,
+        "f=" + std::to_string(interior.fraction));
+
+    Inventory slotCO2{};
+    slotCO2.gas = true;
+    slotCO2.maxFill = 1.0e6f;
+    slotCO2.cellsPerMeter = cpm;
+    slotCO2.items[0] = {SUBSTANCE_AIR, 0.2f};
+    slotCO2.items[1] = {SUBSTANCE_HYDROGEN, 0.2f};
+    slotCO2.items[2] = {SUBSTANCE_OXYGEN,
+        static_cast<float>(molesToStorageAmount(SUBSTANCE_OXYGEN, MatterPhase::Gas, 1.0, cpm))};
+    slotCO2.items[3] = {SUBSTANCE_WATER, 0.2f};
+    slotCO2.count = 4;
+    slotCO2.heat = 2.0e5f;
+    recountFill(slotCO2);
+    SolidReactionInventory slotC = cInv;
+    Inventory slotTrialG = slotCO2;
+    SolidReactionInventory slotTrialC = slotC;
+    bool slotCOk = applySurfaceExtent(cO2, slotTrialC, slotTrialG, 0.1f);
+    emit("co2_slot_failure_leaves_carbon",
+        !slotCOk && near(slotTrialC.fraction, slotC.fraction)
+            && near(amountOf(slotTrialG, SUBSTANCE_OXYGEN), amountOf(slotCO2, SUBSTANCE_OXYGEN)),
+        "frac=" + std::to_string(slotTrialC.fraction));
+
+    bool cNoNeg = true;
+    for (RigidBody const &b : cfR.bodies) {
+        for (int li : b.occupiedLocal) {
+            if (li < static_cast<int>(b.solidRemain.size()) && b.solidRemain[static_cast<size_t>(li)] < -1.0e-6f)
+                cNoNeg = false;
+            if (li < static_cast<int>(b.heat.size()) && b.heat[static_cast<size_t>(li)] < -1.0e-4f)
+                cNoNeg = false;
+        }
+    }
+    for (float a : cfG.amount) if (a < -1.0e-6f) cNoNeg = false;
+    for (float h : cfG.heat) if (h < -1.0e-4f) cNoNeg = false;
+    emit("carbon_no_negative_mass_or_heat", cNoNeg, "");
 
     out << "summary\t" << (failed == 0 ? "PASS" : "FAIL") << '\t' << passed << " passed, "
         << failed << " failed\n";

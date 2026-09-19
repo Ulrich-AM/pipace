@@ -12,7 +12,7 @@ Long-term architecture (cooperating systems, not one universal solver):
 |---|---|
 | **Physics engines** (liquid / solid / gas) | How does matter with these properties move? |
 | **SACE** (Somewhat Accurate Calculator for Elements) | What is this substance, what can it become, what properties should new substances have? |
-| **Chemistry** (`ReactionDefinition` / `ReactionEngine`) | What reactions are possible, and a conservative local execute step. First player-facing reaction: `2 H2(g) + O2(g) -> 2 H2O(g)` (ignition gate ~850 K, `HomogeneousCell`). `SolidGasSurface` topology is implemented for a later C(s)+O2 path; no Carbon/CO2 yet. |
+| **Chemistry** (`ReactionDefinition` / `ReactionEngine`) | What reactions are possible, and a conservative local execute step. Player-facing reactions: `2 H2(g) + O2(g) -> 2 H2O(g)` (`HomogeneousCell`, ignition ~850 K) and `C(s) + O2(g) -> CO2(g)` (`SolidGasSurface`, ignition ~900 K). `SUBSTANCE_AIR` is not decomposed into O2/N2; Carbon does not burn in ambient Air. |
 | **World state** | Where is it, how much, temperature/pressure/phase/local conditions? |
 | **Rendering** | How should the current state be drawn? |
 
@@ -71,12 +71,13 @@ These mappings are **implementation, not laws**:
 | Current representation | Engine |
 |---|---|
 | Water + Liquid, Honey + Liquid | FluidEngine (water/honey volume channels) |
-| Wood/Glass/Metal + Solid | RigidBodyEngine (MaterialId masks) |
+| Wood/Glass/Metal/Carbon + Solid | RigidBodyEngine (MaterialId masks) |
 | Water + Solid | RigidBodyEngine (`MATERIAL_WATER_SOLID` mask, still SUBSTANCE_WATER) |
 | Stone + Solid | rigid body **or** static `solid[]` walls (`kStaticWallSubstance`) |
 | Air + Gas | GasEngine (`SUBSTANCE_AIR` component) |
 | Hydrogen + Gas | GasEngine (`SUBSTANCE_HYDROGEN` component) |
 | Oxygen + Gas | GasEngine (`SUBSTANCE_OXYGEN` component) |
+| Carbon Dioxide + Gas | GasEngine (`SUBSTANCE_CARBON_DIOXIDE` component) |
 | Water + Gas | GasEngine (`SUBSTANCE_WATER` gas component; same SubstanceId) |
 
 Static `solid[]` walls use Stone thermal/mechanical identity but are
@@ -97,8 +98,10 @@ total occupancy. `MatterSample` reports the dominant component plus fractions.
 
 Gas cells use the same pattern: `amount[]` is total cell-atmospheres; composition
 is a 4-slot SoA (`gasCompId` / `gasCompAmt` / `gasCompCount`). Air is an explicit
-`SUBSTANCE_AIR` component. Hydrogen and Oxygen are player-facing gases
-(`SUBSTANCE_HYDROGEN` / `SUBSTANCE_OXYGEN`) painted from the Gases category.
+`SUBSTANCE_AIR` component. Hydrogen, Oxygen, and Carbon Dioxide are player-facing
+gases (`SUBSTANCE_HYDROGEN` / `SUBSTANCE_OXYGEN` / `SUBSTANCE_CARBON_DIOXIDE`)
+painted from the Gases category. Ambient Air is a mixture identity and is **not**
+oxygen; Carbon combustion requires explicit `SUBSTANCE_OXYGEN`.
 Water vapor is `SUBSTANCE_WATER` + `MatterPhase::Gas`.
 Do not infer missing gas as Air. Pressure is `P = (amount/volume)*(T/T_amb)` with
 `T_amb = AMBIENT_TEMPERATURE_K`; `pressure[]` is the cached result.

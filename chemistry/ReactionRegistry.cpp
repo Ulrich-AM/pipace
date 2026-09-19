@@ -52,7 +52,37 @@ ReactionDefinition makeHydrogenCombustion() {
     return r;
 }
 
-constexpr int kReactionTableSize = 2;
+// C(s) + O2(g) -> CO2(g)
+//
+// energyChangeJPerExtent is simplified graphite-to-CO2 formation enthalpy
+// (~393.5 kJ per mole of the written reaction). Not temperature-dependent.
+//
+// minTemperatureK = 900 K is a practical sandbox ignition gate, not a
+// universal carbon autoignition temperature. Not Arrhenius kinetics.
+//
+// maxExtentPerSecond = 120 mol/s per exposed 4-neighbor interface face.
+// A full Carbon pixel at 4 cells/m is ~2940 mol, so one face consumes it
+// in tens of seconds: visible erosion, not an instant vanish. Multiple
+// exposed faces burn faster. This is a sandbox rate, not a graphite burn
+// model. Ambient SUBSTANCE_AIR is not oxygen and does not participate.
+ReactionDefinition makeCarbonCombustion() {
+    ReactionDefinition r;
+    r.id = REACTION_CARBON_COMBUSTION;
+    r.internalName = "carbon_combustion";
+    r.reactants[0] = {SUBSTANCE_CARBON, MatterPhase::Solid, 1.0f};
+    r.reactants[1] = {SUBSTANCE_OXYGEN, MatterPhase::Gas, 1.0f};
+    r.reactantCount = 2;
+    r.products[0] = {SUBSTANCE_CARBON_DIOXIDE, MatterPhase::Gas, 1.0f};
+    r.productCount = 1;
+    r.conditions.minTemperatureValid = true;
+    r.conditions.minTemperatureK = 900.0f;
+    r.energyChangeJPerExtent = -393500.0f;
+    r.topology = ReactionTopology::SolidGasSurface;
+    r.maxExtentPerSecond = 120.0f;
+    return r;
+}
+
+constexpr int kReactionTableSize = 3;
 
 } // namespace
 
@@ -60,6 +90,7 @@ ReactionDefinition const *builtinReactionTable() {
     static ReactionDefinition const table[kReactionTableSize] = {
         makeNoneReaction(),
         makeHydrogenCombustion(),
+        makeCarbonCombustion(),
     };
     return table;
 }
