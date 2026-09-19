@@ -280,13 +280,9 @@ void ShellState::applyPalette(PaletteId id, Tool &tool, MaterialId &drawMaterial
 }
 
 void ShellState::applyCategory(Category cat, Tool &tool, MaterialId &drawMaterial) {
+    (void)tool;
+    (void)drawMaterial;
     category = cat;
-    if (cat == Category::Tools)
-        return;
-    if (elementCount() <= 0)
-        return;
-    bool openWindow = (cat != Category::Energy);
-    applyPalette(elementAt(0), tool, drawMaterial, openWindow);
 }
 
 int ShellState::elementCount() const {
