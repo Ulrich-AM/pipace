@@ -91,18 +91,10 @@ bool paletteHasToolWindow(PaletteId id) {
 }
 
 void syncToolWindow(ShellState &shell, PaletteId id, bool openIfTool) {
-    if (!paletteHasToolWindow(id)) {
-        shell.toolWin.open = false;
-        shell.toolWin.userClosed = false;
-        shell.toolWin.dragging = false;
+    if (!paletteHasToolWindow(id))
         return;
-    }
-    if (!openIfTool) {
-        shell.toolWin.open = false;
-        shell.toolWin.userClosed = true;
-        shell.toolWin.dragging = false;
+    if (!openIfTool)
         return;
-    }
     shell.toolWin.userClosed = false;
     shell.toolWin.open = true;
 }
@@ -145,30 +137,30 @@ bool toolWindowCoversPoint(ShellState const &shell, int x, int y) {
 }
 
 BrushShape activeBrushShape(ShellState const &shell) {
-    switch (shell.palette) {
-        case PaletteId::Erase: return shell.tools.erase.shape;
-        case PaletteId::Brush: return shell.tools.brush.shape;
-        case PaletteId::Heat: return shell.tools.heat.shape;
-        default: return BrushShape::Circle;
+    switch (shell.editTool) {
+        case EditTool::Erase: return shell.tools.erase.shape;
+        case EditTool::Heat: return shell.tools.heat.shape;
+        case EditTool::Brush:
+        default: return shell.tools.brush.shape;
     }
 }
 
 int activeToolBrushSize(ShellState const &shell) {
-    switch (shell.palette) {
-        case PaletteId::Erase: return shell.tools.erase.brushSize;
-        case PaletteId::Brush: return shell.tools.brush.brushSize;
-        case PaletteId::Heat: return shell.tools.heat.brushSize;
-        default: return 3;
+    switch (shell.editTool) {
+        case EditTool::Erase: return shell.tools.erase.brushSize;
+        case EditTool::Heat: return shell.tools.heat.brushSize;
+        case EditTool::Brush:
+        default: return shell.tools.brush.brushSize;
     }
 }
 
 void setActiveToolBrushSize(ShellState &shell, int size) {
     size = std::clamp(size, 1, 14);
-    switch (shell.palette) {
-        case PaletteId::Erase: shell.tools.erase.brushSize = size; break;
-        case PaletteId::Brush: shell.tools.brush.brushSize = size; break;
-        case PaletteId::Heat: shell.tools.heat.brushSize = size; break;
-        default: break;
+    switch (shell.editTool) {
+        case EditTool::Erase: shell.tools.erase.brushSize = size; break;
+        case EditTool::Heat: shell.tools.heat.brushSize = size; break;
+        case EditTool::Brush:
+        default: shell.tools.brush.brushSize = size; break;
     }
 }
 
@@ -177,7 +169,9 @@ void writeBackActiveBrushSize(ShellState &shell, int size) {
 }
 
 void drawToolWindow(HDC dc, ShellState &shell) {
-    if (!shell.toolWin.open || !paletteHasToolWindow(shell.palette)) return;
+    if (!shell.toolWin.open) return;
+    PaletteId pal = paletteForEditTool(shell.editTool);
+    if (!paletteHasToolWindow(pal)) return;
     shell.ensureFonts();
     ensureToolWindowPlacement(shell);
     ToolWindowState &w = shell.toolWin;
@@ -189,12 +183,12 @@ void drawToolWindow(HDC dc, ShellState &shell) {
     int pad = 8;
 
     auto measureEnd = [&]() {
-        switch (shell.palette) {
-            case PaletteId::Erase: return 228;
-            case PaletteId::Grab: return 176;
-            case PaletteId::Brush: return 218;
-            case PaletteId::Touch: return 158;
-            case PaletteId::Heat: return 176;
+        switch (shell.editTool) {
+            case EditTool::Erase: return 228;
+            case EditTool::Grab: return 176;
+            case EditTool::Brush: return 218;
+            case EditTool::Touch: return 158;
+            case EditTool::Heat: return 176;
             default: return 128;
         }
     };
@@ -219,7 +213,7 @@ void drawToolWindow(HDC dc, ShellState &shell) {
     SetBkMode(dc, TRANSPARENT);
     SetTextColor(dc, kText);
     RECT titlePad{title.left + 12, title.top + 6, title.right, title.bottom};
-    drawLabel(dc, titlePad, shell.paletteName(shell.palette), kText, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+    drawLabel(dc, titlePad, shell.paletteName(pal), kText, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
     bool closeOver = ptIn(closeRc, shell.mouseX, shell.mouseY);
     drawButton(dc, closeRc, tr("tw_close"), closeOver ? BtnState::Hover : BtnState::Normal);
     addHit(w, title, TwTitle, "tip_tw_title");
@@ -277,8 +271,8 @@ void drawToolWindow(HDC dc, ShellState &shell) {
         y += 26;
     };
 
-    PaletteId pal = shell.palette;
-    if (pal == PaletteId::Erase) {
+    PaletteId palUi = pal;
+    if (palUi == PaletteId::Erase) {
         EraseToolSettings &s = shell.tools.erase;
         spinRow("tw_brush_size", std::to_wstring(s.brushSize), TwSpin0M, TwSpin0P, true, "tip_tw_brush_size");
         section("tw_delete");
@@ -345,6 +339,8 @@ SettingsMouseResult handleToolWindowMouseDown(ShellState &shell, int x, int y) {
         shell.toolWin.open = false;
         shell.toolWin.userClosed = true;
         shell.toolWin.dragging = false;
+        if (shell.editTool == EditTool::Brush)
+            shell.brushEnabled = false;
         return SettingsMouseResult::Consume;
     }
     if (hit == TwTitle) {
@@ -358,8 +354,8 @@ SettingsMouseResult handleToolWindowMouseDown(ShellState &shell, int x, int y) {
     auto nudgeInt = [](int &v, int d, int lo, int hi) { v = std::clamp(v + d, lo, hi); };
     auto nudgeF = [](float &v, float d, float lo, float hi) { v = std::clamp(v + d, lo, hi); };
 
-    switch (shell.palette) {
-        case PaletteId::Erase: {
+    switch (shell.editTool) {
+        case EditTool::Erase: {
             EraseToolSettings &s = shell.tools.erase;
             if (hit == TwSpin0M) nudgeInt(s.brushSize, -1, 1, 14);
             if (hit == TwSpin0P) nudgeInt(s.brushSize, 1, 1, 14);
@@ -372,7 +368,7 @@ SettingsMouseResult handleToolWindowMouseDown(ShellState &shell, int x, int y) {
             if (hit == TwGases) s.deleteGases = !s.deleteGases;
             break;
         }
-        case PaletteId::Grab: {
+        case EditTool::Grab: {
             GrabToolSettings &s = shell.tools.grab;
             if (hit == TwSpin0M) nudgeF(s.strength, -0.25f, 0.25f, 2.0f);
             if (hit == TwSpin0P) nudgeF(s.strength, 0.25f, 0.25f, 2.0f);
@@ -382,7 +378,7 @@ SettingsMouseResult handleToolWindowMouseDown(ShellState &shell, int x, int y) {
             if (hit == TwPhantom) s.phantom = !s.phantom;
             break;
         }
-        case PaletteId::Brush: {
+        case EditTool::Brush: {
             BrushToolSettings &s = shell.tools.brush;
             if (hit == TwSpin0M) nudgeInt(s.brushSize, -1, 1, 14);
             if (hit == TwSpin0P) nudgeInt(s.brushSize, 1, 1, 14);
@@ -394,7 +390,7 @@ SettingsMouseResult handleToolWindowMouseDown(ShellState &shell, int x, int y) {
                 shell.dyeSwatch = hit - TwDye0;
             break;
         }
-        case PaletteId::Touch: {
+        case EditTool::Touch: {
             TouchToolSettings &s = shell.tools.touch;
             if (hit == TwGroup) s.groupTouch = !s.groupTouch;
             if (hit == TwSpin1M && s.groupTouch) nudgeF(s.groupRadius, -1.0f, 2.0f, 24.0f);
@@ -402,7 +398,7 @@ SettingsMouseResult handleToolWindowMouseDown(ShellState &shell, int x, int y) {
             if (hit == TwToggleAnchor) s.toggleAnchor = !s.toggleAnchor;
             break;
         }
-        case PaletteId::Heat: {
+        case EditTool::Heat: {
             HeatToolSettings &s = shell.tools.heat;
             if (hit == TwSpin0M) nudgeF(s.power, -0.25f, -8.0f, 8.0f);
             if (hit == TwSpin0P) nudgeF(s.power, 0.25f, -8.0f, 8.0f);
@@ -428,20 +424,20 @@ void dragToolWindow(ShellState &shell, int x, int y) {
 bool handleToolWindowWheel(ShellState &shell, int x, int y, int wheelDelta) {
     if (!toolWindowCoversPoint(shell, x, y)) return false;
     int d = wheelDelta > 0 ? 1 : -1;
-    switch (shell.palette) {
-        case PaletteId::Erase:
+    switch (shell.editTool) {
+        case EditTool::Erase:
             shell.tools.erase.brushSize = std::clamp(shell.tools.erase.brushSize + d, 1, 14);
             return true;
-        case PaletteId::Brush:
+        case EditTool::Brush:
             shell.tools.brush.brushSize = std::clamp(shell.tools.brush.brushSize + d, 1, 14);
             return true;
-        case PaletteId::Heat:
+        case EditTool::Heat:
             shell.tools.heat.brushSize = std::clamp(shell.tools.heat.brushSize + d, 1, 14);
             return true;
-        case PaletteId::Grab:
+        case EditTool::Grab:
             shell.tools.grab.strength = std::clamp(shell.tools.grab.strength + d * 0.25f, 0.25f, 2.0f);
             return true;
-        case PaletteId::Touch:
+        case EditTool::Touch:
             if (shell.tools.touch.groupTouch)
                 shell.tools.touch.groupRadius = std::clamp(shell.tools.touch.groupRadius + static_cast<float>(d), 2.0f, 24.0f);
             return true;

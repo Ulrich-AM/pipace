@@ -101,7 +101,7 @@ inline Layout computeLayout(int clientW, int clientH) {
         int innerGaps = 9;
         int btnW = avail > 0 ? (avail - extra - innerGaps * innerGap) / L.viewCount : 26;
         btnW = std::clamp(btnW, 20, 44);
-        int groupOf[13] = {0, 0, 1, 1, 1, 1, 1, 2, 2, 2, 3, 3, 3};
+        int groupOf[13] = {0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 3, 3, 3};
         int x = viewLeft;
         for (int i = 0; i < L.viewCount; ++i) {
             if (i > 0) x += (groupOf[i] != groupOf[i - 1]) ? groupGap : innerGap;

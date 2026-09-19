@@ -113,6 +113,51 @@ enum class PaletteId : int {
     CarbonDioxide
 };
 
+// Floating-window / canvas editing mode. Separate from selected content
+// (Water, Carbon, Oxygen, …). PaletteId::Brush is a Tools item, not a material.
+enum class EditTool : uint8_t {
+    Brush = 0,
+    Erase,
+    Grab,
+    Touch,
+    Heat
+};
+
+inline PaletteId paletteForEditTool(EditTool tool) {
+    switch (tool) {
+        case EditTool::Erase: return PaletteId::Erase;
+        case EditTool::Grab: return PaletteId::Grab;
+        case EditTool::Touch: return PaletteId::Touch;
+        case EditTool::Heat: return PaletteId::Heat;
+        case EditTool::Brush:
+        default: return PaletteId::Brush;
+    }
+}
+
+inline bool isPlaceablePalette(PaletteId id) {
+    switch (id) {
+        case PaletteId::Water:
+        case PaletteId::Honey:
+        case PaletteId::Wood:
+        case PaletteId::Stone:
+        case PaletteId::Glass:
+        case PaletteId::Metal:
+        case PaletteId::Carbon:
+        case PaletteId::Wall:
+        case PaletteId::Hydrogen:
+        case PaletteId::Oxygen:
+        case PaletteId::CarbonDioxide:
+            return true;
+        default:
+            return false;
+    }
+}
+
+inline bool isEnergyPalette(PaletteId id) {
+    return id == PaletteId::Heat || id == PaletteId::Cool
+        || id == PaletteId::Pressurize || id == PaletteId::Depressurize;
+}
+
 enum class HitId : int {
     None = 0,
     SpeedMinus,

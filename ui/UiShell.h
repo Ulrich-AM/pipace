@@ -28,6 +28,9 @@ struct ShellState {
     Layout layout{};
     Category category = Category::Fluids;
     PaletteId palette = PaletteId::Water;
+    PaletteId contentPalette = PaletteId::Water;
+    EditTool editTool = EditTool::Brush;
+    bool brushEnabled = true;
     bool placeAnchored = false;
     bool placeSleeping = false;
     bool placePowder = false;
@@ -75,10 +78,14 @@ struct ShellState {
     void log(wchar_t const *line);
     void applyPalette(PaletteId id, Tool &tool, MaterialId &drawMaterial, bool openToolWindow = true);
     void applyCategory(Category cat, Tool &tool, MaterialId &drawMaterial);
+    void applyContentToActiveTool(Tool &tool, MaterialId &drawMaterial) const;
+    void enableBrushEdit(Tool &tool, MaterialId &drawMaterial);
     PaletteId elementAt(int slot) const;
     PaletteId elementAt(Category cat, int slot) const;
     int elementCount() const;
     int elementCount(Category cat) const;
+    bool paletteSlotSelected(PaletteId id) const;
+    bool normalBrushPlacementEnabled() const;
     bool hasPlacement() const;
     wchar_t const *categoryName(Category cat) const;
     wchar_t const *paletteName(PaletteId id) const;

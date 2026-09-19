@@ -97,12 +97,12 @@ struct ViewBarDef {
 ViewBarDef const kViewBar[] = {
     {HitId::ViewNorm, "bar_norm", "view_title_norm", "view_help_norm", kViewGeneral, kViewGeneralSel},
     {HitId::ViewChnk, "bar_chnk", "view_title_chnk", "view_help_chnk", kViewGeneral, kViewGeneralSel},
+    {HitId::ViewTemp, "bar_temp", "view_title_temp", "view_help_temp", kViewGeneral, kViewGeneralSel},
     {HitId::ViewFill, "bar_fill", "view_title_fill", "view_help_fill", kViewLiquid, kViewLiquidSel},
     {HitId::ViewLiqp, "bar_liqp", "view_title_liqp", "view_help_liqp", kViewLiquid, kViewLiquidSel},
     {HitId::ViewLvel, "bar_lvel", "view_title_lvel", "view_help_lvel", kViewLiquid, kViewLiquidSel},
-        {HitId::ViewLdiv, "bar_ldiv", "view_title_ldiv", "view_help_ldiv", kViewLiquid, kViewLiquidSel},
-        {HitId::ViewTemp, "bar_temp", "view_title_temp", "view_help_temp", kViewLiquid, kViewLiquidSel},
-        {HitId::ViewRgdn, "bar_rgdn", "view_title_rgdn", "view_help_rgdn", kViewSolid, kViewSolidSel},
+    {HitId::ViewLdiv, "bar_ldiv", "view_title_ldiv", "view_help_ldiv", kViewLiquid, kViewLiquidSel},
+    {HitId::ViewRgdn, "bar_rgdn", "view_title_rgdn", "view_help_rgdn", kViewSolid, kViewSolidSel},
     {HitId::ViewRgdo, "bar_rgdo", "view_title_rgdo", "view_help_rgdo", kViewSolid, kViewSolidSel},
     {HitId::ViewMois, "bar_mois", "view_title_mois", "view_help_mois", kViewSolid, kViewSolidSel},
     {HitId::ViewGasp, "bar_gasp", "view_title_gasp", "view_help_gasp", kViewGas, kViewGasSel},
@@ -164,41 +164,133 @@ void ShellState::log(wchar_t const *line) {
     if (consoleLines.size() > 80) consoleLines.erase(consoleLines.begin(), consoleLines.begin() + 20);
 }
 
-void ShellState::applyPalette(PaletteId id, Tool &tool, MaterialId &drawMaterial, bool openToolWindow) {
-    palette = id;
-    switch (id) {
-        case PaletteId::None: break;
-        case PaletteId::Water: category = Category::Fluids; tool = Tool::Water; break;
-        case PaletteId::Honey: category = Category::Fluids; tool = Tool::Water; break;
-        case PaletteId::Wood:  category = Category::Solids; tool = Tool::Rigid; drawMaterial = MATERIAL_WOOD; break;
-        case PaletteId::Stone: category = Category::Solids; tool = Tool::Rigid; drawMaterial = MATERIAL_STONE; break;
-        case PaletteId::Glass: category = Category::Solids; tool = Tool::Rigid; drawMaterial = MATERIAL_GLASS; break;
-        case PaletteId::Metal: category = Category::Solids; tool = Tool::Rigid; drawMaterial = MATERIAL_METAL; break;
-        case PaletteId::Erase: category = Category::Tools; tool = Tool::Eraser; break;
-        case PaletteId::Grab:  category = Category::Tools; tool = Tool::Grab; break;
-        case PaletteId::Brush: category = Category::Tools; tool = Tool::Brush; break;
-        case PaletteId::Touch: category = Category::Tools; tool = Tool::Touch; break;
-        case PaletteId::Wall:  category = Category::Misc; tool = Tool::Solid; break;
-        case PaletteId::Heat:  category = Category::Energy; tool = Tool::Heat; break;
-        case PaletteId::Cool:  category = Category::Energy; tool = Tool::Cool; break;
-        case PaletteId::Pressurize: category = Category::Energy; tool = Tool::Pressurize; break;
-        case PaletteId::Depressurize: category = Category::Energy; tool = Tool::Depressurize; break;
-        case PaletteId::Hydrogen: category = Category::Gases; tool = Tool::Gas; break;
-        case PaletteId::Oxygen: category = Category::Gases; tool = Tool::Gas; break;
-        case PaletteId::Carbon: category = Category::Solids; tool = Tool::Rigid; drawMaterial = MATERIAL_CARBON; break;
-        case PaletteId::CarbonDioxide: category = Category::Gases; tool = Tool::Gas; break;
+void ShellState::applyContentToActiveTool(Tool &tool, MaterialId &drawMaterial) const {
+    switch (contentPalette) {
+        case PaletteId::Honey:
+        case PaletteId::Water: tool = Tool::Water; break;
+        case PaletteId::Wood:  tool = Tool::Rigid; drawMaterial = MATERIAL_WOOD; break;
+        case PaletteId::Stone: tool = Tool::Rigid; drawMaterial = MATERIAL_STONE; break;
+        case PaletteId::Glass: tool = Tool::Rigid; drawMaterial = MATERIAL_GLASS; break;
+        case PaletteId::Metal: tool = Tool::Rigid; drawMaterial = MATERIAL_METAL; break;
+        case PaletteId::Carbon: tool = Tool::Rigid; drawMaterial = MATERIAL_CARBON; break;
+        case PaletteId::Wall:  tool = Tool::Solid; break;
+        case PaletteId::Hydrogen:
+        case PaletteId::Oxygen:
+        case PaletteId::CarbonDioxide: tool = Tool::Gas; break;
+        default: tool = Tool::Water; break;
     }
-    syncToolWindow(*this, id, openToolWindow);
+}
+
+void ShellState::enableBrushEdit(Tool &tool, MaterialId &drawMaterial) {
+    editTool = EditTool::Brush;
+    brushEnabled = true;
+    applyContentToActiveTool(tool, drawMaterial);
+    syncToolWindow(*this, PaletteId::Brush, true);
+}
+
+void ShellState::applyPalette(PaletteId id, Tool &tool, MaterialId &drawMaterial, bool openToolWindow) {
+    switch (id) {
+        case PaletteId::None:
+            palette = id;
+            break;
+        case PaletteId::Water:
+        case PaletteId::Honey:
+            palette = id;
+            contentPalette = id;
+            category = Category::Fluids;
+            enableBrushEdit(tool, drawMaterial);
+            break;
+        case PaletteId::Wood:
+        case PaletteId::Stone:
+        case PaletteId::Glass:
+        case PaletteId::Metal:
+        case PaletteId::Carbon:
+            palette = id;
+            contentPalette = id;
+            category = Category::Solids;
+            enableBrushEdit(tool, drawMaterial);
+            break;
+        case PaletteId::Wall:
+            palette = id;
+            contentPalette = id;
+            category = Category::Misc;
+            enableBrushEdit(tool, drawMaterial);
+            break;
+        case PaletteId::Hydrogen:
+        case PaletteId::Oxygen:
+        case PaletteId::CarbonDioxide:
+            palette = id;
+            contentPalette = id;
+            category = Category::Gases;
+            enableBrushEdit(tool, drawMaterial);
+            break;
+        case PaletteId::Erase:
+            palette = id;
+            category = Category::Tools;
+            tool = Tool::Eraser;
+            editTool = EditTool::Erase;
+            syncToolWindow(*this, id, openToolWindow);
+            break;
+        case PaletteId::Grab:
+            palette = id;
+            category = Category::Tools;
+            tool = Tool::Grab;
+            editTool = EditTool::Grab;
+            syncToolWindow(*this, id, openToolWindow);
+            break;
+        case PaletteId::Brush:
+            category = Category::Tools;
+            if (isPlaceablePalette(contentPalette))
+                palette = contentPalette;
+            enableBrushEdit(tool, drawMaterial);
+            break;
+        case PaletteId::Touch:
+            palette = id;
+            category = Category::Tools;
+            tool = Tool::Touch;
+            editTool = EditTool::Touch;
+            syncToolWindow(*this, id, openToolWindow);
+            break;
+        case PaletteId::Heat:
+            palette = id;
+            category = Category::Energy;
+            tool = Tool::Heat;
+            editTool = EditTool::Heat;
+            syncToolWindow(*this, id, openToolWindow);
+            break;
+        case PaletteId::Cool:
+            palette = id;
+            category = Category::Energy;
+            tool = Tool::Cool;
+            syncToolWindow(*this, id, openToolWindow);
+            break;
+        case PaletteId::Pressurize:
+            palette = id;
+            category = Category::Energy;
+            tool = Tool::Pressurize;
+            syncToolWindow(*this, id, openToolWindow);
+            break;
+        case PaletteId::Depressurize:
+            palette = id;
+            category = Category::Energy;
+            tool = Tool::Depressurize;
+            syncToolWindow(*this, id, openToolWindow);
+            break;
+    }
 }
 
 void ShellState::applyCategory(Category cat, Tool &tool, MaterialId &drawMaterial) {
     category = cat;
-    if (elementCount() <= 0) {
-        palette = PaletteId::None;
-        syncToolWindow(*this, PaletteId::None, false);
+    if (cat == Category::Tools) {
+        enableBrushEdit(tool, drawMaterial);
+        if (isPlaceablePalette(contentPalette))
+            palette = contentPalette;
         return;
     }
-    applyPalette(elementAt(0), tool, drawMaterial, false);
+    if (elementCount() <= 0)
+        return;
+    bool openWindow = (cat != Category::Energy);
+    applyPalette(elementAt(0), tool, drawMaterial, openWindow);
 }
 
 int ShellState::elementCount() const {
@@ -246,8 +338,24 @@ PaletteId ShellState::elementAt(Category cat, int slot) const {
     }
 }
 
+bool ShellState::paletteSlotSelected(PaletteId id) const {
+    if (category == Category::Tools)
+        return paletteForEditTool(editTool) == id;
+    return palette == id;
+}
+
+bool ShellState::normalBrushPlacementEnabled() const {
+    return brushEnabled && editTool == EditTool::Brush && isPlaceablePalette(contentPalette);
+}
+
 bool ShellState::hasPlacement() const {
-    return palette != PaletteId::None && palette != PaletteId::Grab && palette != PaletteId::Touch;
+    if (editTool == EditTool::Grab || editTool == EditTool::Touch)
+        return false;
+    if (editTool == EditTool::Erase || editTool == EditTool::Heat)
+        return true;
+    if (isEnergyPalette(palette) && editTool != EditTool::Brush)
+        return true;
+    return normalBrushPlacementEnabled();
 }
 
 wchar_t const *ShellState::categoryName(Category cat) const {
@@ -521,8 +629,10 @@ void drawShell(HDC dc, ShellState &shell, View const &view) {
         if (pid == PaletteId::Oxygen) fill = RGB(110, 150, 196);
         if (pid == PaletteId::Carbon) fill = RGB(45, 45, 50);
         if (pid == PaletteId::CarbonDioxide) fill = RGB(185, 185, 200);
+        if (pid == PaletteId::Brush) fill = RGB(70, 110, 150);
+        if (pid == PaletteId::Touch) fill = RGB(90, 80, 120);
         drawButton(dc, shell.layout.palSlot[i], shell.paletteName(pid),
-            btnState(shell, hid, shell.palette == pid), fill, fill);
+            btnState(shell, hid, shell.paletteSlotSelected(pid)), fill, fill);
     }
 
     fillRect(dc, L.propsCol, kPanel);
@@ -638,9 +748,9 @@ void drawShell(HDC dc, ShellState &shell, View const &view) {
         RECT note{pb.left, y, pb.right, y + 56};
         drawLabel(dc, note, tr("prop_dye_note"), kDimText, DT_LEFT | DT_TOP | DT_WORDBREAK);
     } else if (shell.category == Category::Tools) {
-        if (shell.palette == PaletteId::Grab) propLine(tr("prop_tool_grab"));
-        else if (shell.palette == PaletteId::Brush) propLine(tr("prop_tool_brush"));
-        else if (shell.palette == PaletteId::Touch) propLine(tr("prop_tool_touch"));
+        if (shell.editTool == EditTool::Grab) propLine(tr("prop_tool_grab"));
+        else if (shell.editTool == EditTool::Brush) propLine(tr("prop_tool_brush"));
+        else if (shell.editTool == EditTool::Touch) propLine(tr("prop_tool_touch"));
         else propLine(tr("prop_tool_eraser"));
         propLine(tr("prop_tool_window_hint"));
     } else if (shell.category == Category::Energy) {

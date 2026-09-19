@@ -40,7 +40,6 @@ constexpr std::array<float, 6> speedScales{{0.10f, 0.25f, 0.50f, 1.0f, 2.0f, 4.0
 size_t speedScaleIndex = 3;
 Tool activeTool = Tool::Water;
 DebugView debugView = DebugView::Normal;
-int brushRadius = 3;
 std::vector<uint32_t> eraseStrokeSeen;
 bool paused = false;
 bool mousePainting = false;
@@ -141,7 +140,7 @@ ui::View makeView() {
     v.gas = &gas;
     v.tool = activeTool;
     v.debugView = debugView;
-    v.brushRadius = brushRadius;
+    v.brushRadius = ui::activeToolBrushSize(shell);
     v.paused = paused;
     v.settingsOpen = settingsOpen;
     v.worldLook = worldLook;
@@ -162,15 +161,10 @@ void setQualityPreset(QualityPreset preset);
 void adaptAutoQuality(double worldMs);
 void paintEnergyDisc(int cx, int cy);
 void paintGasDisc(int cx, int cy);
-
-bool paletteUsesToolBrush() {
-    using ui::PaletteId;
-    return shell.palette == PaletteId::Erase || shell.palette == PaletteId::Brush
-        || shell.palette == PaletteId::Heat;
-}
+void cancelPlacementStroke();
 
 int strokeRadius() {
-    return paletteUsesToolBrush() ? ui::activeToolBrushSize(shell) : brushRadius;
+    return ui::activeToolBrushSize(shell);
 }
 
 BrushShape strokeShape() {
@@ -178,10 +172,7 @@ BrushShape strokeShape() {
 }
 
 void nudgeStrokeRadius(int delta) {
-    if (paletteUsesToolBrush())
-        ui::writeBackActiveBrushSize(shell, ui::activeToolBrushSize(shell) + delta);
-    else
-        brushRadius = std::clamp(brushRadius + delta, 1, 14);
+    ui::writeBackActiveBrushSize(shell, ui::activeToolBrushSize(shell) + delta);
 }
 
 void applySimQuality(int level) {
@@ -568,7 +559,7 @@ void ghostTint(int &r, int &g, int &b) {
     r = 214; g = 208; b = 190;
     if (activeTool == Tool::Water) {
         r = 70; g = 168; b = 214;
-        if (shell.palette == ui::PaletteId::Honey) { r = 210; g = 150; b = 48; }
+        if (shell.contentPalette == ui::PaletteId::Honey) { r = 210; g = 150; b = 48; }
         if (shell.dyeOnly || shell.dyeSwatch > 0) {
             float dr, dg, db;
             shell.dyeChannels(dr, dg, db);
@@ -601,8 +592,8 @@ void ghostTint(int &r, int &g, int &b) {
     else if (activeTool == Tool::Pressurize) { r = 200; g = 160; b = 70; }
     else if (activeTool == Tool::Depressurize) { r = 110; g = 112; b = 140; }
     else if (activeTool == Tool::Gas) {
-        if (shell.palette == ui::PaletteId::Oxygen) { r = 120; g = 160; b = 210; }
-        else if (shell.palette == ui::PaletteId::CarbonDioxide) { r = 185; g = 185; b = 200; }
+        if (shell.contentPalette == ui::PaletteId::Oxygen) { r = 120; g = 160; b = 210; }
+        else if (shell.contentPalette == ui::PaletteId::CarbonDioxide) { r = 185; g = 185; b = 200; }
         else { r = 170; g = 210; b = 220; }
     }
     else if (activeTool == Tool::Rigid) {
@@ -1055,10 +1046,15 @@ void worldTick() {
 void invalidate() { if (mainWindow) InvalidateRect(mainWindow, nullptr, FALSE); }
 
 void preparePlacement() {
-    rigid.placePowder = shell.placePowder && shell.category == ui::Category::Solids;
+    bool solidContent = shell.contentPalette == ui::PaletteId::Wood
+        || shell.contentPalette == ui::PaletteId::Stone
+        || shell.contentPalette == ui::PaletteId::Glass
+        || shell.contentPalette == ui::PaletteId::Metal
+        || shell.contentPalette == ui::PaletteId::Carbon;
+    rigid.placePowder = shell.placePowder && solidContent;
     rigid.powderParticleSize = std::clamp(shell.powderParticleSize, 1, 8);
-    rigid.placeAnchored = shell.placeAnchored && shell.category == ui::Category::Solids && !rigid.placePowder;
-    rigid.placeSleeping = shell.placeSleeping && shell.category == ui::Category::Solids
+    rigid.placeAnchored = shell.placeAnchored && solidContent && !rigid.placePowder;
+    rigid.placeSleeping = shell.placeSleeping && solidContent
         && !shell.placeAnchored && !rigid.placePowder;
 }
 
@@ -1067,17 +1063,19 @@ void cancelLineStroke() {
     lineStartX = lineStartY = lineEndX = lineEndY = -1;
 }
 
+void cancelPlacementStroke() {
+    mousePainting = false;
+    lastPaintX = lastPaintY = -1;
+    cancelLineStroke();
+    rigid.clearPending();
+}
+
 LiquidPaint liquidPaintFromShell() {
     LiquidPaint p;
-    if (shell.palette == ui::PaletteId::Brush) {
-        p.asHoney = false;
-        p.dyeOnly = shell.tools.brush.colorMode;
-        p.dyeStrength = shell.dyeStrength;
-        shell.dyeChannels(p.dyeR, p.dyeG, p.dyeB);
-        return p;
-    }
-    p.asHoney = shell.palette == ui::PaletteId::Honey;
+    p.asHoney = shell.contentPalette == ui::PaletteId::Honey;
     p.dyeOnly = shell.dyeOnly;
+    if (shell.editTool == ui::EditTool::Brush && shell.tools.brush.colorMode)
+        p.dyeOnly = true;
     p.dyeStrength = shell.dyeStrength;
     shell.dyeChannels(p.dyeR, p.dyeG, p.dyeB);
     return p;
@@ -1122,7 +1120,7 @@ void commitLineStroke() {
     preparePlacement();
     if (activeTool == Tool::Rigid) {
         rigid.clearPending();
-        rigid.paintPendingLine(lineStartX, lineStartY, lineEndX, lineEndY, brushRadius);
+        rigid.paintPendingLine(lineStartX, lineStartY, lineEndX, lineEndY, strokeRadius());
         rigid.commitPending(engine);
         rigid.syncOccupancy(engine);
         gas.handleWorldEdit(engine);
@@ -1177,9 +1175,9 @@ void paintEnergyDisc(int cx, int cy) {
 
 void paintGasDisc(int cx, int cy) {
     SubstanceId sid = SUBSTANCE_NONE;
-    if (shell.palette == ui::PaletteId::Hydrogen) sid = SUBSTANCE_HYDROGEN;
-    else if (shell.palette == ui::PaletteId::Oxygen) sid = SUBSTANCE_OXYGEN;
-    else if (shell.palette == ui::PaletteId::CarbonDioxide) sid = SUBSTANCE_CARBON_DIOXIDE;
+    if (shell.contentPalette == ui::PaletteId::Hydrogen) sid = SUBSTANCE_HYDROGEN;
+    else if (shell.contentPalette == ui::PaletteId::Oxygen) sid = SUBSTANCE_OXYGEN;
+    else if (shell.contentPalette == ui::PaletteId::CarbonDioxide) sid = SUBSTANCE_CARBON_DIOXIDE;
     if (sid == SUBSTANCE_NONE) return;
     gas.applyGasBrush(engine, cx, cy, strokeRadius(), sid,
         gas.config.brushAtmPerSec * std::max(0.25f, shell.heatPower), PHYSICS_DT, strokeShape());
@@ -1204,7 +1202,7 @@ void beginPaintStroke(int x, int y) {
         gas.handleWorldEdit(engine);
         return;
     }
-    if (activeTool == Tool::Rigid) rigid.paintPendingDisc(lastPaintX, lastPaintY, brushRadius);
+    if (activeTool == Tool::Rigid) rigid.paintPendingDisc(lastPaintX, lastPaintY, strokeRadius());
     else {
         engine.paintDisc(lastPaintX, lastPaintY, paintTool(), strokeRadius(), liquidPaintFromShell(), strokeShape());
         engine.finalizePaint();
@@ -1232,7 +1230,7 @@ void continuePaintStroke(int x, int y) {
         lastPaintX = gx; lastPaintY = gy;
         return;
     }
-    if (activeTool == Tool::Rigid) rigid.paintPendingLine(lastPaintX, lastPaintY, gx, gy, brushRadius);
+    if (activeTool == Tool::Rigid) rigid.paintPendingLine(lastPaintX, lastPaintY, gx, gy, strokeRadius());
     else {
         engine.paintLine(lastPaintX, lastPaintY, gx, gy, paintTool(), strokeRadius(), liquidPaintFromShell(), strokeShape());
         engine.finalizePaint();
@@ -1252,29 +1250,25 @@ LRESULT CALLBACK wndProc(HWND hwnd, UINT message, WPARAM wp, LPARAM lp) {
             ui::MenuCmd settingsCmd = ui::MenuCmd::None;
             ui::SettingsMouseResult settingsHit = ui::handleSettingsMouseDown(shell, view, x, y, settingsCmd);
             if (settingsHit == ui::SettingsMouseResult::Drag) {
-                mousePainting = false;
-                cancelLineStroke();
+                cancelPlacementStroke();
                 invalidate();
                 return 0;
             }
             if (settingsHit != ui::SettingsMouseResult::Miss) {
                 if (settingsHit == ui::SettingsMouseResult::Command) handleMenuCommand(settingsCmd);
-                mousePainting = false;
-                cancelLineStroke();
+                cancelPlacementStroke();
                 ReleaseCapture();
                 invalidate();
                 return 0;
             }
             ui::SettingsMouseResult toolHit = ui::handleToolWindowMouseDown(shell, x, y);
             if (toolHit == ui::SettingsMouseResult::Drag) {
-                mousePainting = false;
-                cancelLineStroke();
+                cancelPlacementStroke();
                 invalidate();
                 return 0;
             }
             if (toolHit != ui::SettingsMouseResult::Miss) {
-                mousePainting = false;
-                cancelLineStroke();
+                cancelPlacementStroke();
                 ReleaseCapture();
                 invalidate();
                 return 0;
@@ -1287,8 +1281,7 @@ LRESULT CALLBACK wndProc(HWND hwnd, UINT message, WPARAM wp, LPARAM lp) {
                     shell.consoleFocused = false;
                 }
                 handleHit(hit);
-                mousePainting = false;
-                cancelLineStroke();
+                cancelPlacementStroke();
                 ReleaseCapture();
                 invalidate();
                 return 0;
@@ -1395,11 +1388,20 @@ LRESULT CALLBACK wndProc(HWND hwnd, UINT message, WPARAM wp, LPARAM lp) {
                 mouseGrabbing = false;
             }
             if (linePainting) {
-                commitLineStroke();
+                if (shell.hasPlacement())
+                    commitLineStroke();
+                else {
+                    cancelLineStroke();
+                    rigid.clearPending();
+                }
             } else if (activeTool == Tool::Rigid && mousePainting) {
-                rigid.commitPending(engine);
-                rigid.syncOccupancy(engine);
-                gas.handleWorldEdit(engine);
+                if (shell.normalBrushPlacementEnabled()) {
+                    rigid.commitPending(engine);
+                    rigid.syncOccupancy(engine);
+                    gas.handleWorldEdit(engine);
+                } else {
+                    rigid.clearPending();
+                }
             }
             else if (mousePainting) engine.flushPaintDirty();
             mousePainting = false; lastPaintX = lastPaintY = -1; ReleaseCapture();
@@ -1459,7 +1461,7 @@ LRESULT CALLBACK wndProc(HWND hwnd, UINT message, WPARAM wp, LPARAM lp) {
             }
             if (wp == VK_ESCAPE) {
                 if (linePainting) {
-                    cancelLineStroke();
+                    cancelPlacementStroke();
                     shell.mouseDown = false;
                     ReleaseCapture();
                     invalidate();
@@ -1475,10 +1477,10 @@ LRESULT CALLBACK wndProc(HWND hwnd, UINT message, WPARAM wp, LPARAM lp) {
                 invalidate();
                 return 0;
             }
-            if (wp == '1') shell.applyCategory(ui::Category::Tools, activeTool, rigid.drawMaterial);
-            else if (wp == '2') shell.applyCategory(ui::Category::Fluids, activeTool, rigid.drawMaterial);
-            else if (wp == '3') shell.applyCategory(ui::Category::Solids, activeTool, rigid.drawMaterial);
-            else if (wp == '4') shell.applyCategory(ui::Category::Misc, activeTool, rigid.drawMaterial);
+            if (wp == '1') { cancelPlacementStroke(); shell.applyCategory(ui::Category::Tools, activeTool, rigid.drawMaterial); }
+            else if (wp == '2') { cancelPlacementStroke(); shell.applyCategory(ui::Category::Fluids, activeTool, rigid.drawMaterial); }
+            else if (wp == '3') { cancelPlacementStroke(); shell.applyCategory(ui::Category::Solids, activeTool, rigid.drawMaterial); }
+            else if (wp == '4') { cancelPlacementStroke(); shell.applyCategory(ui::Category::Misc, activeTool, rigid.drawMaterial); }
             else if (wp == VK_SPACE) paused = !paused; else if (wp == 'S' && paused) worldTick();
             else if (wp == 'A') engine.config.velocityAdvection = nextVelocityAdvection(engine.config.velocityAdvection);
             else if (wp == VK_OEM_4) nudgeStrokeRadius(-1); else if (wp == VK_OEM_6) nudgeStrokeRadius(1);
@@ -1505,7 +1507,8 @@ LRESULT CALLBACK wndProc(HWND hwnd, UINT message, WPARAM wp, LPARAM lp) {
             }
             if (inCanvas(p.x, p.y) && !(settingsOpen && ui::settingsCoversPoint(shell, p.x, p.y))) {
                 bool hand = activeTool == Tool::Grab || activeTool == Tool::Touch;
-                SetCursor(LoadCursor(nullptr, hand ? IDC_HAND : IDC_CROSS));
+                bool paint = shell.hasPlacement();
+                SetCursor(LoadCursor(nullptr, hand ? IDC_HAND : (paint ? IDC_CROSS : IDC_ARROW)));
                 return TRUE;
             }
             SetCursor(LoadCursor(nullptr, IDC_ARROW));
