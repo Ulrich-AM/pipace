@@ -275,6 +275,41 @@ void runPhaseTransferDiagnostics() {
         !supportsLiveLiquidGasTransition(SUBSTANCE_NONE)
             && !supportsLiveLiquidGasTransition(static_cast<SubstanceId>(0xFFFF)), "");
 
+    emit("live_sl_water_eligible",
+        supportsLiveSolidLiquidTransition(SUBSTANCE_WATER)
+            && canTransition(SUBSTANCE_WATER, MatterPhase::Solid, MatterPhase::Liquid)
+            && canTransition(SUBSTANCE_WATER, MatterPhase::Liquid, MatterPhase::Solid)
+            && rigidMaterialForSubstance(SUBSTANCE_WATER) == MATERIAL_WATER_SOLID, "");
+    emit("live_sl_honey_not_eligible",
+        !supportsLiveSolidLiquidTransition(SUBSTANCE_HONEY), "");
+    emit("live_sl_carbon_not_eligible",
+        !supportsLiveSolidLiquidTransition(SUBSTANCE_CARBON), "");
+    emit("live_sl_stone_glass_metal_not_eligible",
+        !supportsLiveSolidLiquidTransition(SUBSTANCE_STONE)
+            && !supportsLiveSolidLiquidTransition(SUBSTANCE_GLASS)
+            && !supportsLiveSolidLiquidTransition(SUBSTANCE_METAL), "");
+    emit("live_sl_none_not_eligible",
+        !supportsLiveSolidLiquidTransition(SUBSTANCE_NONE)
+            && !supportsLiveSolidLiquidTransition(static_cast<SubstanceId>(0xFFFF)), "");
+    emit("live_lg_water_still_eligible",
+        supportsLiveLiquidGasTransition(SUBSTANCE_WATER), "");
+
+    GasComponentView airOnly{};
+    airOnly.items[0] = {SUBSTANCE_AIR, 1.0f};
+    airOnly.count = 1;
+    GasComponentView waterVaporView{};
+    waterVaporView.items[0] = {SUBSTANCE_WATER, 0.25f};
+    waterVaporView.count = 1;
+    GasComponentView mixedView{};
+    mixedView.items[0] = {SUBSTANCE_AIR, 0.8f};
+    mixedView.items[1] = {SUBSTANCE_WATER, 0.2f};
+    mixedView.count = 2;
+    emit("vapor_gate_reads_component_view",
+        !gasViewHasLiveLiquidGasVapor(airOnly)
+            && gasViewHasLiveLiquidGasVapor(waterVaporView)
+            && gasViewHasLiveLiquidGasVapor(mixedView),
+        "Air-only is not a live volatile; Water component identity is");
+
     out << "summary\t" << (failed == 0 ? "PASS" : "FAIL") << '\t'
         << passed << " passed, " << failed << " failed\n";
 }

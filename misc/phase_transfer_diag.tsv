@@ -40,4 +40,16 @@ test	sat_pressure_rises_with_temperature	PASS	Psat(Tb+25)=230976.59338
 test	sat_temperature_rises_with_pressure	PASS	Tsat(2atm)=393.959004308
 test	low_pressure_lowers_boiling_temperature	PASS	Tsat(0.1atm)=317.448820753
 test	sat_helpers_roundtrip_near_tb	PASS	P=151987.5 Tsat=385.047126704 Psat(Tsat)=151987.5
-summary	PASS	42 passed, 0 failed
+test	live_lg_water_liquid_gas_eligible	PASS	
+test	live_lg_honey_not_eligible	PASS	
+test	live_lg_co2_not_eligible	PASS	
+test	live_lg_carbon_not_eligible	PASS	
+test	live_lg_none_not_eligible	PASS	
+test	live_sl_water_eligible	PASS	
+test	live_sl_honey_not_eligible	PASS	
+test	live_sl_carbon_not_eligible	PASS	
+test	live_sl_stone_glass_metal_not_eligible	PASS	
+test	live_sl_none_not_eligible	PASS	
+test	live_lg_water_still_eligible	PASS	
+test	vapor_gate_reads_component_view	PASS	Air-only is not a live volatile; Water component identity is
+summary	PASS	54 passed, 0 failed

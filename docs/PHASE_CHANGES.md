@@ -1,10 +1,10 @@
 # Phase changes — design note
 
 This is the next milestone after the Substance / MatterPhase architecture pass.
-Live **Liquid ⇄ Gas** is generic (`world/PhaseChangeEngine.cpp`) and driven by
-`SubstanceId` + `PhaseProperties`. Water is currently the only built-in that
-meets both-endpoint eligibility. Live **Solid ⇄ Liquid** is still Water-specific
-(`world/WaterPhaseChange.cpp`). Honey mixtures do not boil or freeze yet.
+Live **Liquid ⇄ Gas** and **Solid ⇄ Liquid** are generic (`world/PhaseChangeEngine.cpp`)
+and driven by `SubstanceId` + `PhaseProperties`. Water is currently the only
+built-in that meets both-endpoint eligibility. Honey mixtures do not boil or
+freeze yet.
 
 Target first: **water** `solid ⇄ liquid ⇄ gas` using the existing `SUBSTANCE_WATER`
 id. There will be no `SUBSTANCE_ICE` or `SUBSTANCE_STEAM`.
@@ -21,10 +21,10 @@ Today water is only simulated as liquid (`FluidEngine` volume). Capability flags
 already say it can be solid and gas. Those flags are metadata, not transfer.
 
 Mass/fill/gas-amount conversion helpers live in `substance/PhaseTransfer.h`.
-Live **Liquid ⇄ Gas** transfer is in `world/PhaseChangeEngine.cpp` (Water
-uses this path; Honey/CO2/Carbon are ineligible with current metadata).
-Live **water liquid ⇄ solid** (rigid `MATERIAL_WATER_SOLID`, still
-`SUBSTANCE_WATER`) is in `world/WaterPhaseChange.cpp`. Honey mixtures do not boil or freeze yet.
+Live **Liquid ⇄ Gas** and **Solid ⇄ Liquid** transfer is in
+`world/PhaseChangeEngine.cpp` (Water uses this path; Honey/CO2/Carbon/Stone/Glass/Metal
+are ineligible with current metadata). `WaterPhaseChange.cpp` is a diagnostics
+and compatibility wrapper only. Honey mixtures do not boil or freeze yet.
 
 Vapor placement: the occupancy model is one primary medium per cell, and liquid
 with `fill >= MIN_PRESSURE_FILL` has zero gas volume. Boiling deposits vapor
@@ -80,18 +80,17 @@ lab apparatus except where noted.
 
 ## Implementation status
 
-Live Liquid ⇄ Gas is generic (`world/PhaseChangeEngine.cpp`). Only substances
-whose registered capabilities support both liquid and gas endpoints, and whose
-saturation/latent/molar-mass data are valid, are eligible. Water is eligible.
-Honey, CO2, and Carbon are not (do not change their capabilities to force it).
-Live Solid ⇄ Liquid remains Water-specific. Remaining:
+Live Liquid ⇄ Gas and Solid ⇄ Liquid are generic (`world/PhaseChangeEngine.cpp`).
+Only substances whose registered capabilities support both endpoints, and whose
+mass/latent data are valid, are eligible. Water is eligible. Honey, CO2, Carbon,
+Stone, Glass, and Metal are not (do not change their capabilities to force it).
+Remaining:
 
 1. Mixture thermodynamics (honey/water must not boil/freeze until then).
 2. Same-cell liquid/gas occupancy if the one-primary-medium model is relaxed.
 3. Rigid/fluid buoyancy may not yet make ice float; do not add a special ice force.
 4. Clausius–Clapeyron is a two-parameter approximation near the reference
    boiling point, not a steam table / critical-point model.
-5. Generic Solid ⇄ Liquid (Phase Change Generalization - Phase 2).
 
 ## Invariants
 
