@@ -9,6 +9,7 @@ using ReactionId = uint16_t;
 
 constexpr ReactionId REACTION_NONE = 0;
 constexpr ReactionId REACTION_HYDROGEN_COMBUSTION = 1;
+constexpr ReactionId REACTION_CARBON_COMBUSTION = 2;
 
 // How participating matter is arranged in the world. Do not infer from names.
 enum class ReactionTopology : uint8_t {

@@ -108,7 +108,9 @@ enum class PaletteId : int {
     Pressurize,
     Depressurize,
     Hydrogen,
-    Oxygen
+    Oxygen,
+    Carbon,
+    CarbonDioxide
 };
 
 enum class HitId : int {

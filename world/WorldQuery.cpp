@@ -89,7 +89,7 @@ void runSubstancePhaseDiagnostics(FluidEngine &fluid, RigidBodyEngine &rigid, Ga
         "glass liquid-capable without a fluid table");
     emit("supports_metal_liquid_no_fluid",
         supportsPhase(SUBSTANCE_METAL, MatterPhase::Liquid) && !hasFluidProperties(SUBSTANCE_METAL), "");
-    emit("no_ice_id", SUBSTANCE_COUNT == 10 && substanceFromInternalName("ice") == SUBSTANCE_NONE, "");
+    emit("no_ice_id", SUBSTANCE_COUNT == 12 && substanceFromInternalName("ice") == SUBSTANCE_NONE, "");
     emit("no_steam_id", substanceFromInternalName("steam") == SUBSTANCE_NONE, "");
     emit("no_current_phase_on_def", true, "SubstanceDefinition stores capability flags only");
     emit("water_has_fluid", hasFluidProperties(SUBSTANCE_WATER) && hasPropertiesForPhase(SUBSTANCE_WATER, MatterPhase::Liquid), "");
@@ -105,6 +105,13 @@ void runSubstancePhaseDiagnostics(FluidEngine &fluid, RigidBodyEngine &rigid, Ga
     emit("oxygen_has_gas",
         hasGasProperties(SUBSTANCE_OXYGEN) && supportsPhase(SUBSTANCE_OXYGEN, MatterPhase::Gas)
             && !supportsPhase(SUBSTANCE_OXYGEN, MatterPhase::Liquid), "");
+    emit("carbon_has_solid",
+        hasMechanicalProperties(SUBSTANCE_CARBON) && supportsPhase(SUBSTANCE_CARBON, MatterPhase::Solid)
+            && !supportsPhase(SUBSTANCE_CARBON, MatterPhase::Gas)
+            && rigidIdentityForMaterial(MATERIAL_CARBON).substance == SUBSTANCE_CARBON, "");
+    emit("co2_has_gas",
+        hasGasProperties(SUBSTANCE_CARBON_DIOXIDE) && supportsPhase(SUBSTANCE_CARBON_DIOXIDE, MatterPhase::Gas)
+            && !supportsPhase(SUBSTANCE_CARBON_DIOXIDE, MatterPhase::Solid), "");
     emit("plasma_unsupported", !supportsPhase(SUBSTANCE_WATER, MatterPhase::Plasma), "");
     emit("none_phase_unsupported", !supportsPhase(SUBSTANCE_WATER, MatterPhase::None), "");
     emit("invalid_id_no_phase", !supportsPhase(999, MatterPhase::Liquid) && !supportsPhase(999, MatterPhase::Solid), "");

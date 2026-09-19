@@ -165,7 +165,7 @@ void runPhaseTransferDiagnostics() {
         "fill=" + f8(iceBack.destinationAmountAdded));
 
     emit("no_ice_substance_id",
-        SUBSTANCE_COUNT == 10 && substanceFromInternalName("ice") == SUBSTANCE_NONE, "");
+        SUBSTANCE_COUNT == 12 && substanceFromInternalName("ice") == SUBSTANCE_NONE, "");
     emit("no_steam_substance_id",
         substanceFromInternalName("steam") == SUBSTANCE_NONE, "");
 

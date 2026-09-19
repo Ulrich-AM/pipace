@@ -76,6 +76,8 @@ void seedEnglish() {
     set("el_depressurize", L"DEPRESSURIZE");
     set("el_hydrogen", L"HYDROGEN");
     set("el_oxygen", L"OXYGEN");
+    set("el_carbon", L"CARBON");
+    set("el_carbon_dioxide", L"CARBON DIOXIDE");
 
     set("hint_water", L"Free-surface liquid. Paint into the world. Shift+drag previews a straight line; release to place.");
     set("hint_honey", L"Thicker, denser liquid. Mixes with water. Dye it from Properties. Shift+drag previews a straight line; release to place.");
@@ -93,7 +95,9 @@ void seedEnglish() {
     set("hint_pressurize", L"Adds air under the brush, raising gas pressure. Does not add liquid. Not a substance.");
     set("hint_depressurize", L"Removes air under the brush, lowering gas pressure. Does not remove liquid. Not a substance.");
     set("hint_hydrogen", L"A light flammable gas. Reacts with oxygen when sufficiently heated.");
-    set("hint_oxygen", L"An oxidizing gas. Supports reactions with fuels such as hydrogen.");
+    set("hint_oxygen", L"An oxidizing gas. Supports reactions with fuels such as hydrogen and carbon.");
+    set("hint_carbon", L"Dense brittle graphite-like solid. Burns at a hot surface if explicit oxygen is present. Ambient air is not oxygen.");
+    set("hint_carbon_dioxide", L"A heavy colorless gas. Shown with a faint identification tint. Product of carbon burning in oxygen.");
     set("hint_none", L"Nothing in this tab yet.");
 
     set("view_normal", L"NORM");
@@ -185,11 +189,13 @@ void seedEnglish() {
     set("prop_material_stone", L"Material: stone");
     set("prop_material_glass", L"Material: glass");
     set("prop_material_metal", L"Material: metal");
+    set("prop_material_carbon", L"Material: carbon");
     set("prop_substance_water", L"Substance: water");
     set("prop_substance_honey", L"Substance: honey");
     set("prop_substance_hydrogen", L"Substance: hydrogen");
     set("prop_substance_oxygen", L"Substance: oxygen");
-    set("prop_gases_note", L"Injects into existing air. Mix hydrogen with oxygen, then heat past ignition.");
+    set("prop_substance_carbon_dioxide", L"Substance: carbon dioxide");
+    set("prop_gases_note", L"Injects into existing air. Ambient air is not oxygen. Mix hydrogen with oxygen, or carbon with oxygen, then heat past ignition.");
     set("prop_fill_paint", L"Fill: paint to 100%");
     set("prop_dye_mode", L"Paint: dye only (no new fill)");
     set("prop_dye", L"Dye");
@@ -299,6 +305,8 @@ void seedEnglish() {
     set("ins_mat_air", L"Air");
     set("ins_mat_hydrogen", L"Hydrogen");
     set("ins_mat_oxygen", L"Oxygen");
+    set("ins_mat_carbon", L"Carbon");
+    set("ins_mat_carbon_dioxide", L"Carbon Dioxide");
     set("ins_mat_none", L"(none)");
     set("ins_substance", L"Substance: {0}");
     set("ins_substance_dominant", L"Substance: {0} (dominant)");
@@ -536,8 +544,8 @@ void seedEnglish() {
     set("tip_gas_scene", L"Load this prepared air test. Turns the air solver on if it was off.");
     set("tip_cat_tools", L"Eraser and grab. Tools change how you edit the world, not what material you spawn.");
     set("tip_cat_fluids", L"Paintable liquids. Water is the current free-surface engine.");
-    set("tip_cat_solids", L"Drawable rigid bodies. Wood, stone, glass, and metal share the same solver with different density and strength.");
-    set("tip_cat_gases", L"Paintable gases. Hydrogen and oxygen mix with air. Heat a hydrogen-oxygen mixture past ignition to form water vapor.");
+    set("tip_cat_solids", L"Drawable rigid bodies. Wood, stone, glass, metal, and carbon share the same solver with different density and strength.");
+    set("tip_cat_gases", L"Paintable gases. Hydrogen, oxygen, and carbon dioxide mix with air. Ambient air is not oxygen. Heat hydrogen-oxygen past ignition for water vapor, or a hot carbon-oxygen surface for CO2.");
     set("tip_cat_plasma", L"Nothing in this tab yet.");
     set("tip_cat_energy", L"Heat, cool, pressurize, and depressurize. These add or remove energy or air; they are not substances.");
     set("tip_cat_misc", L"Static world walls. These do not move.");

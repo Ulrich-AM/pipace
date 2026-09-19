@@ -12,7 +12,8 @@ constexpr MaterialId MATERIAL_STONE = 2;
 constexpr MaterialId MATERIAL_GLASS = 3;
 constexpr MaterialId MATERIAL_METAL = 4;
 constexpr MaterialId MATERIAL_WATER_SOLID = 5; // compatibility mask for SUBSTANCE_WATER + Solid
-constexpr MaterialId MATERIAL_COUNT = 6;
+constexpr MaterialId MATERIAL_CARBON = 6;
+constexpr MaterialId MATERIAL_COUNT = 7;
 // Rigid source masks still store MaterialId. Map to engine identity with
 // substanceForMaterial(). MATERIAL_WATER_SOLID is not a SubstanceId.
 
@@ -106,6 +107,7 @@ inline MaterialDefinition const &materialDef(MaterialId id) {
         materialDefinitionFromSubstance(substanceDef(substanceForMaterialId(3))),
         materialDefinitionFromSubstance(substanceDef(substanceForMaterialId(4))),
         materialDefinitionFromSubstance(substanceDef(substanceForMaterialId(5))),
+        materialDefinitionFromSubstance(substanceDef(substanceForMaterialId(6))),
     };
     if (id >= MATERIAL_COUNT) return defs[0];
     return defs[id];

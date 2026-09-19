@@ -19,7 +19,9 @@ constexpr SubstanceId SUBSTANCE_METAL = 6;
 constexpr SubstanceId SUBSTANCE_AIR = 7;
 constexpr SubstanceId SUBSTANCE_HYDROGEN = 8;
 constexpr SubstanceId SUBSTANCE_OXYGEN = 9;
-constexpr SubstanceId SUBSTANCE_COUNT = 10;
+constexpr SubstanceId SUBSTANCE_CARBON = 10;
+constexpr SubstanceId SUBSTANCE_CARBON_DIOXIDE = 11;
+constexpr SubstanceId SUBSTANCE_COUNT = 12;
 
 // Static world walls currently use the stone solid table. This is an explicit
 // world-boundary identity, not a rule that every future solid is stone.
@@ -206,6 +208,7 @@ inline SubstanceId substanceForMaterialId(uint16_t materialId) {
         case 3: return SUBSTANCE_GLASS;
         case 4: return SUBSTANCE_METAL;
         case 5: return SUBSTANCE_WATER; // MATERIAL_WATER_SOLID — still WATER
+        case 6: return SUBSTANCE_CARBON;
         default: return SUBSTANCE_NONE;
     }
 }

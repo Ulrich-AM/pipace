@@ -602,6 +602,7 @@ void ghostTint(int &r, int &g, int &b) {
     else if (activeTool == Tool::Depressurize) { r = 110; g = 112; b = 140; }
     else if (activeTool == Tool::Gas) {
         if (shell.palette == ui::PaletteId::Oxygen) { r = 120; g = 160; b = 210; }
+        else if (shell.palette == ui::PaletteId::CarbonDioxide) { r = 185; g = 185; b = 200; }
         else { r = 170; g = 210; b = 220; }
     }
     else if (activeTool == Tool::Rigid) {
@@ -1178,6 +1179,7 @@ void paintGasDisc(int cx, int cy) {
     SubstanceId sid = SUBSTANCE_NONE;
     if (shell.palette == ui::PaletteId::Hydrogen) sid = SUBSTANCE_HYDROGEN;
     else if (shell.palette == ui::PaletteId::Oxygen) sid = SUBSTANCE_OXYGEN;
+    else if (shell.palette == ui::PaletteId::CarbonDioxide) sid = SUBSTANCE_CARBON_DIOXIDE;
     if (sid == SUBSTANCE_NONE) return;
     gas.applyGasBrush(engine, cx, cy, strokeRadius(), sid,
         gas.config.brushAtmPerSec * std::max(0.25f, shell.heatPower), PHYSICS_DT, strokeShape());

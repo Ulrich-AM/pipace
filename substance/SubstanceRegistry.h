@@ -19,6 +19,7 @@ inline MaterialId rigidMaterialForSubstance(SubstanceId substance) {
         case SUBSTANCE_GLASS: return MATERIAL_GLASS;
         case SUBSTANCE_METAL: return MATERIAL_METAL;
         case SUBSTANCE_WATER: return MATERIAL_WATER_SOLID;
+        case SUBSTANCE_CARBON: return MATERIAL_CARBON;
         default: return MATERIAL_EMPTY;
     }
 }

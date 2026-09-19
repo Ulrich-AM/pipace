@@ -185,6 +185,8 @@ void ShellState::applyPalette(PaletteId id, Tool &tool, MaterialId &drawMaterial
         case PaletteId::Depressurize: category = Category::Energy; tool = Tool::Depressurize; break;
         case PaletteId::Hydrogen: category = Category::Gases; tool = Tool::Gas; break;
         case PaletteId::Oxygen: category = Category::Gases; tool = Tool::Gas; break;
+        case PaletteId::Carbon: category = Category::Solids; tool = Tool::Rigid; drawMaterial = MATERIAL_CARBON; break;
+        case PaletteId::CarbonDioxide: category = Category::Gases; tool = Tool::Gas; break;
     }
     syncToolWindow(*this, id, openToolWindow);
 }
@@ -207,10 +209,10 @@ int ShellState::elementCount(Category cat) const {
     switch (cat) {
         case Category::Tools: return 4;
         case Category::Fluids: return 2;
-        case Category::Solids: return 4;
+        case Category::Solids: return 5;
         case Category::Misc: return 1;
         case Category::Energy: return 1;
-        case Category::Gases: return 2;
+        case Category::Gases: return 3;
         default: return 0;
     }
 }
@@ -231,12 +233,15 @@ PaletteId ShellState::elementAt(Category cat, int slot) const {
             if (slot == 1) return PaletteId::Stone;
             if (slot == 2) return PaletteId::Glass;
             if (slot == 3) return PaletteId::Metal;
+            if (slot == 4) return PaletteId::Carbon;
             return PaletteId::Wood;
         case Category::Misc: return PaletteId::Wall;
         case Category::Energy:
             return PaletteId::Heat;
         case Category::Gases:
-            return slot == 1 ? PaletteId::Oxygen : PaletteId::Hydrogen;
+            if (slot == 1) return PaletteId::Oxygen;
+            if (slot == 2) return PaletteId::CarbonDioxide;
+            return PaletteId::Hydrogen;
         default: return PaletteId::None;
     }
 }
@@ -277,6 +282,8 @@ wchar_t const *ShellState::paletteName(PaletteId id) const {
         case PaletteId::Depressurize: return tr("el_depressurize");
         case PaletteId::Hydrogen: return tr("el_hydrogen");
         case PaletteId::Oxygen: return tr("el_oxygen");
+        case PaletteId::Carbon: return tr("el_carbon");
+        case PaletteId::CarbonDioxide: return tr("el_carbon_dioxide");
         case PaletteId::None:  return L"";
     }
     return L"";
@@ -301,6 +308,8 @@ wchar_t const *ShellState::paletteHint(PaletteId id) const {
         case PaletteId::Depressurize: return tr("hint_depressurize");
         case PaletteId::Hydrogen: return tr("hint_hydrogen");
         case PaletteId::Oxygen: return tr("hint_oxygen");
+        case PaletteId::Carbon: return tr("hint_carbon");
+        case PaletteId::CarbonDioxide: return tr("hint_carbon_dioxide");
         case PaletteId::None:  return tr("hint_none");
     }
     return L"";
@@ -510,6 +519,8 @@ void drawShell(HDC dc, ShellState &shell, View const &view) {
         if (pid == PaletteId::Depressurize) fill = RGB(70, 72, 92);
         if (pid == PaletteId::Hydrogen) fill = RGB(150, 190, 205);
         if (pid == PaletteId::Oxygen) fill = RGB(110, 150, 196);
+        if (pid == PaletteId::Carbon) fill = RGB(45, 45, 50);
+        if (pid == PaletteId::CarbonDioxide) fill = RGB(185, 185, 200);
         drawButton(dc, shell.layout.palSlot[i], shell.paletteName(pid),
             btnState(shell, hid, shell.palette == pid), fill, fill);
     }
@@ -588,6 +599,7 @@ void drawShell(HDC dc, ShellState &shell, View const &view) {
         if (shell.palette == PaletteId::Stone) propLine(tr("prop_material_stone"));
         else if (shell.palette == PaletteId::Glass) propLine(tr("prop_material_glass"));
         else if (shell.palette == PaletteId::Metal) propLine(tr("prop_material_metal"));
+        else if (shell.palette == PaletteId::Carbon) propLine(tr("prop_material_carbon"));
         else propLine(tr("prop_material_wood"));
     } else if (shell.category == Category::Fluids) {
         propLine(shell.palette == PaletteId::Honey ? tr("prop_substance_honey") : tr("prop_substance_water"));
@@ -636,6 +648,7 @@ void drawShell(HDC dc, ShellState &shell, View const &view) {
         propLine(tr("prop_tool_window_hint"));
     } else if (shell.category == Category::Gases) {
         if (shell.palette == PaletteId::Oxygen) propLine(tr("prop_substance_oxygen"));
+        else if (shell.palette == PaletteId::CarbonDioxide) propLine(tr("prop_substance_carbon_dioxide"));
         else propLine(tr("prop_substance_hydrogen"));
         propLine(tr("prop_gases_note"));
     } else if (shell.category == Category::Misc) {
