@@ -84,7 +84,10 @@ Live Liquid ⇄ Gas and Solid ⇄ Liquid are generic (`world/PhaseChangeEngine.c
 Only substances whose registered capabilities support both endpoints, and whose
 mass/latent data are valid, are eligible. Water is eligible. Honey, CO2, Carbon,
 Stone, Glass, and Metal are not (do not change their capabilities to force it).
-Remaining:
+Sub-pixel pending solid (`solidifyPendingKg` / `solidifyPendingHeatJ`) carries
+mass and sensible energy and participates in normal ThermalEngine conduction as
+an extra reservoir in the same cell; it is not the primary `resolveNode()`
+thermal node. Remaining:
 
 1. Mixture thermodynamics (honey/water must not boil/freeze until then).
 2. Same-cell liquid/gas occupancy if the one-primary-medium model is relaxed.

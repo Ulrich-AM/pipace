@@ -87,6 +87,9 @@ struct ThermalEngine {
     static float wallTempK(FluidEngine const &fluid, int index);
     static float gasTempK(GasEngine const &gas, int index);
     static float rigidPixelTempK(RigidBody const &b, int localIndex);
+    static float pendingSolidCapacity(FluidEngine const &fluid, int index);
+    static float pendingSolidTemperatureK(FluidEngine const &fluid, int index);
+    static float pendingSolidConductivity(FluidEngine const &fluid, int index);
 
     void runDiagnostics(FluidEngine &fluid, RigidBodyEngine &rigid, GasEngine &gas);
     void runSpreadDiagnostics(FluidEngine &fluid, RigidBodyEngine &rigid, GasEngine &gas);
@@ -94,7 +97,9 @@ struct ThermalEngine {
 private:
     bool resolveNode(FluidEngine &fluid, RigidBodyEngine &rigid, GasEngine &gas,
         int x, int y, float *&energy, float &cap, float &k, int &bodyId, bool &isGas);
+    bool resolvePendingSolid(FluidEngine &fluid, int index, float *&energy, float &cap, float &k);
     void conductActive(FluidEngine &fluid, RigidBodyEngine &rigid, GasEngine &gas, float dt);
+    void conductPendingSolids(FluidEngine &fluid, RigidBodyEngine &rigid, GasEngine &gas, float dt);
     void conductOpenBoundary(FluidEngine &fluid, RigidBodyEngine &rigid, GasEngine &gas, float dt);
     void conductRigidBodies(RigidBodyEngine &rigid, float dt, float areaOverDx);
     void sleepChunks(FluidEngine &fluid, RigidBodyEngine &rigid, GasEngine &gas);
