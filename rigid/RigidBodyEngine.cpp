@@ -421,7 +421,9 @@ void RigidBodyEngine::updateAabb(RigidBody &b) {
     b.aabbX0 = x0 - 1.0f; b.aabbY0 = y0 - 1.0f; b.aabbX1 = x1 + 1.0f; b.aabbY1 = y1 + 1.0f;
 }
 
-RigidBody RigidBodyEngine::makeBodyFromCells(std::vector<int> const &cells, MaterialId material) {
+RigidBody RigidBodyEngine::makeBodyFromCells(std::vector<int> const &cells, MaterialId material,
+    std::vector<SpawnedSourcePixel> *createdPixels)
+{
     RigidBody b;
     int minX = GW, minY = GH, maxX = -1, maxY = -1;
     for (int index : cells) {
@@ -439,10 +441,20 @@ RigidBody RigidBodyEngine::makeBodyFromCells(std::vector<int> const &cells, Mate
     b.solidRemain.assign(nMask, 0.0f);
     b.bondsRight.assign(nMask, StructuralBond{});
     b.bondsDown.assign(nMask, StructuralBond{});
+    std::vector<uint8_t> localFilled(nMask, 0);
+    struct Created { int worldIndex; int localIndex; };
+    std::vector<Created> created;
+    created.reserve(cells.size());
     for (int index : cells) {
         int x = index % GW, y = index / GW;
-        b.mask[static_cast<size_t>((y - minY) * b.maskW + (x - minX))] = material;
-        b.solidRemain[static_cast<size_t>((y - minY) * b.maskW + (x - minX))] = 1.0f;
+        size_t li = static_cast<size_t>((y - minY) * b.maskW + (x - minX));
+        bool wasEmpty = (b.mask[li] == MATERIAL_EMPTY);
+        b.mask[li] = material;
+        b.solidRemain[li] = 1.0f;
+        if (wasEmpty && !localFilled[li]) {
+            localFilled[li] = 1;
+            created.push_back({index, static_cast<int>(li)});
+        }
     }
     rebuildDerived(b);
     computeMassProperties(b);
@@ -457,6 +469,16 @@ RigidBody RigidBodyEngine::makeBodyFromCells(std::vector<int> const &cells, Mate
     b.y = static_cast<float>(minY) + b.comLocalY;
     b.theta = 0.0f;
     b.id = nextId++;
+    if (createdPixels) {
+        for (Created const &c : created) {
+            SpawnedSourcePixel p;
+            p.worldIndex = c.worldIndex;
+            p.uniqueCreated = true;
+            p.bodyId = b.id;
+            p.localIndex = c.localIndex;
+            createdPixels->push_back(p);
+        }
+    }
     b.anchored = placeAnchored;
     b.dormant = placeSleeping && !placeAnchored;
     if (b.immobile()) {
@@ -520,7 +542,9 @@ void RigidBodyEngine::shrinkMask(RigidBody &b) {
     applyComShift(b, oldComX, oldComY, -minX, -minY);
 }
 
-void RigidBodyEngine::addWorldCellsToBody(int bodyIndex, std::vector<int> const &worldCells, MaterialId material) {
+void RigidBodyEngine::addWorldCellsToBody(int bodyIndex, std::vector<int> const &worldCells, MaterialId material,
+    std::vector<SpawnedSourcePixel> *createdPixels)
+{
     if (bodyIndex < 0 || bodyIndex >= static_cast<int>(bodies.size()) || worldCells.empty()) return;
     RigidBody &b = bodies[static_cast<size_t>(bodyIndex)];
     struct Local { int x, y; };
@@ -578,13 +602,22 @@ void RigidBodyEngine::addWorldCellsToBody(int bodyIndex, std::vector<int> const 
         b.maskW = newW;
         b.maskH = newH;
     }
-    for (Local const &p : locals) {
+    for (size_t n = 0; n < locals.size(); ++n) {
+        Local const &p = locals[n];
         int x = p.x + padL, y = p.y + padT;
         if (x < 0 || y < 0 || x >= b.maskW || y >= b.maskH) continue;
         size_t i = static_cast<size_t>(y * b.maskW + x);
         if (b.mask[i] == MATERIAL_EMPTY) {
             b.mask[i] = material;
             if (b.solidRemain.size() == b.mask.size()) b.solidRemain[i] = 1.0f;
+            if (createdPixels) {
+                SpawnedSourcePixel p;
+                p.worldIndex = worldCells[n];
+                p.uniqueCreated = true;
+                p.bodyId = b.id;
+                p.localIndex = static_cast<int>(i);
+                createdPixels->push_back(p);
+            }
         }
         if (b.heat.size() == b.mask.size() && b.heat[i] == 0.0f && b.mask[i] != MATERIAL_EMPTY) {
             float cap = thermalCapacity(massKg(materialDef(b.mask[i]).density, 1.0f),
@@ -785,8 +818,13 @@ int RigidBodyEngine::commitPending(FluidEngine &fluid) {
 }
 
 int RigidBodyEngine::addSameMaterialWorldCells(FluidEngine &fluid, std::vector<int> const &worldCells,
-    MaterialId material, float temperatureK)
+    MaterialId material, float temperatureK, std::vector<SpawnedSourcePixel> *uniqueCreated)
 {
+    if (uniqueCreated) {
+        uniqueCreated->assign(worldCells.size(), SpawnedSourcePixel{});
+        for (size_t n = 0; n < worldCells.size(); ++n)
+            (*uniqueCreated)[n].worldIndex = worldCells[n];
+    }
     if (worldCells.empty() || material == MATERIAL_EMPTY) return 0;
     std::vector<int> fresh;
     fresh.reserve(worldCells.size());
@@ -805,24 +843,17 @@ int RigidBodyEngine::addSameMaterialWorldCells(FluidEngine &fluid, std::vector<i
     for (int index : fresh) inFresh[static_cast<size_t>(index)] = 1;
     constexpr int dx[4] = {-1, 1, 0, 0};
     constexpr int dy[4] = {0, 0, -1, 1};
-    auto seedHeat = [&](int bodyIndex, std::vector<int> const &cells) {
+    auto seedHeatAt = [&](int bodyIndex, int localIndex) {
         if (bodyIndex < 0 || bodyIndex >= static_cast<int>(bodies.size())) return;
         RigidBody &b = bodies[static_cast<size_t>(bodyIndex)];
         ensurePixelState(b);
-        for (int index : cells) {
-            int gx = index % GW, gy = index / GW;
-            float lx, ly;
-            worldToLocal(b, gx + 0.5f, gy + 0.5f, lx, ly);
-            int ix = static_cast<int>(std::floor(lx)), iy = static_cast<int>(std::floor(ly));
-            if (!maskOccupied(b, ix, iy)) continue;
-            int li = iy * b.maskW + ix;
-            if (li < 0 || li >= static_cast<int>(b.heat.size())) continue;
-            if (li < static_cast<int>(b.solidRemain.size())) b.solidRemain[static_cast<size_t>(li)] = 1.0f;
-            float cap = thermalCapacity(massKg(materialDef(material).density, 1.0f),
-                solidPhaseSpecificHeat(substanceForMaterialId(material)));
-            float t = std::isfinite(temperatureK) ? temperatureK : AMBIENT_TEMPERATURE_K;
-            b.heat[static_cast<size_t>(li)] = energyFromTemp(cap, t);
-        }
+        if (localIndex < 0 || localIndex >= static_cast<int>(b.heat.size())) return;
+        if (localIndex < static_cast<int>(b.solidRemain.size()))
+            b.solidRemain[static_cast<size_t>(localIndex)] = 1.0f;
+        float cap = thermalCapacity(massKg(materialDef(material).density, 1.0f),
+            solidPhaseSpecificHeat(substanceForMaterialId(material)));
+        float t = std::isfinite(temperatureK) ? temperatureK : AMBIENT_TEMPERATURE_K;
+        b.heat[static_cast<size_t>(localIndex)] = energyFromTemp(cap, t);
         computeMassProperties(b);
         b.sleeping = false;
         b.quietTicks = 0;
@@ -831,6 +862,8 @@ int RigidBodyEngine::addSameMaterialWorldCells(FluidEngine &fluid, std::vector<i
 
     int spawned = 0;
     bool changed = false;
+    std::vector<SpawnedSourcePixel> createdPixels;
+    createdPixels.reserve(worldCells.size());
     for (int start : fresh) {
         if (seen[static_cast<size_t>(start)]) continue;
         std::vector<int> component;
@@ -852,23 +885,57 @@ int RigidBodyEngine::addSameMaterialWorldCells(FluidEngine &fluid, std::vector<i
         if (component.empty()) continue;
         int attach = attachedBodyForComponent(component, material);
         if (attach >= 0) {
-            addWorldCellsToBody(attach, component, material);
-            seedHeat(attach, component);
+            addWorldCellsToBody(attach, component, material, &createdPixels);
             changed = true;
         } else {
             bool savedAnchor = placeAnchored;
             bool savedSleep = placeSleeping;
             placeAnchored = false;
             placeSleeping = false;
-            bodies.push_back(makeBodyFromCells(component, material));
+            bodies.push_back(makeBodyFromCells(component, material, &createdPixels));
             placeAnchored = savedAnchor;
             placeSleeping = savedSleep;
-            seedHeat(static_cast<int>(bodies.size()) - 1, component);
             ++spawned;
             changed = true;
         }
     }
+    for (SpawnedSourcePixel &c : createdPixels) {
+        int bi = indexOfId(c.bodyId);
+        if (bi < 0 || bi >= static_cast<int>(bodies.size())) continue;
+        RigidBody const &b = bodies[static_cast<size_t>(bi)];
+        int gx = c.worldIndex % GW, gy = c.worldIndex / GW;
+        float lx, ly;
+        worldToLocal(b, static_cast<float>(gx) + 0.5f, static_cast<float>(gy) + 0.5f, lx, ly);
+        int ix = static_cast<int>(std::floor(lx)), iy = static_cast<int>(std::floor(ly));
+        if (maskOccupied(b, ix, iy))
+            c.localIndex = iy * b.maskW + ix;
+        seedHeatAt(bi, c.localIndex);
+    }
     if (changed) syncOccupancy(fluid);
+    if (uniqueCreated) {
+        std::vector<uint64_t> seenKeys;
+        seenKeys.reserve(createdPixels.size());
+        for (size_t n = 0; n < worldCells.size(); ++n) {
+            SpawnedSourcePixel &r = (*uniqueCreated)[n];
+            r.worldIndex = worldCells[n];
+            SpawnedSourcePixel const *hit = nullptr;
+            for (SpawnedSourcePixel const &c : createdPixels) {
+                if (c.worldIndex == worldCells[n]) { hit = &c; break; }
+            }
+            if (!hit || hit->bodyId == 0) continue;
+            uint64_t key = (static_cast<uint64_t>(hit->bodyId) << 32)
+                | static_cast<uint32_t>(hit->localIndex);
+            bool dup = false;
+            for (uint64_t k : seenKeys) {
+                if (k == key) { dup = true; break; }
+            }
+            if (dup) continue;
+            seenKeys.push_back(key);
+            r.uniqueCreated = true;
+            r.bodyId = hit->bodyId;
+            r.localIndex = hit->localIndex;
+        }
+    }
     return spawned;
 }
 

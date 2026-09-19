@@ -303,6 +303,7 @@ double ThermalEngine::totalThermalEnergy(FluidEngine const &fluid, RigidBodyEngi
         e += fluid.liquidHeat[static_cast<size_t>(i)];
         e += fluid.solidHeat[static_cast<size_t>(i)];
         e += gas.heat[static_cast<size_t>(i)];
+        e += fluid.solidifyPendingSensibleJ(i);
     }
     for (RigidBody const &b : rigid.bodies)
         for (float h : b.heat) e += h;

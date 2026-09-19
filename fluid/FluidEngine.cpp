@@ -31,6 +31,7 @@ FluidEngine::FluidEngine()
     , liquidCompCount(GW * GH, 0)
     , solidifyPendingId(GW * GH, SUBSTANCE_NONE)
     , solidifyPendingKg(GW * GH, 0.0f)
+    , solidifyPendingHeatJ(GW * GH, 0.0f)
     , nextDyeR(GW * GH, 0.0f)
     , nextDyeG(GW * GH, 0.0f)
     , nextDyeB(GW * GH, 0.0f)
@@ -584,39 +585,55 @@ void FluidEngine::addLiquidFill(int index, float dFill, float dHeat) {
 
 void FluidEngine::clearSolidifyPending(int index) {
     if (index < 0 || index >= GW * GH) return;
-    solidifyPendingId[static_cast<size_t>(index)] = SUBSTANCE_NONE;
-    solidifyPendingKg[static_cast<size_t>(index)] = 0.0f;
+    size_t i = static_cast<size_t>(index);
+    solidifyPendingId[i] = SUBSTANCE_NONE;
+    solidifyPendingKg[i] = 0.0f;
+    solidifyPendingHeatJ[i] = 0.0f;
 }
 
-bool FluidEngine::addSolidifyPendingKg(int index, SubstanceId id, float kg) {
+bool FluidEngine::addSolidifyPendingKg(int index, SubstanceId id, float kg, float heatJ) {
     if (index < 0 || index >= GW * GH) return false;
     if (!(kg > 0.0f) || !std::isfinite(kg) || id == SUBSTANCE_NONE || !validSubstance(id))
         return false;
     size_t i = static_cast<size_t>(index);
     float &pending = solidifyPendingKg[i];
     SubstanceId &pendId = solidifyPendingId[i];
+    float &heat = solidifyPendingHeatJ[i];
+    float addHeat = (std::isfinite(heatJ) && heatJ > 0.0f) ? heatJ : 0.0f;
     if (!(pending > 1.0e-12f) || !std::isfinite(pending) || pendId == SUBSTANCE_NONE) {
         pendId = id;
         pending = kg;
+        heat = addHeat;
         return true;
     }
     if (pendId != id) return false;
     pending += kg;
+    heat += addHeat;
     return true;
 }
 
-bool FluidEngine::takeSolidifyPendingKg(int index, SubstanceId id, float kg) {
+bool FluidEngine::takeSolidifyPendingKg(int index, SubstanceId id, float kg, float *outHeatJ) {
     if (index < 0 || index >= GW * GH) return false;
     if (!(kg > 0.0f) || !std::isfinite(kg)) return false;
     size_t i = static_cast<size_t>(index);
     if (solidifyPendingId[i] != id) return false;
     float &pending = solidifyPendingKg[i];
+    float &heat = solidifyPendingHeatJ[i];
     if (!(pending + 1.0e-9f >= kg) || !std::isfinite(pending)) return false;
+    float frac = kg / pending;
+    float takeHeat = 0.0f;
+    if (std::isfinite(heat) && heat > 0.0f)
+        takeHeat = heat * frac;
     pending -= kg;
+    heat -= takeHeat;
     if (!(pending > 1.0e-12f) || !std::isfinite(pending)) {
         pending = 0.0f;
+        heat = 0.0f;
         solidifyPendingId[i] = SUBSTANCE_NONE;
+    } else if (!(heat > 0.0f) || !std::isfinite(heat)) {
+        heat = 0.0f;
     }
+    if (outHeatJ) *outHeatJ = takeHeat;
     return true;
 }
 
@@ -635,6 +652,14 @@ float FluidEngine::solidifyPendingMassKg(int index) const {
     float p = solidifyPendingKg[i];
     if (!(p > 0.0f) || !std::isfinite(p)) return 0.0f;
     return p;
+}
+
+float FluidEngine::solidifyPendingSensibleJ(int index) const {
+    if (index < 0 || index >= GW * GH) return 0.0f;
+    if (solidifyPendingSubstance(index) == SUBSTANCE_NONE) return 0.0f;
+    float h = solidifyPendingHeatJ[static_cast<size_t>(index)];
+    if (!(h > 0.0f) || !std::isfinite(h)) return 0.0f;
+    return h;
 }
 
 float FluidEngine::waterFrozenPendingKg(int index) const {
@@ -2480,6 +2505,7 @@ void FluidEngine::zeroFluidState() {
     std::fill(liquidCompCount.begin(), liquidCompCount.end(), 0);
     std::fill(solidifyPendingId.begin(), solidifyPendingId.end(), SUBSTANCE_NONE);
     std::fill(solidifyPendingKg.begin(), solidifyPendingKg.end(), 0.0f);
+    std::fill(solidifyPendingHeatJ.begin(), solidifyPendingHeatJ.end(), 0.0f);
     std::fill(nextDyeR.begin(), nextDyeR.end(), 0.0f); std::fill(nextDyeG.begin(), nextDyeG.end(), 0.0f); std::fill(nextDyeB.begin(), nextDyeB.end(), 0.0f);
     std::fill(nextCompId.begin(), nextCompId.end(), SUBSTANCE_NONE);
     std::fill(nextCompAmt.begin(), nextCompAmt.end(), 0.0f);

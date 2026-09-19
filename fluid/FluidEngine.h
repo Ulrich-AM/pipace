@@ -39,6 +39,7 @@ struct FluidEngine {
     std::vector<uint8_t> liquidCompCount;
     std::vector<SubstanceId> solidifyPendingId; // one pending solid SubstanceId per cell
     std::vector<float> solidifyPendingKg;       // sub-pixel solid mass waiting for a rigid pixel
+    std::vector<float> solidifyPendingHeatJ;    // sensible energy of that pending solid mass
     std::vector<float> nextDyeR, nextDyeG, nextDyeB;
     std::vector<SubstanceId> nextCompId;
     std::vector<float> nextCompAmt;
@@ -181,10 +182,11 @@ struct FluidEngine {
     void seedAmbientHeat();
     void addLiquidFill(int index, float dFill, float dHeat);
     void clearSolidifyPending(int index);
-    bool addSolidifyPendingKg(int index, SubstanceId id, float kg);
-    bool takeSolidifyPendingKg(int index, SubstanceId id, float kg);
+    bool addSolidifyPendingKg(int index, SubstanceId id, float kg, float heatJ = 0.0f);
+    bool takeSolidifyPendingKg(int index, SubstanceId id, float kg, float *outHeatJ = nullptr);
     SubstanceId solidifyPendingSubstance(int index) const;
     float solidifyPendingMassKg(int index) const;
+    float solidifyPendingSensibleJ(int index) const;
     // Water diagnostics compatibility: pending kg only when the slot is Water.
     float waterFrozenPendingKg(int index) const;
     LiquidCarry takeLiquidCarry(int index, float amount);

@@ -48,8 +48,17 @@ struct RigidBodyEngine {
     void paintPendingLine(int x0, int y0, int x1, int y1, int brushRadius);
     void clearPending();
     int commitPending(FluidEngine &fluid);
+    // Per requested world cell: whether addSameMaterialWorldCells created a unique
+    // source pixel (bodyId + localIndex) that was empty before this call.
+    struct SpawnedSourcePixel {
+        int worldIndex = -1;
+        bool uniqueCreated = false;
+        uint32_t bodyId = 0;
+        int localIndex = -1;
+    };
     int addSameMaterialWorldCells(FluidEngine &fluid, std::vector<int> const &worldCells,
-        MaterialId material, float temperatureK);
+        MaterialId material, float temperatureK,
+        std::vector<SpawnedSourcePixel> *uniqueCreated = nullptr);
     void finalizeMaskEdits(FluidEngine &fluid);
     void refreshMassProperties(int bodyIndex);
     // After chemistry: refresh remain-only mass, then connectivity for mask clears.
@@ -157,12 +166,14 @@ private:
     void refreshMaterialCache(RigidBody &b);
     void updateAabb(RigidBody &b);
     void applyComShift(RigidBody &b, float oldComX, float oldComY, int padL, int padT);
-    void addWorldCellsToBody(int bodyIndex, std::vector<int> const &worldCells, MaterialId material);
+    void addWorldCellsToBody(int bodyIndex, std::vector<int> const &worldCells, MaterialId material,
+        std::vector<SpawnedSourcePixel> *createdPixels = nullptr);
     void shrinkMask(RigidBody &b);
     void refreshBodyAfterMaskEdit(int index, std::vector<RigidBody> &spawned);
     void carveWorldCells(std::vector<int> const &cells, FluidEngine &fluid);
     int attachedBodyForComponent(std::vector<int> const &component, MaterialId requiredMat = MATERIAL_EMPTY) const;
-    RigidBody makeBodyFromCells(std::vector<int> const &cells, MaterialId material);
+    RigidBody makeBodyFromCells(std::vector<int> const &cells, MaterialId material,
+        std::vector<SpawnedSourcePixel> *createdPixels = nullptr);
     void integrate(RigidBody &b, float dt);
     void collectStaticContacts(FluidEngine const &fluid, RigidBody const &b, int index, std::vector<RigidContact> &out) const;
     void collectBodyContacts(std::vector<RigidContact> &out);

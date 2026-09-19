@@ -1,28 +1,35 @@
 test	no_ice_id	PASS	
 test	ice_density_below_liquid	PASS	0.9169999957
-test	pure_water_freezes	PASS	frozen_kg=2943.922708 pixels=96
-test	freeze_identity_water_solid	PASS	sub=1 phase=1 iceT=253.2098784
-test	freeze_mass_conserved	FAIL	dLiq=2943.928857 dSol=2929.594889
-test	freeze_latent_released	PASS	J=983270184.6
-test	freeze_near_melting_point	PASS	Tmean=277.2186187 Tm=273.1499939 remaining liquid at freeze plateau
-test	contiguous_ice_bodies	FAIL	pixels=96 bodies=38
+test	pure_water_freezes	PASS	frozen_kg=2947.538843 pixels=58
+test	freeze_identity_water_solid	PASS	sub=1 phase=1 iceT=253.1935404
+test	freeze_mass_conserved	PASS	dLiq=2947.543402 dSol=2947.539107
+test	freeze_latent_released	PASS	J=984477973.6
+test	freeze_near_melting_point	PASS	Tmean=278.9433928 Tm=273.1499939 remaining liquid at freeze plateau
+test	contiguous_ice_bodies	PASS	pixels=58 bodies=8
 test	no_water_in_blocked	PASS	
-test	pending_not_discarded	FAIL	
+test	pending_not_discarded	PASS	
 test	honey_mixture_does_not_freeze	PASS	frozen=0
-test	heating_melts_ice	PASS	melted=458.2893963 sol0=1188.796823 sol1=730.5074884
-test	melt_mass_conserved	PASS	dSol=458.2893348 dLiq=456.7856893
-test	melt_latent_absorbed	PASS	J=153068658.4
-test	repeat_freeze_melt_mass	PASS	start=125 end=125.0000072
-test	closed_energy_with_fusion	PASS	rel=0.008296393218 E0=2141589120 E1=2129130334 latRel=5308679.854
+test	heating_melts_ice	PASS	melted=1203.912649 sol0=1203.124972 sol1=1.069764763e-05
+test	melt_mass_conserved	PASS	dSol=1203.124961 dLiq=1201.227992
+test	melt_latent_absorbed	PASS	J=402106824.8
+test	repeat_freeze_melt_mass	PASS	start=125 end=124.9999811
+test	closed_energy_with_fusion	PASS	rel=0.004155004806 E0=2141589120 E1=2137999485 latRel=5308690.626
 test	melt_split_fragments	PASS	before=1 after=2
-test	tick_rate_20_vs_30	PASS	kg30=171.438366 kg20=171.5736063
-test	full_cycle_phases	FAIL	solid=0 liq=0 gas=0 solid2=1
-test	full_cycle_mass	PASS	start=78.125 end=78.12499816
-test	ice_buoyancy_probe	PASS	no_net_rise_coupling_limit y0=67 y1=67.34906006
-test	perf_ms_tick	PASS	idle=0.9724325 small=8.47861 large=20.73862
+test	tick_rate_20_vs_30	PASS	kg30=171.4377624 kg20=171.4274426
+test	full_cycle_phases	PASS	solid=1 liq=1 gas=1 solid2=1
+test	full_cycle_mass	PASS	start=78.125 end=78.13183459
+test	ice_buoyancy_probe	PASS	rose_or_held_up y0=67 y1=61.27426529
+test	perf_ms_tick	PASS	idle=0.4327375 small=3.5845775 large=9.6972475
 test	no_nan_inf_negK	PASS	
-test	generic_water_freeze_pending_or_pixel	PASS	solidified=140.6249992 pixels=1 spawned=1 latent=46968749.75
+test	generic_water_freeze_pending_or_pixel	PASS	solidified=140.624598 pixels=3 spawned=3 latent=46968615.72
 test	generic_pending_id_no_merge	PASS	id=1 leftover=5.731250763 spawned=1
-test	generic_partial_melt_remain	PASS	remain0=1 remain1=0.6500000358 mass0=0.9169999957 mass1=0.596050024
-test	generic_full_melt_clears_pixel	PASS	mask=0 liq=14.22638481
-summary	FAIL	23 passed, 4 failed
+test	generic_partial_melt_remain	PASS	remain0=1 remain1=0.650000155 mass0=0.9169999957 mass1=0.5960501432
+test	generic_full_melt_clears_pixel	PASS	mask=0 liq=14.22638557
+test	pending_spawn_transaction_failure	PASS	pend0=14.328125 pend1=14.328125 ice=0
+test	unique_rigid_pixel_accounting	PASS	unique=1 pixels=1 requested=2
+test	pending_sensible_heat	PASS	J=18400
+test	pending_melt_back	PASS	pend0=5.014843941 pend1=0 dLiq=5.014843773
+test	pending_does_not_grow_unbounded	PASS	pend=1.223533273 pixel=14.32812493 liq0=15.625 liq1=0 tot0=15.625 tot1=15.55165821 ice=1
+test	pending_to_rigid_energy	PASS	Tpend=261.1499939 Tice=261.1499939 Tm=273.1499939 pendLeft=0
+test	configured_scale_partial_solid	PASS	remain=0.9166666865 heat=1206161.25 expect=941740.6875 wrong4=7533925.5
+summary	PASS	34 passed, 0 failed
