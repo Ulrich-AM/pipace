@@ -48,6 +48,8 @@ PIPACE/
     ReactionTypes.h / ReactionRegistry.h/.cpp  # ReactionId + ReactionDefinition data only
     ReactionMatterAccess.h/.cpp                # SubstanceId+phase query; liquid commit
     ReactionEngine.h/.cpp                      # local liquid/gas reactions via moles; H2+O2 combustion live
+  sim/
+    SimulationQuality.h/.cpp                   # SimulationQualityProfile + tick scheduler
   docs/
     PHASE_CHANGES.md       # Water solid ⇄ liquid ⇄ gas is live; honey mixtures are not
   CMakeLists.txt / build.bat / run.bat
@@ -178,7 +180,7 @@ Performance pass (2026-09-12) landed sparse flux/pressure/surface lists, pressur
 
 Remaining headroom:
 
-- Quality presets (Low / Medium / High / Auto) change cost knobs only: pressure iters, CFL substeps, limiter passes, surface tension, spray, gas rate, sim Hz, flat render. Auto drops Low after several overloaded ticks. Low/Auto-Low use `GasSimMode::Half`; they never silently set `GasSimMode::Off`. Settings → Gas Off remains explicit, and Auto quality must not turn gas back on while Off is selected.
+- Quality presets (Low/Performance, Medium/Balanced, High/Accurate, Auto) flow through `SimulationQualityProfile` (`sim/SimulationQuality.h`). They change solver iterations, substeps, sleep, and thermal/chemistry/phase **update intervals** (accumulated dt, not slower physics). Auto chooses Performance or Balanced only. Low/Auto-Low use `GasSimMode::Half`; they never silently set `GasSimMode::Off`. Settings → Gas Off and Thermal Off remain explicit. `PHYSICS_DT` is still 1/30 if the menu Hz is 20 (deferred).
 - Connectivity-aware residual / splash redeposit (correctness)
 - Broader multithreading on **larger grids** (pressure lists ≥20k cells/phase); do not force 200×120 onto many cores
 - Avoid guessing; use `--benchmark` and stage timings

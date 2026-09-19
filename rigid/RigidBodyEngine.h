@@ -25,6 +25,10 @@ struct RigidBodyEngine {
     bool placePowder = false;
     int powderParticleSize = 2;
     float gravityScale = 1.0f;
+    int velocityContactIters = 8;
+    int positionalIters = 1;
+    int sleepQuietTicks = 18;
+    float sleepLin = 0.16f;
     uint32_t nextId = 1;
     double lastStepMs = 0.0;
     int lastFractureSplits = 0;
