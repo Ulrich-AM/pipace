@@ -21,6 +21,7 @@ add_executable(pipace WIN32
   chemistry/ReactionEngine.cpp
   world/WorldQuery.cpp
   world/WaterPhaseChange.cpp
+  world/PhaseChangeEngine.cpp
   sim/SimulationQuality.cpp
 )
 target_include_directories(pipace PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

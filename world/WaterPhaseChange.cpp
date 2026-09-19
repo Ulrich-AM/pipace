@@ -8,6 +8,7 @@
 #include "substance/SubstanceRegistry.h"
 #include "substance/LiquidMixtureProperties.h"
 #include "thermal/ThermalEngine.h"
+#include "world/PhaseChangeEngine.h"
 #include "world/WorldQuery.h"
 
 #include <algorithm>
@@ -28,14 +29,10 @@ constexpr int kDy[4] = {-1, 0, 0, 1}; // above, left, right, below (y down)
 bool liquidIsPureWater(FluidEngine const &fluid, int i) {
     return liquidCompositionIsPureWater(fluid.liquidComponents(i));
 }
-// Time-based liquid/gas conversion cap. 10.5 fill/s matches the old 0.35 fill/tick at 30 Hz.
-constexpr float kMaxFillPerSec = 10.5f;
-// Solver safety only: not a thermodynamic boiling law. Destination storage refuses
-// amounts that would exceed this many atmospheres in one cell.
+// Phase-change existence; fluid motion uses MIN_ACTIVE_FILL
+constexpr float kMinFillMove = 1.0e-6f;
+// Solver safety only: not a thermodynamic boiling law.
 constexpr float kSolverSafetyAtm = 1.0e4f;
-constexpr float kMinFillMove = 1.0e-6f; // phase-change existence; fluid motion uses MIN_ACTIVE_FILL
-constexpr float kBoilEpsK = 0.05f;      // tiny numerical hysteresis, not a fake boiling gap
-constexpr float kSatHystRel = 0.002f;   // 0.2% supersaturation before condensation
 constexpr float kFreezeEpsK = 0.05f; // numerical; latent heat is the real plateau
 constexpr float kMaxIcePixelsPerSec = 2.5f; // kg-equivalent of ice pixels per second per cell
 constexpr float kMinIceRemain = 0.03f;
@@ -132,119 +129,6 @@ float coolSurfaceBonus(FluidEngine const &fluid, RigidBodyEngine const &rigid, G
         bonus += 3.2f * span;
     }
     return bonus;
-}
-
-float gasCellPressureAtm(GasEngine const &gas, int i, float vol) {
-    if (!(vol >= GAS_MIN_VOLUME)) return 0.0f;
-    return gasPressureAtmFromState(gas.amount[static_cast<size_t>(i)], vol, gas.cellTemperatureK(i));
-}
-
-float gasAmountRoomForPressureAtm(GasEngine const &gas, int i, float vol, float maxAtm) {
-    if (!(vol >= GAS_MIN_VOLUME)) return 0.0f;
-    float capAmt = gasAmountFromPressureAtm(maxAtm, vol, gas.cellTemperatureK(i));
-    return capAmt - gas.amount[static_cast<size_t>(i)];
-}
-
-float vaporPartialPressurePa(FluidEngine const &fluid, GasEngine const &gas, int x, int y) {
-    if (!gas.isAccessible(fluid, x, y)) return 0.0f;
-    return gas.gasPartialPressurePaFromCurrentState(GasEngine::ci(x, y), SUBSTANCE_WATER);
-}
-
-float localAmbientPressurePa(FluidEngine const &fluid, RigidBodyEngine const &rigid, GasEngine const &gas,
-    int x, int y)
-{
-    (void)rigid;
-    float pref = gas.config.referencePressurePa;
-    float bestAtm = -1.0f;
-    auto consider = [&](int cx, int cy) {
-        if (!gas.isAccessible(fluid, cx, cy)) return;
-        int i = GasEngine::ci(cx, cy);
-        float vol = gas.availableVolume(fluid, cx, cy);
-        if (!(vol >= GAS_MIN_VOLUME)) return;
-        float pAtm = gasCellPressureAtm(gas, i, vol);
-        if (bestAtm < 0.0f || pAtm < bestAtm) bestAtm = pAtm;
-    };
-    consider(x, y);
-    for (int n = 0; n < 4; ++n) consider(x + kDx[n], y + kDy[n]);
-    if (bestAtm < 0.0f) return 1.0f; // fully enclosed: treat as vacuum-ish 1 Pa floor via Tsat clamp
-    return std::max(1.0f, bestAtm * pref);
-}
-
-int findVaporDest(FluidEngine const &fluid, RigidBodyEngine const &rigid, GasEngine const &gas,
-    int sx, int sy, float needAmt, uint32_t salt, float maxAtm, bool *hitSafety, bool *hitEq)
-{
-    if (needAmt <= GAS_MIN_AMOUNT) return -1;
-    if (hitSafety) *hitSafety = false;
-    if (hitEq) *hitEq = false;
-    if (!(maxAtm > 0.0f) || !std::isfinite(maxAtm)) maxAtm = kSolverSafetyAtm;
-    auto room = [&](int x, int y) -> float {
-        if (isBlockedSolid(fluid, rigid, x, y)) return 0.0f;
-        if (!gas.isAccessible(fluid, x, y)) return 0.0f;
-        int i = GasEngine::ci(x, y);
-        float vol = gas.availableVolume(fluid, x, y);
-        if (vol < GAS_MIN_VOLUME) return 0.0f;
-        float thermo = gasAmountRoomForPressureAtm(gas, i, vol, maxAtm);
-        float safety = gasAmountRoomForPressureAtm(gas, i, vol, kSolverSafetyAtm);
-        return std::min(thermo, safety);
-    };
-    int best = -1;
-    float bestRoom = 0.0f;
-    uint32_t bestKey = ~0u;
-    auto consider = [&](int x, int y) {
-        float r = room(x, y);
-        if (!(r > GAS_MIN_AMOUNT)) return;
-        uint32_t key = destTieKey(x, y, salt);
-        if (destBetter(r, key, bestRoom, bestKey)) {
-            bestRoom = r;
-            bestKey = key;
-            best = GasEngine::ci(x, y);
-        }
-    };
-    for (int n = 0; n < 4; ++n) consider(sx + kDx[n], sy + kDy[n]);
-    consider(sx, sy);
-    if (best >= 0 && bestRoom >= std::min(needAmt, 1.0e-4f)) return best;
-
-    PhaseScratch &sc = phaseScratch();
-    sc.prepareSeen();
-    sc.q.reserve(kSearchLimit);
-    auto push = [&](int x, int y) {
-        if (!FluidEngine::inside(x, y)) return;
-        if (isBlockedSolid(fluid, rigid, x, y)) return;
-        int i = FluidEngine::ci(x, y);
-        if (!sc.mark(i)) return;
-        sc.q.push_back(i);
-    };
-    if (FluidEngine::inside(sx, sy)) {
-        int si = FluidEngine::ci(sx, sy);
-        if (sc.mark(si)) sc.q.push_back(si);
-    }
-    for (size_t head = 0; head < sc.q.size() && static_cast<int>(head) < kSearchLimit; ++head) {
-        int i = sc.q[head];
-        int x = i % GW, y = i / GW;
-        consider(x, y);
-        if (best >= 0 && bestRoom >= needAmt) return best;
-        for (int n = 0; n < 4; ++n) push(x + kDx[n], y + kDy[n]);
-    }
-    if (best >= 0 && bestRoom > GAS_MIN_AMOUNT) return best;
-    bool anyAccess = gas.isAccessible(fluid, sx, sy);
-    for (int n = 0; n < 4 && !anyAccess; ++n)
-        anyAccess = gas.isAccessible(fluid, sx + kDx[n], sy + kDy[n]);
-    if (anyAccess) {
-        bool anySafety = false;
-        auto probe = [&](int x, int y) {
-            if (!gas.isAccessible(fluid, x, y)) return;
-            float vol = gas.availableVolume(fluid, x, y);
-            if (vol < GAS_MIN_VOLUME) return;
-            float amt = gas.amount[static_cast<size_t>(GasEngine::ci(x, y))];
-            if (amt >= gasAmountFromPressureAtm(kSolverSafetyAtm, vol, gas.cellTemperatureK(GasEngine::ci(x, y)))
-                - GAS_MIN_AMOUNT) anySafety = true;
-        };
-        probe(sx, sy);
-        for (int n = 0; n < 4; ++n) probe(sx + kDx[n], sy + kDy[n]);
-        if (anySafety && hitSafety) *hitSafety = true;
-        else if (hitEq) *hitEq = true;
-    }
-    return -1;
 }
 
 int findLiquidDest(FluidEngine const &fluid, RigidBodyEngine const &rigid, GasEngine const &gas,
@@ -856,17 +740,6 @@ WaterPhaseTickStats stepWaterPhaseChange(FluidEngine &fluid, RigidBodyEngine &ri
     if (!canTransition(SUBSTANCE_WATER, MatterPhase::Liquid, MatterPhase::Gas)
         && !canTransition(SUBSTANCE_WATER, MatterPhase::Liquid, MatterPhase::Solid))
         return st;
-    PhaseProperties const &phase = phaseForSubstance(SUBSTANCE_WATER);
-    float Tb = phase.boilingPointK;
-    float Lv = phase.latentHeatVaporization;
-    if (!(Tb > 1.0f) || !(Lv > 1.0f)) return st;
-    double cpm = fluid.config.cellsPerMeter;
-    float cpLiquid = thermalForSubstance(SUBSTANCE_WATER).specificHeat;
-    float cpVapor = gasPhaseSpecificHeat(SUBSTANCE_WATER);
-    float pref = gas.config.referencePressurePa;
-    (void)Tb;
-    double mRateFill = liquidFillToMassKg(SUBSTANCE_WATER,
-        static_cast<double>(kMaxFillPerSec) * static_cast<double>(dtSafe), cpm);
 
     static uint32_t phaseSalt = 0;
     ++phaseSalt;
@@ -891,256 +764,9 @@ WaterPhaseTickStats stepWaterPhaseChange(FluidEngine &fluid, RigidBodyEngine &ri
     }
     if (!anyLiquid && !anyVapor && !anyIce && !anyPending) return st;
 
-    if (anyLiquid && canTransition(SUBSTANCE_WATER, MatterPhase::Liquid, MatterPhase::Gas)) {
-        for (int y = 0; y < GH; ++y) for (int x = 0; x < GW; ++x) {
-            int i = FluidEngine::ci(x, y);
-            if (isBlockedSolid(fluid, rigid, x, y)) continue;
-            float fill = fluid.fill[static_cast<size_t>(i)];
-            if (fill < kMinFillMove) continue;
-            if (!liquidIsPureWater(fluid, i)) continue;
-            float waterFill = fluid.liquidComponentAmount(i, SUBSTANCE_WATER);
-            if (waterFill < kMinFillMove) continue;
-            float C = ThermalEngine::liquidCapacity(fluid, i);
-            float E = fluid.liquidHeat[static_cast<size_t>(i)];
-            float T = (C > MIN_THERMAL_CAPACITY) ? tempFromEnergy(E, C)
-                : ThermalEngine::sampleTemperatureK(fluid, rigid, gas, x, y);
-            float Tplace = T;
-            double PsatT = saturationVaporPressurePa(SUBSTANCE_WATER, T);
-            float maxAtm = static_cast<float>(PsatT / static_cast<double>(pref));
-            if (!(maxAtm > 0.0f) || !std::isfinite(maxAtm)) maxAtm = kSolverSafetyAtm;
-            maxAtm = std::min(maxAtm, kSolverSafetyAtm);
-            double mFill = liquidFillToMassKg(SUBSTANCE_WATER, waterFill, cpm);
-            double vaporWantProbe = massKgToGasAmount(SUBSTANCE_WATER, std::min(mFill, mRateFill), cpm);
-            bool hitSafety = false, hitEq = false;
-            int dest = findVaporDest(fluid, rigid, gas, x, y, static_cast<float>(std::max(vaporWantProbe, 1.0e-4)),
-                salt, maxAtm, &hitSafety, &hitEq);
-            if (dest < 0) {
-                if (hitSafety) { ++st.blockedBoil; ++st.blockedBoilSafetyLimit; }
-                else if (hitEq) { ++st.blockedBoil; ++st.blockedBoilEquilibrium; }
-                continue;
-            }
-            int dx = dest % GW, dy = dest / GW;
-            float vol = gas.availableVolume(fluid, dx, dy);
-            float Pdest = std::max(1.0f, gasCellPressureAtm(gas, dest, vol) * pref);
-            float Tsat = static_cast<float>(saturationTemperatureK(SUBSTANCE_WATER, Pdest));
-            float Tm = phase.meltingPointK;
-            // Do not cool remaining liquid below melting to pay for boiling (that
-            // falsely freezes leftovers when Tsat < Tm at low pressure).
-            float Tpay = std::max(Tsat, Tm + 1.0f);
-            if (!(T > Tpay + kBoilEpsK)) {
-                ++st.blockedBoil;
-                ++st.blockedBoilEquilibrium;
-                continue;
-            }
-            wakeAllEngines(fluid, gas, thermal, x, y);
-            float Eplat = (C > MIN_THERMAL_CAPACITY) ? energyFromTemp(C, Tpay) : 0.0f;
-            float excess = (C > MIN_THERMAL_CAPACITY) ? std::max(0.0f, E - Eplat) : 0.0f;
-            float neighborQ = heatAvailableAround(fluid, rigid, gas, x, y, Tpay, false);
-            float totalQ = excess + neighborQ;
-            double denom = static_cast<double>(Lv)
-                + static_cast<double>(cpVapor) * static_cast<double>(Tplace)
-                - static_cast<double>(cpLiquid) * static_cast<double>(Tpay);
-            if (denom < 1.0) denom = static_cast<double>(Lv);
-            double mEnergy = (denom > 1.0) ? static_cast<double>(totalQ) / denom : mFill;
-            double mWant = std::min({mEnergy, mFill, mRateFill});
-            if (!(mWant > 1.0e-9)) {
-                ++st.blockedBoil;
-                ++st.blockedBoilEnergy;
-                continue;
-            }
-            double vaporWant = massKgToGasAmount(SUBSTANCE_WATER, mWant, cpm);
-            float roomThermo = gasAmountRoomForPressureAtm(gas, dest, vol, maxAtm);
-            float roomSafety = gasAmountRoomForPressureAtm(gas, dest, vol, kSolverSafetyAtm);
-            float room = std::min(roomThermo, roomSafety);
-            if (room <= GAS_MIN_AMOUNT) {
-                ++st.blockedBoil;
-                if (roomSafety <= GAS_MIN_AMOUNT) ++st.blockedBoilSafetyLimit;
-                else ++st.blockedBoilEquilibrium;
-                continue;
-            }
-            double vaporGot = std::min(vaporWant, static_cast<double>(room));
-            double m = gasAmountToMassKg(SUBSTANCE_WATER, vaporGot, cpm);
-            if (!(m > 1.0e-9)) {
-                ++st.blockedBoil;
-                ++st.blockedBoilEquilibrium;
-                continue;
-            }
-            float dFill = static_cast<float>(massKgToLiquidFill(SUBSTANCE_WATER, m, cpm));
-            dFill = std::min(dFill, waterFill);
-            if (dFill < kMinFillMove) continue;
-            m = liquidFillToMassKg(SUBSTANCE_WATER, dFill, cpm);
-            vaporGot = massKgToGasAmount(SUBSTANCE_WATER, m, cpm);
-
-            float Eremoved = 0.0f;
-            if (fill > 1.0e-8f) Eremoved = E * (dFill / fill);
-            float Edest = static_cast<float>(m) * cpVapor * Tplace;
-            float Qneed = static_cast<float>(m * static_cast<double>(Lv)) + Edest - Eremoved;
-
-            removePureWaterFill(fluid, i, dFill);
-            float remainFill = fluid.fill[static_cast<size_t>(i)];
-            float remainE = std::max(0.0f, E - Eremoved);
-            if (remainFill <= 1.0e-8f) {
-                fluid.liquidHeat[static_cast<size_t>(i)] = 0.0f;
-                if (remainE > 0.0f) Qneed -= remainE;
-            } else {
-                fluid.liquidHeat[static_cast<size_t>(i)] = remainE;
-            }
-            if (Qneed > 0.0f) {
-                float pay = Qneed;
-                float newC = ThermalEngine::liquidCapacity(fluid, i);
-                takeHeatAboveK(fluid.liquidHeat[static_cast<size_t>(i)], newC, Tpay, pay);
-                if (pay > 0.0f)
-                    takeHeatAround(fluid, rigid, gas, thermal, x, y, Tpay, pay, false);
-                if (pay > 0.0f)
-                    takeHeatAround(fluid, rigid, gas, thermal, dx, dy, Tpay, pay, true);
-                if (pay > 0.0f)
-                    takeHeatAboveK(gas.heat[static_cast<size_t>(dest)],
-                        ThermalEngine::gasCapacity(gas, dest), Tpay, pay);
-                // Unpaid remainder stays as a small numerical defect. Do not
-                // strip neighbors to MIN_SAFE — that froze leftover water.
-            } else if (Qneed < 0.0f) {
-                gas.heat[static_cast<size_t>(dest)] += -Qneed;
-            }
-
-            gas.addWaterVapor(dest, static_cast<float>(vaporGot));
-            gas.heat[static_cast<size_t>(dest)] += Edest;
-            if (!std::isfinite(gas.heat[static_cast<size_t>(dest)]) || gas.heat[static_cast<size_t>(dest)] < 0.0f)
-                gas.heat[static_cast<size_t>(dest)] = 0.0f;
-
-            fluid.expectedVolume -= static_cast<double>(dFill);
-            gas.expectedAmount += vaporGot;
-            gas.expectedWaterVapor += vaporGot;
-            st.massBoiledKg += m;
-            st.latentAbsorbedJ += m * static_cast<double>(Lv);
-            st.vaporPlacedAmount += vaporGot;
-            st.liquidFillRemoved += dFill;
-            ++st.boilCells;
-            wakeAllEngines(fluid, gas, thermal, x, y);
-            wakeAllEngines(fluid, gas, thermal, dx, dy);
-        }
-    }
-
-    if (anyVapor && canTransition(SUBSTANCE_WATER, MatterPhase::Gas, MatterPhase::Liquid)) {
-        for (int y = 0; y < GH; ++y) for (int x = 0; x < GW; ++x) {
-            int gi = GasEngine::ci(x, y);
-            float vap = gas.vaporAmount(gi);
-            if (vap <= GAS_MIN_AMOUNT) continue;
-            if (isBlockedSolid(fluid, rigid, x, y)) continue;
-            float vol = gas.availableVolume(fluid, x, y);
-            if (vol < GAS_MIN_VOLUME) continue;
-            float Tgas = ThermalEngine::gasTempK(gas, gi);
-            double Pv = static_cast<double>(vaporPartialPressurePa(fluid, gas, x, y));
-            double Psat = saturationVaporPressurePa(SUBSTANCE_WATER, Tgas);
-            if (!(Pv > Psat * (1.0 + static_cast<double>(kSatHystRel)))) {
-                if (Pv > Psat * 0.9 && vap > 1.0e-3f) {
-                    ++st.blockedCondense;
-                    ++st.blockedCondenseEquilibrium;
-                }
-                continue;
-            }
-            // Water partial P depends on the Water component amount at T.
-            // Invert Psat to a Water-vapor amount; do not use isothermal (ΔP/Pref)*V.
-            float psatAtm = static_cast<float>(Psat / static_cast<double>(pref));
-            float satAmt = gasAmountFromPressureAtm(psatAtm, vol, Tgas);
-            double excessAmt = static_cast<double>(vap) - static_cast<double>(satAmt);
-            if (!(excessAmt > GAS_MIN_AMOUNT) || !std::isfinite(excessAmt)) continue;
-            excessAmt = std::min(excessAmt, static_cast<double>(vap));
-            double mAvail = gasAmountToMassKg(SUBSTANCE_WATER, vap, cpm);
-            double mExcess = gasAmountToMassKg(SUBSTANCE_WATER, excessAmt, cpm);
-            double mWant = std::min({mAvail, mExcess, mRateFill});
-            if (!(mWant > 1.0e-9)) continue;
-            int dest = findLiquidDest(fluid, rigid, gas, x, y,
-                static_cast<float>(massKgToLiquidFill(SUBSTANCE_WATER, mWant, cpm)),
-                salt, true, Tgas);
-            if (dest < 0) {
-                ++st.blockedCondense;
-                ++st.blockedCondenseNoLiquidSpace;
-                continue;
-            }
-            int dx = dest % GW, dy = dest / GW;
-            if (fluid.solid[static_cast<size_t>(dest)]) {
-                ++st.blockedCondense;
-                ++st.blockedCondenseNoLiquidSpace;
-                continue;
-            }
-            float roomFill = 1.0f - fluid.fill[static_cast<size_t>(dest)];
-            if (roomFill < kMinFillMove) {
-                ++st.blockedCondense;
-                ++st.blockedCondenseNoLiquidSpace;
-                continue;
-            }
-            float Pdest = localAmbientPressurePa(fluid, rigid, gas, dx, dy);
-            float TsatDest = static_cast<float>(saturationTemperatureK(SUBSTANCE_WATER, Pdest));
-            float Cdest = ThermalEngine::liquidCapacity(fluid, dest);
-            float Edest0 = fluid.liquidHeat[static_cast<size_t>(dest)];
-            float Tdest = (Cdest > MIN_THERMAL_CAPACITY) ? tempFromEnergy(Edest0, Cdest) : Tgas;
-            if (Tdest > TsatDest - kBoilEpsK) {
-                ++st.blockedCondense;
-                ++st.blockedCondenseEquilibrium;
-                continue;
-            }
-            double m = mWant;
-            float dFill = static_cast<float>(massKgToLiquidFill(SUBSTANCE_WATER, m, cpm));
-            dFill = std::min(dFill, roomFill);
-            if (dFill < kMinFillMove) continue;
-            m = liquidFillToMassKg(SUBSTANCE_WATER, dFill, cpm);
-            float vaporTake = static_cast<float>(massKgToGasAmount(SUBSTANCE_WATER, m, cpm));
-            float heatBefore = gas.heat[static_cast<size_t>(gi)];
-            float taken = gas.takeWaterVapor(gi, vaporTake);
-            if (taken <= GAS_MIN_AMOUNT) {
-                ++st.blockedCondense;
-                ++st.blockedCondenseEnergy;
-                continue;
-            }
-            float Eremoved = std::max(0.0f, heatBefore - gas.heat[static_cast<size_t>(gi)]);
-            m = gasAmountToMassKg(SUBSTANCE_WATER, taken, cpm);
-            dFill = static_cast<float>(massKgToLiquidFill(SUBSTANCE_WATER, m, cpm));
-            float TmPlace = phase.meltingPointK;
-            float Tplace = std::min(Tgas, TsatDest);
-            if (TmPlace > 1.0f) Tplace = std::max(Tplace, TmPlace);
-            Tplace = std::clamp(Tplace, MIN_SAFE_TEMPERATURE_K,
-                (TsatDest > TmPlace) ? TsatDest : std::max(TsatDest, TmPlace));
-            float Eliquid = static_cast<float>(m) * cpLiquid * Tplace;
-            float leftover = static_cast<float>(m * static_cast<double>(Lv)) + Eremoved - Eliquid;
-            fluid.addLiquidFill(dest, dFill, Eliquid);
-            if (leftover > 0.0f) {
-                float TliqCap = std::max(TmPlace, TsatDest - 1.0f);
-                addHeatToK(fluid.liquidHeat[static_cast<size_t>(dest)],
-                    ThermalEngine::liquidCapacity(fluid, dest), TliqCap, leftover);
-                addHeatToK(gas.heat[static_cast<size_t>(gi)], ThermalEngine::gasCapacity(gas, gi),
-                    TsatDest + 40.0f, leftover);
-                for (int n = 0; n < 4; ++n) {
-                    if (!(leftover > 0.0f)) break;
-                    dumpHeatBudget(fluid, rigid, gas, thermal, dx + kDx[n], dy + kDy[n],
-                        TsatDest + 80.0f, leftover);
-                }
-                for (int n = 0; n < 4 && leftover > 0.0f; ++n) {
-                    int nx = dx + kDx[n], ny = dy + kDy[n];
-                    if (!FluidEngine::inside(nx, ny)) continue;
-                    int ni = FluidEngine::ci(nx, ny);
-                    if (!fluid.solid[static_cast<size_t>(ni)]) continue;
-                    fluid.solidHeat[static_cast<size_t>(ni)] += leftover;
-                    leftover = 0.0f;
-                    thermal.wakeCell(nx, ny);
-                }
-                if (leftover > 0.0f)
-                    gas.heat[static_cast<size_t>(gi)] += leftover;
-            } else if (leftover < 0.0f) {
-                float need = -leftover;
-                takeHeatAround(fluid, rigid, gas, thermal, dx, dy, Tplace, need, true);
-            }
-            int xw = dest % GW, yw = dest / GW;
-            fluid.waterShade[static_cast<size_t>(dest)] = fluid.makeShade(xw, yw);
-            fluid.expectedVolume += static_cast<double>(dFill);
-            gas.expectedAmount -= taken;
-            gas.expectedWaterVapor -= taken;
-            st.massCondensedKg += m;
-            st.latentReleasedJ += m * static_cast<double>(Lv);
-            st.liquidFillAdded += dFill;
-            ++st.condenseCells;
-            wakeAllEngines(fluid, gas, thermal, x, y);
-            wakeAllEngines(fluid, gas, thermal, dx, dy);
-        }
+    if (anyLiquid || anyVapor) {
+        LiquidGasPhaseTickStats lg = stepLiquidGasPhaseChange(fluid, rigid, gas, thermal, dtSafe, salt);
+        applyLiquidGasStatsToWaterCompat(lg, st);
     }
 
     if (anyLiquid || anyIce || anyPending)
@@ -1429,6 +1055,63 @@ void runWaterPhaseDiagnostics(FluidEngine &fluid, RigidBodyEngine &rigid,
             + " escaped_vapor_kg=" + f8(escapedVaporMass));
 
     emit("no_ice_id", substanceFromInternalName("ice") == SUBSTANCE_NONE, "");
+
+    resetSealed();
+    {
+        int i = FluidEngine::ci(55, 50);
+        fluid.setLiquidComponentAmount(i, SUBSTANCE_WATER, 1.0f);
+        float C = ThermalEngine::liquidCapacity(fluid, i);
+        fluid.liquidHeat[static_cast<size_t>(i)] = energyFromTemp(C, Tb + 40.0f);
+        fluid.expectedVolume = 1.0;
+        fluid.wakeAllFluidChunks();
+        gas.handleWorldEdit(fluid);
+        double genericVaporized = 0.0;
+        uint32_t salt = 7;
+        for (int n = 0; n < 40; ++n) {
+            LiquidGasPhaseTickStats lg = stepLiquidGasPhaseChange(fluid, rigid, gas, thermal, PHYSICS_DT, salt++);
+            genericVaporized += lg.massVaporizedKg;
+        }
+        double waterGasAmt = 0.0;
+        bool steamId = false;
+        for (int gi = 0; gi < GW * GH; ++gi) {
+            waterGasAmt += gas.gasComponentAmount(gi, SUBSTANCE_WATER);
+        }
+        MatterSample vaporSample = sampleMatterAt(fluid, rigid, gas, 55, 49);
+        bool waterGasPhase = waterGasAmt > GAS_MIN_AMOUNT;
+        emit("generic_executor_water_liquid_to_gas",
+            genericVaporized > 1.0e-4 && waterGasPhase && !steamId,
+            "mass=" + f8(genericVaporized) + " water_gas_amt=" + f8(waterGasAmt)
+                + " sample_id=" + std::to_string(vaporSample.identity.substance)
+                + " sample_phase=" + std::to_string(static_cast<int>(vaporSample.identity.phase)));
+        for (int gi = 0; gi < GW * GH; ++gi) {
+            if (gas.gasComponentAmount(gi, SUBSTANCE_WATER) <= GAS_MIN_AMOUNT) continue;
+            float cap = ThermalEngine::gasCapacity(gas, gi);
+            if (cap > MIN_THERMAL_CAPACITY)
+                gas.heat[static_cast<size_t>(gi)] = energyFromTemp(cap, 280.0f);
+        }
+        for (int y = 0; y < GH; ++y) for (int x = 0; x < GW; ++x) {
+            int li = FluidEngine::ci(x, y);
+            if (fluid.fill[static_cast<size_t>(li)] < kMinFillMove) continue;
+            float cap = ThermalEngine::liquidCapacity(fluid, li);
+            if (cap > MIN_THERMAL_CAPACITY)
+                fluid.liquidHeat[static_cast<size_t>(li)] = energyFromTemp(cap, 280.0f);
+        }
+        double genericCondensed = 0.0;
+        for (int n = 0; n < 50; ++n) {
+            LiquidGasPhaseTickStats lg = stepLiquidGasPhaseChange(fluid, rigid, gas, thermal, PHYSICS_DT, salt++);
+            genericCondensed += lg.massCondensedKg;
+        }
+        bool liquidWater = false;
+        for (int li = 0; li < GW * GH; ++li) {
+            if (fluid.liquidComponentAmount(li, SUBSTANCE_WATER) > kMinFillMove) {
+                liquidWater = true;
+                break;
+            }
+        }
+        emit("generic_executor_water_gas_to_liquid",
+            (genericCondensed > 1.0e-6 || liquidWater) && substanceFromInternalName("steam") == SUBSTANCE_NONE,
+            "condensed=" + f8(genericCondensed) + " liquid=" + (liquidWater ? "1" : "0"));
+    }
 
     out << "summary\t" << (failed == 0 ? "PASS" : "FAIL") << '\t'
         << passed << " passed, " << failed << " failed\n";

@@ -14,6 +14,7 @@
 #include "render/WorldRenderer.h"
 #include "world/WorldQuery.h"
 #include "world/WaterPhaseChange.h"
+#include "world/PhaseChangeEngine.h"
 #include "chemistry/ReactionEngine.h"
 #include "substance/SubstanceRegistry.h"
 #include "substance/PhaseTransfer.h"
@@ -1098,7 +1099,7 @@ void worldTick() {
     if (simSchedule.takeThermal(dtThermal))
         thermal.simulationTick(engine, rigid, gas, dtThermal);
     if (simSchedule.takePhase(dtPhase))
-        stepWaterPhaseChange(engine, rigid, gas, thermal, dtPhase);
+        stepPhaseChanges(engine, rigid, gas, thermal, dtPhase);
     if (simSchedule.takeChemistry(dtChem))
         reactions.simulationTick(engine, rigid, gas, thermal, dtChem);
     gas.recomputePressure();
