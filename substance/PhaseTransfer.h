@@ -8,9 +8,8 @@
 #include <cmath>
 
 // Phase-transfer accounting helpers (fill ↔ mass ↔ gas amount, latent energy,
-// Clausius–Clapeyron saturation). Live Liquid ⇄ Gas is in
-// world/PhaseChangeEngine.cpp. Live water solid ⇄ liquid is in
-// world/WaterPhaseChange.cpp.
+// Clausius–Clapeyron saturation). Live Liquid ⇄ Gas and Solid ⇄ Liquid are in
+// world/PhaseChangeEngine.cpp. WaterPhaseChange.cpp is diagnostics/compat only.
 //
 // Current sandbox units (do not invent a second system):
 //
@@ -358,6 +357,7 @@ inline float gasMixtureConductivity(GasComponentView const &view) {
 }
 
 // Closed accounting only. Does not mutate FluidEngine / GasEngine / rigid storage.
+// Live Liquid ⇄ Gas and Solid ⇄ Liquid are in world/PhaseChangeEngine.cpp.
 inline PhaseTransferResult convertPhaseAmount(SubstanceId id, MatterPhase from, MatterPhase to,
     double sourceAmount, double cellsPerMeter)
 {

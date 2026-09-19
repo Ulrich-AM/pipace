@@ -42,10 +42,9 @@ struct WaterPhaseTickStats {
 void runWaterPhaseStabilityDiagnostics(FluidEngine &fluid, RigidBodyEngine &rigid,
     GasEngine &gas, ThermalEngine &thermal);
 
-// Live WATER liquid ⇄ gas (via generic PhaseChangeEngine) and liquid ⇄ solid.
-// Honey mixtures are skipped. Occupancy stays one primary medium: vapor is
-// placed in neighboring gas cells. Solid water uses rigid MATERIAL_WATER_SOLID
-// (still SUBSTANCE_WATER).
+// Live WATER diagnostics / compatibility wrappers. Authoritative Liquid ⇄ Gas
+// and Solid ⇄ Liquid physics live in PhaseChangeEngine. Honey mixtures are
+// skipped. Solid water uses rigid MATERIAL_WATER_SOLID (still SUBSTANCE_WATER).
 WaterPhaseTickStats stepWaterPhaseChange(FluidEngine &fluid, RigidBodyEngine &rigid,
     GasEngine &gas, ThermalEngine &thermal, float dt);
 

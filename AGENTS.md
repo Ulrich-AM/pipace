@@ -43,8 +43,8 @@ PIPACE/
     PhaseTransfer.h/.cpp  # fill/mass/gas-amount conversion
   world/
     WorldQuery.h/.cpp      # sampleMatterAt (SubstanceId + phase), phase/registry diags
-    PhaseChangeEngine.h/.cpp # generic live Liquid ⇄ Gas by SubstanceId / PhaseProperties
-    WaterPhaseChange.h/.cpp # Water Solid ⇄ Liquid; Water L⇄G compatibility wrapper
+    PhaseChangeEngine.h/.cpp # generic live Liquid ⇄ Gas and Solid ⇄ Liquid by SubstanceId
+    WaterPhaseChange.h/.cpp # Water diagnostics / compatibility wrappers
   chemistry/
     ReactionTypes.h / ReactionRegistry.h/.cpp  # ReactionId + ReactionDefinition data only
     ReactionMatterAccess.h/.cpp                # SubstanceId+phase query; liquid commit
@@ -52,7 +52,7 @@ PIPACE/
   sim/
     SimulationQuality.h/.cpp                   # SimulationQualityProfile + tick scheduler
   docs/
-    PHASE_CHANGES.md       # Live Liquid ⇄ Gas is generic; Water Solid ⇄ Liquid is still Water-specific
+    PHASE_CHANGES.md       # Live Liquid ⇄ Gas and Solid ⇄ Liquid are generic by SubstanceId
   CMakeLists.txt / build.bat / run.bat
   README.md
   AGENTS.md
@@ -87,10 +87,9 @@ Static `solid[]` walls use Stone thermal/mechanical identity but are
 **moisture-inert** (no absorb / drip / wetness). Porous Stone rigid bodies still
 absorb. Condensation may form liquid in adjacent free cells, not inside the wall.
 
-`supportsPhase` is capability metadata. Live **Liquid ⇄ Gas** is generic
-(`world/PhaseChangeEngine.cpp`) for substances whose metadata supports both
-endpoints; Water is currently the only eligible built-in. Live **Solid ⇄ Liquid**
-is still Water-specific (`world/WaterPhaseChange.cpp`). Do **not** add
+`supportsPhase` is capability metadata. Live **Liquid ⇄ Gas** and **Solid ⇄ Liquid**
+are generic (`world/PhaseChangeEngine.cpp`) for substances whose metadata supports
+both endpoints; Water is currently the only eligible built-in. Do **not** add
 SUBSTANCE_ICE / SUBSTANCE_STEAM.
 Density stays phase-specific: mechanical.densityRel (solid), fluid.density (liquid),
 gas amount/EoS (gas). Honey/water mixtures do not boil or freeze yet.
@@ -207,9 +206,9 @@ Do **not** sacrifice conservation or replace the donor/receiver limiter with sca
 Completed architecture: SubstanceId, registry, grouped properties, MatterPhase /
 MatterIdentity, world query, material migration, moisture stabilization.
 
-**Next major milestone: SACE / mixtures** — live `Liquid ⇄ Gas` is generic by
-SubstanceId (`world/PhaseChangeEngine.cpp`); Water `Solid ⇄ Liquid` is still
-Water-specific (`world/WaterPhaseChange.cpp`). Honey mixtures still skip phase change.
+**Next major milestone: SACE / mixtures** — live `Liquid ⇄ Gas` and `Solid ⇄ Liquid`
+are generic by SubstanceId (`world/PhaseChangeEngine.cpp`). Honey mixtures still
+skip phase change.
 
 Longer sequence (historical): liquid correctness → performance → modularization →
 honey composition → rigid coupling → temperature/gas → **phase changes** → SACE.

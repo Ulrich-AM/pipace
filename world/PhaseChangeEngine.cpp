@@ -5,6 +5,7 @@
 #include "rigid/RigidBodyEngine.h"
 #include "substance/LiquidMixtureProperties.h"
 #include "substance/PhaseTransfer.h"
+#include "substance/SubstanceRegistry.h"
 #include "thermal/ThermalEngine.h"
 #include "world/WaterPhaseChange.h"
 
@@ -24,11 +25,19 @@ constexpr float kMinFillMove = 1.0e-6f;
 constexpr float kBoilEpsK = 0.05f;
 constexpr float kSatHystRel = 0.002f;
 constexpr int kSearchLimit = 96;
+constexpr int kSolidSearchLimit = 32;
+constexpr float kFreezeEpsK = 0.05f;
+constexpr float kMaxSolidPixelsPerSec = 2.5f;
+constexpr float kMinSolidRemain = 0.03f;
 
 struct PhaseScratch {
     std::vector<int> q;
     std::vector<uint32_t> seen;
     uint32_t gen = 1;
+    std::vector<uint8_t> reserved;
+    std::vector<int> spawnCells;
+    std::vector<int> worldCells;
+    std::vector<int> spawnByMat[MATERIAL_COUNT];
 
     void prepareSeen() {
         size_t n = static_cast<size_t>(GW * GH);
@@ -54,6 +63,11 @@ struct PhaseScratch {
 };
 
 PhaseScratch &liquidGasScratch() {
+    static PhaseScratch s;
+    return s;
+}
+
+PhaseScratch &solidLiquidScratch() {
     static PhaseScratch s;
     return s;
 }
@@ -185,6 +199,49 @@ bool resolvePureLiquidForVaporization(FluidEngine const &fluid, int i,
     outId = found;
     outFill = fluid.liquidComponentAmount(i, found);
     return outFill >= kMinFillMove;
+}
+
+bool resolvePureLiquidForSolidification(FluidEngine const &fluid, int i,
+    SubstanceId &outId, float &outFill)
+{
+    outId = SUBSTANCE_NONE;
+    outFill = 0.0f;
+    float fill = fluid.fill[static_cast<size_t>(i)];
+    if (fill < kMinFillMove) return false;
+    LiquidComponentView view = fluid.liquidComponents(i);
+    SubstanceId found = SUBSTANCE_NONE;
+    float mainAmt = 0.0f;
+    float otherAmt = 0.0f;
+    for (int n = 0; n < view.count; ++n) {
+        SubstanceId sid = view.items[n].id;
+        float amt = view.items[n].amount;
+        if (!validLiquidComponentId(sid) || !std::isfinite(amt) || amt <= kMinLiquidComponent)
+            continue;
+        if (found == SUBSTANCE_NONE || sid == found) {
+            found = sid;
+            mainAmt += amt;
+        } else {
+            otherAmt += amt;
+        }
+    }
+    if (found == SUBSTANCE_NONE) return false;
+    if (otherAmt > kMeaningfulLiquidComponent) return false;
+    if (mainAmt + kMeaningfulLiquidComponent < fill) return false;
+    if (!supportsLiveSolidLiquidTransition(found)) return false;
+    outId = found;
+    outFill = fluid.liquidComponentAmount(i, found);
+    return outFill >= kMinFillMove;
+}
+
+void addLiquidComponentWithHeat(FluidEngine &fluid, int dest, SubstanceId id, float dFill, float dHeat) {
+    if (dest < 0 || dest >= GW * GH || !(dFill > 0.0f)) return;
+    fluid.addLiquidComponentAmount(dest, id, dFill);
+    fluid.liquidHeat[static_cast<size_t>(dest)] += dHeat;
+    if (id == SUBSTANCE_WATER) {
+        int x = dest % GW, y = dest / GW;
+        fluid.waterShade[static_cast<size_t>(dest)] = fluid.makeShade(x, y);
+    }
+    fluid.clearEmptyLiquidCell(dest);
 }
 
 float localAmbientPressurePa(FluidEngine const &fluid, RigidBodyEngine const &rigid, GasEngine const &gas,
@@ -502,6 +559,102 @@ void takeHeatAround(FluidEngine &fluid, RigidBodyEngine &rigid, GasEngine &gas,
         takeHeatAtCell(fluid, rigid, gas, thermal, x + kDx[n], y + kDy[n], tMin, budget);
 }
 
+float heatRoomAround(FluidEngine const &fluid, RigidBodyEngine const &rigid, GasEngine const &gas,
+    int x, int y, float tMax)
+{
+    float room = 0.0f;
+    auto add = [&](int cx, int cy) {
+        if (!FluidEngine::inside(cx, cy)) return;
+        int i = FluidEngine::ci(cx, cy);
+        int body = rigid.occupant[static_cast<size_t>(i)];
+        if (body >= 0 && body < static_cast<int>(rigid.bodies.size())) {
+            RigidBody const &b = rigid.bodies[static_cast<size_t>(body)];
+            float lx, ly;
+            RigidBodyEngine::worldToLocal(b, cx + 0.5f, cy + 0.5f, lx, ly);
+            int ix = static_cast<int>(std::floor(lx)), iy = static_cast<int>(std::floor(ly));
+            if (RigidBodyEngine::maskOccupied(b, ix, iy)) {
+                int li = iy * b.maskW + ix;
+                if (li >= 0 && li < static_cast<int>(b.heat.size()))
+                    room += heatRoomToK(b.heat[static_cast<size_t>(li)],
+                        ThermalEngine::rigidPixelCapacity(b, li), tMax);
+            }
+            return;
+        }
+        if (fluid.solid[static_cast<size_t>(i)]) {
+            room += heatRoomToK(fluid.solidHeat[static_cast<size_t>(i)],
+                ThermalEngine::wallCapacity(fluid, i), tMax);
+            return;
+        }
+        if (fluid.fill[static_cast<size_t>(i)] > 1.0e-8f) {
+            room += heatRoomToK(fluid.liquidHeat[static_cast<size_t>(i)],
+                ThermalEngine::liquidCapacity(fluid, i), tMax);
+            return;
+        }
+        if (gas.amount[static_cast<size_t>(i)] > GAS_MIN_AMOUNT)
+            room += heatRoomToK(gas.heat[static_cast<size_t>(i)],
+                ThermalEngine::gasCapacity(gas, i), tMax);
+    };
+    add(x, y);
+    for (int n = 0; n < 4; ++n) add(x + kDx[n], y + kDy[n]);
+    return room;
+}
+
+bool solidDestCellFree(FluidEngine const &fluid, RigidBodyEngine const &rigid,
+    std::vector<uint8_t> const &reserved, int x, int y)
+{
+    if (!FluidEngine::inside(x, y)) return false;
+    int i = FluidEngine::ci(x, y);
+    if (fluid.solid[static_cast<size_t>(i)]) return false;
+    if (rigid.occupant[static_cast<size_t>(i)] >= 0) return false;
+    if (!reserved.empty() && reserved[static_cast<size_t>(i)]) return false;
+    return true;
+}
+
+int findSolidDest(FluidEngine const &fluid, RigidBodyEngine const &rigid,
+    std::vector<uint8_t> const &reserved, int sx, int sy)
+{
+    auto consider = [&](int x, int y) -> bool {
+        return solidDestCellFree(fluid, rigid, reserved, x, y);
+    };
+    if (consider(sx, sy)) return FluidEngine::ci(sx, sy);
+    for (int n = 0; n < 4; ++n) {
+        int x = sx + kDx[n], y = sy + kDy[n];
+        if (consider(x, y)) return FluidEngine::ci(x, y);
+    }
+    PhaseScratch &sc = solidLiquidScratch();
+    sc.prepareSeen();
+    sc.q.reserve(kSolidSearchLimit);
+    auto push = [&](int x, int y) {
+        if (!FluidEngine::inside(x, y)) return;
+        if (isBlockedSolid(fluid, rigid, x, y)) return;
+        int i = FluidEngine::ci(x, y);
+        if (!sc.mark(i)) return;
+        sc.q.push_back(i);
+    };
+    if (FluidEngine::inside(sx, sy)) {
+        int si = FluidEngine::ci(sx, sy);
+        if (sc.mark(si)) sc.q.push_back(si);
+    }
+    for (size_t head = 0; head < sc.q.size() && static_cast<int>(head) < kSolidSearchLimit; ++head) {
+        int i = sc.q[head];
+        int x = i % GW, y = i / GW;
+        if (consider(x, y)) return i;
+        for (int n = 0; n < 4; ++n) push(x + kDx[n], y + kDy[n]);
+    }
+    return -1;
+}
+
+bool anyEligibleGasVapor(GasEngine const &gas) {
+    for (int i = 0; i < GW * GH; ++i) {
+        if (gas.amount[static_cast<size_t>(i)] <= GAS_MIN_AMOUNT
+            && gas.gasCompCount[static_cast<size_t>(i)] == 0)
+            continue;
+        if (gasViewHasLiveLiquidGasVapor(gas.gasComponents(i)))
+            return true;
+    }
+    return false;
+}
+
 } // namespace
 
 bool supportsLiveLiquidGasTransition(SubstanceId id) {
@@ -529,6 +682,38 @@ float liquidGasTransferRateFillPerSec() {
     return kMaxLiquidGasFillPerSec;
 }
 
+float solidLiquidTransferRatePixelsPerSec() {
+    return kMaxSolidPixelsPerSec;
+}
+
+bool gasViewHasLiveLiquidGasVapor(GasComponentView const &view) {
+    int n = view.count;
+    if (n > kMaxGasComponents) n = kMaxGasComponents;
+    for (int i = 0; i < n; ++i) {
+        SubstanceId id = view.items[i].id;
+        float amt = view.items[i].amount;
+        if (!(amt > GAS_MIN_AMOUNT) || !std::isfinite(amt)) continue;
+        if (supportsLiveLiquidGasTransition(id)) return true;
+    }
+    return false;
+}
+
+bool supportsLiveSolidLiquidTransition(SubstanceId id) {
+    if (id == SUBSTANCE_NONE || !validSubstance(id)) return false;
+    if (!supportsPhase(id, MatterPhase::Solid) || !supportsPhase(id, MatterPhase::Liquid))
+        return false;
+    if (!hasMechanicalProperties(id) || !hasFluidProperties(id)) return false;
+    if (!canTransition(id, MatterPhase::Solid, MatterPhase::Liquid)) return false;
+    if (rigidMaterialForSubstance(id) == MATERIAL_EMPTY) return false;
+    PhaseProperties const &p = phaseForSubstance(id);
+    if (!p.valid) return false;
+    if (!(p.meltingPointK > 1.0f) || !std::isfinite(p.meltingPointK)) return false;
+    if (!(p.latentHeatFusion > 0.0f) || !std::isfinite(p.latentHeatFusion)) return false;
+    if (!(solidFractionToMassKg(id, 1.0, 4.0) > 0.0)) return false;
+    if (!(liquidFillToMassKg(id, 1.0, 4.0) > 0.0)) return false;
+    return true;
+}
+
 void applyLiquidGasStatsToWaterCompat(LiquidGasPhaseTickStats const &lg, WaterPhaseTickStats &st) {
     st.massBoiledKg += lg.massVaporizedKg;
     st.massCondensedKg += lg.massCondensedKg;
@@ -552,6 +737,23 @@ void applyLiquidGasStatsToWaterCompat(LiquidGasPhaseTickStats const &lg, WaterPh
         + lg.blockedCondensationEnergy;
 }
 
+void applySolidLiquidStatsToWaterCompat(SolidLiquidPhaseTickStats const &sl, WaterPhaseTickStats &st) {
+    st.massFrozenKg += sl.massSolidifiedKg;
+    st.massMeltedKg += sl.massMeltedKg;
+    st.latentFusionReleasedJ += sl.latentFusionReleasedJ;
+    st.latentFusionAbsorbedJ += sl.latentFusionAbsorbedJ;
+    st.liquidFillRemoved += sl.liquidFillRemoved;
+    st.liquidFillAdded += sl.liquidFillAdded;
+    st.freezeCells += sl.solidifyCells;
+    st.meltPixels += sl.meltPixels;
+    st.icePixelsSpawned += sl.solidPixelsSpawned;
+    st.blockedFreeze += sl.blockedSolidify;
+    st.blockedMelt += sl.blockedMelt;
+    st.blockedFreezeNoDest += sl.blockedSolidifyNoDest;
+    st.blockedMeltNoDest += sl.blockedMeltNoDest;
+    st.blockedMeltEnergy += sl.blockedMeltEnergy;
+}
+
 LiquidGasPhaseTickStats stepLiquidGasPhaseChange(FluidEngine &fluid, RigidBodyEngine &rigid,
     GasEngine &gas, ThermalEngine &thermal, float dt, uint32_t salt)
 {
@@ -564,11 +766,7 @@ LiquidGasPhaseTickStats stepLiquidGasPhaseChange(FluidEngine &fluid, RigidBodyEn
         static_cast<double>(kMaxLiquidGasFillPerSec) * static_cast<double>(dtSafe), cpm);
 
     bool anyLiquid = fluid.expectedVolume > 1.0e-10;
-    // Compatibility/accounting only: Water vapor counters are a cheap skip while
-    // Water is the only live Liquid/Gas substance. Identity still comes from
-    // stored components, not these counters.
-    bool anyVapor = gas.currentWaterVapor > GAS_MIN_AMOUNT
-        || gas.expectedWaterVapor > GAS_MIN_AMOUNT;
+    bool anyVapor = anyEligibleGasVapor(gas);
     if (!anyLiquid && !anyVapor) return st;
 
     if (anyLiquid) {
@@ -860,26 +1058,335 @@ LiquidGasPhaseTickStats stepLiquidGasPhaseChange(FluidEngine &fluid, RigidBodyEn
     return st;
 }
 
+SolidLiquidPhaseTickStats stepSolidLiquidPhaseChange(FluidEngine &fluid, RigidBodyEngine &rigid,
+    GasEngine &gas, ThermalEngine &thermal, float dt, uint32_t salt)
+{
+    SolidLiquidPhaseTickStats st;
+    float dtSafe = (dt > 1.0e-6f && std::isfinite(dt)) ? dt : PHYSICS_DT;
+    double cpm = fluid.config.cellsPerMeter;
+
+    PhaseScratch &sc = solidLiquidScratch();
+    size_t nCells = static_cast<size_t>(GW * GH);
+    if (sc.reserved.size() != nCells)
+        sc.reserved.assign(nCells, 0);
+    else
+        std::fill(sc.reserved.begin(), sc.reserved.end(), 0);
+    for (int m = 0; m < MATERIAL_COUNT; ++m)
+        sc.spawnByMat[m].clear();
+    sc.spawnCells.clear();
+
+    auto trySpawnPending = [&](int x, int y) {
+        int i = FluidEngine::ci(x, y);
+        SubstanceId id = fluid.solidifyPendingSubstance(i);
+        if (id == SUBSTANCE_NONE || !supportsLiveSolidLiquidTransition(id)) return;
+        MaterialId mat = rigidMaterialForSubstance(id);
+        if (mat == MATERIAL_EMPTY || mat >= MATERIAL_COUNT) {
+            ++st.blockedSolidify;
+            ++st.blockedSolidifyNoDest;
+            return;
+        }
+        double pixelKg = solidFractionToMassKg(id, 1.0, cpm);
+        if (!(pixelKg > 1.0e-9)) return;
+        while (static_cast<double>(fluid.solidifyPendingMassKg(i)) + 1.0e-9 >= pixelKg) {
+            int dest = findSolidDest(fluid, rigid, sc.reserved, x, y);
+            if (dest < 0) {
+                ++st.blockedSolidify;
+                ++st.blockedSolidifyNoDest;
+                break;
+            }
+            int dx = dest % GW, dy = dest / GW;
+            float leftoverFill = fluid.fill[static_cast<size_t>(dest)];
+            if (leftoverFill > kMinFillMove) {
+                LiquidCarry carry = fluid.takeLiquidCarry(dest, leftoverFill);
+                float rem = fluid.relocateVolumeTopologySafe(dx, dy, leftoverFill, 0.0f, 0.0f, &carry, true);
+                if (rem > 1.0e-5f) {
+                    for (int n = 0; n < carry.compCount; ++n) {
+                        if (carry.comps[n].amount > 0.0f && validLiquidComponentId(carry.comps[n].id))
+                            fluid.addLiquidComponentAmount(dest, carry.comps[n].id, carry.comps[n].amount);
+                    }
+                    fluid.liquidHeat[static_cast<size_t>(dest)] += carry.heat;
+                    fluid.dyeR[static_cast<size_t>(dest)] += carry.dyeR;
+                    fluid.dyeG[static_cast<size_t>(dest)] += carry.dyeG;
+                    fluid.dyeB[static_cast<size_t>(dest)] += carry.dyeB;
+                    fluid.clearEmptyLiquidCell(dest);
+                    ++st.blockedSolidify;
+                    break;
+                }
+            }
+            if (!fluid.takeSolidifyPendingKg(i, id, static_cast<float>(pixelKg)))
+                break;
+            sc.reserved[static_cast<size_t>(dest)] = 1;
+            sc.spawnByMat[mat].push_back(dest);
+            ++st.solidPixelsSpawned;
+        }
+    };
+
+    for (int y = 0; y < GH; ++y) for (int x = 0; x < GW; ++x) {
+        int i = FluidEngine::ci(x, y);
+        if (isBlockedSolid(fluid, rigid, x, y)) {
+            trySpawnPending(x, y);
+            continue;
+        }
+        float fill = fluid.fill[static_cast<size_t>(i)];
+        SubstanceId id = SUBSTANCE_NONE;
+        float liquidFill = 0.0f;
+        if (fill >= kMinFillMove && resolvePureLiquidForSolidification(fluid, i, id, liquidFill)) {
+            PhaseProperties const &phase = phaseForSubstance(id);
+            float Tm = phase.meltingPointK;
+            float Lf = phase.latentHeatFusion;
+            double pixelKg = solidFractionToMassKg(id, 1.0, cpm);
+            double mRate = pixelKg * static_cast<double>(kMaxSolidPixelsPerSec) * static_cast<double>(dtSafe);
+            float C = ThermalEngine::liquidCapacity(fluid, i);
+            float E = fluid.liquidHeat[static_cast<size_t>(i)];
+            float T = (C > MIN_THERMAL_CAPACITY) ? tempFromEnergy(E, C)
+                : ThermalEngine::sampleTemperatureK(fluid, rigid, gas, x, y);
+            if (liquidFill >= kMinFillMove && T <= Tm + kFreezeEpsK) {
+                SubstanceId pendId = fluid.solidifyPendingSubstance(i);
+                if (pendId != SUBSTANCE_NONE && pendId != id) {
+                    ++st.blockedSolidify;
+                } else {
+                    float roomJ = heatRoomAround(fluid, rigid, gas, x, y, Tm);
+                    double mEnergy = static_cast<double>(roomJ) / static_cast<double>(Lf);
+                    double mFill = liquidFillToMassKg(id, liquidFill, cpm);
+                    double mWant = std::min({mEnergy, mFill, mRate});
+                    if (mWant > 1.0e-9) {
+                        float dFill = static_cast<float>(massKgToLiquidFill(id, mWant, cpm));
+                        dFill = std::min(dFill, liquidFill);
+                        if (dFill >= kMinFillMove) {
+                            double m = liquidFillToMassKg(id, dFill, cpm);
+                            (void)fluid.takeLiquidVolume(i, dFill);
+                            float newC = ThermalEngine::liquidCapacity(fluid, i);
+                            fluid.liquidHeat[static_cast<size_t>(i)] = (newC > MIN_THERMAL_CAPACITY)
+                                ? energyFromTemp(newC, std::min(T, Tm)) : 0.0f;
+                            fluid.expectedVolume -= static_cast<double>(dFill);
+                            if (!fluid.addSolidifyPendingKg(i, id, static_cast<float>(m))) {
+                                addLiquidComponentWithHeat(fluid, i, id, dFill,
+                                    (newC > MIN_THERMAL_CAPACITY) ? energyFromTemp(
+                                        ThermalEngine::liquidCapacity(fluid, i), std::min(T, Tm)) : 0.0f);
+                                fluid.expectedVolume += static_cast<double>(dFill);
+                                ++st.blockedSolidify;
+                            } else {
+                                float latent = static_cast<float>(m * static_cast<double>(Lf));
+                                dumpHeatBudget(fluid, rigid, gas, thermal, x, y, Tm, latent);
+                                for (int n = 0; n < 4 && latent > 0.0f; ++n)
+                                    dumpHeatBudget(fluid, rigid, gas, thermal, x + kDx[n], y + kDy[n], Tm, latent);
+                                if (latent > 0.0f)
+                                    dumpHeatBudget(fluid, rigid, gas, thermal, x, y, Tm, latent);
+                                st.massSolidifiedKg += m;
+                                st.latentFusionReleasedJ += m * static_cast<double>(Lf);
+                                st.liquidFillRemoved += dFill;
+                                ++st.solidifyCells;
+                                wakeAllEngines(fluid, gas, thermal, x, y);
+                            }
+                        }
+                    } else if (mFill > 1.0e-9 && mEnergy <= 1.0e-9) {
+                        ++st.blockedSolidify;
+                        ++st.blockedSolidifyEnergy;
+                    }
+                }
+            }
+        }
+        trySpawnPending(x, y);
+    }
+
+    for (int m = 1; m < MATERIAL_COUNT; ++m) {
+        if (sc.spawnByMat[m].empty()) continue;
+        SubstanceId sid = substanceForMaterialId(static_cast<MaterialId>(m));
+        float Tm = phaseForSubstance(sid).meltingPointK;
+        if (!(Tm > 1.0f)) Tm = AMBIENT_TEMPERATURE_K;
+        rigid.addSameMaterialWorldCells(fluid, sc.spawnByMat[m], static_cast<MaterialId>(m), Tm);
+        for (int dest : sc.spawnByMat[m]) {
+            int dx = dest % GW, dy = dest / GW;
+            wakeAllEngines(fluid, gas, thermal, dx, dy);
+        }
+    }
+
+    bool meltedDirty = false;
+    sc.worldCells.clear();
+    for (int y = 0; y < GH; ++y) for (int x = 0; x < GW; ++x) {
+        MaterialId mat = rigid.worldCellMaterial(x, y);
+        if (mat == MATERIAL_EMPTY) continue;
+        SubstanceId sid = substanceForMaterialId(mat);
+        if (!supportsLiveSolidLiquidTransition(sid)) continue;
+        sc.worldCells.push_back(FluidEngine::ci(x, y));
+    }
+    for (int index : sc.worldCells) {
+        int x = index % GW, y = index / GW;
+        RigidBodyEngine::SourcePixel site = rigid.resolveSourcePixel(fluid, x, y);
+        if (!site.valid) continue;
+        SubstanceId id = site.substance;
+        if (!supportsLiveSolidLiquidTransition(id)) continue;
+        if (!rigid.sourcePixelStillValid(site)) continue;
+        PhaseProperties const &phase = phaseForSubstance(id);
+        float Tm = phase.meltingPointK;
+        float Lf = phase.latentHeatFusion;
+        double pixelKg = solidFractionToMassKg(id, 1.0, cpm);
+        if (!(pixelKg > 1.0e-9) || !(Lf > 1.0f) || !(Tm > 1.0f)) continue;
+        double mRate = pixelKg * static_cast<double>(kMaxSolidPixelsPerSec) * static_cast<double>(dtSafe);
+        float remain = site.fraction;
+        if (remain <= 1.0e-6f) continue;
+        int bi = rigid.indexOfId(site.bodyId);
+        if (bi < 0 || bi >= static_cast<int>(rigid.bodies.size())) continue;
+        RigidBody &b = rigid.bodies[static_cast<size_t>(bi)];
+        int li = site.localIndex;
+        float cap = ThermalEngine::rigidPixelCapacity(b, li);
+        float Eice = site.heatJ;
+        float Tice = tempFromEnergy(Eice, cap);
+        wakeAllEngines(fluid, gas, thermal, x, y);
+        if (!(Tice + kFreezeEpsK >= Tm)) continue;
+        float Eplat = energyFromTemp(std::max(cap, MIN_THERMAL_CAPACITY), Tm);
+        float excess = std::max(0.0f, Eice - Eplat);
+        float neighborQ = heatAvailableAround(fluid, rigid, gas, x, y, Tm, false);
+        float totalQ = excess + neighborQ;
+        if (!(totalQ > 0.0f)) {
+            ++st.blockedMelt;
+            ++st.blockedMeltEnergy;
+            continue;
+        }
+        double mEnergy = static_cast<double>(totalQ) / static_cast<double>(Lf);
+        double mRemain = pixelKg * static_cast<double>(remain);
+        double mWant = std::min({mEnergy, mRemain, mRate});
+        if (!(mWant > 1.0e-9)) {
+            ++st.blockedMelt;
+            ++st.blockedMeltEnergy;
+            continue;
+        }
+        int dest = findLiquidDest(fluid, rigid, gas, id, x, y, salt, false, Tm);
+        if (dest < 0) { ++st.blockedMelt; ++st.blockedMeltNoDest; continue; }
+        int dx = dest % GW, dy = dest / GW;
+        if (dx == x && dy == y) {
+            dest = -1;
+            uint32_t bestKey = ~0u;
+            float bestS = -1.0f;
+            for (int n = 0; n < 4; ++n) {
+                int nx = x + kDx[n], ny = y + kDy[n];
+                if (!FluidEngine::inside(nx, ny) || isBlockedSolid(fluid, rigid, nx, ny)) continue;
+                int ni = FluidEngine::ci(nx, ny);
+                float room = 1.0f - fluid.fill[static_cast<size_t>(ni)];
+                if (room < kMinFillMove) continue;
+                if (!liquidCellAcceptsCondensate(fluid, ni, id)) continue;
+                uint32_t key = destTieKey(nx, ny, salt);
+                if (destBetter(room, key, bestS, bestKey)) {
+                    bestS = room;
+                    bestKey = key;
+                    dest = ni;
+                }
+            }
+            if (dest < 0) dest = findLiquidDest(fluid, rigid, gas, id, x, y, salt, false, Tm);
+            if (dest < 0) { ++st.blockedMelt; ++st.blockedMeltNoDest; continue; }
+            dx = dest % GW; dy = dest / GW;
+            if (dx == x && dy == y) { ++st.blockedMelt; ++st.blockedMeltNoDest; continue; }
+        }
+        if (isBlockedSolid(fluid, rigid, dx, dy)) { ++st.blockedMelt; ++st.blockedMeltNoDest; continue; }
+        if (!liquidCellAcceptsCondensate(fluid, dest, id)) {
+            ++st.blockedMelt;
+            ++st.blockedMeltNoDest;
+            continue;
+        }
+        float roomFill = 1.0f - fluid.fill[static_cast<size_t>(dest)];
+        if (roomFill < kMinFillMove) { ++st.blockedMelt; ++st.blockedMeltNoDest; continue; }
+        float dFill = static_cast<float>(massKgToLiquidFill(id, mWant, cpm));
+        dFill = std::min(dFill, roomFill);
+        if (dFill < kMinFillMove) { ++st.blockedMelt; ++st.blockedMeltNoDest; continue; }
+        double m = liquidFillToMassKg(id, dFill, cpm);
+        float pay = static_cast<float>(m * static_cast<double>(Lf));
+        float iceTake = std::min(pay, excess);
+        pay -= iceTake;
+        if (pay > 0.0f)
+            takeHeatAround(fluid, rigid, gas, thermal, x, y, Tm, pay, false);
+        float leftoverEx = std::max(0.0f, excess - iceTake);
+        float sensible = static_cast<float>(m) * thermalForSubstance(id).specificHeat * Tm;
+        addLiquidComponentWithHeat(fluid, dest, id, dFill, sensible);
+        remain -= static_cast<float>(m / pixelKg);
+        bool removePixel = remain < kMinSolidRemain;
+        if (removePixel) {
+            double leftover = pixelKg * static_cast<double>(std::max(0.0f, remain));
+            if (leftover > 1.0e-9) {
+                float extraFill = static_cast<float>(massKgToLiquidFill(id, leftover, cpm));
+                float extraRoom = 1.0f - fluid.fill[static_cast<size_t>(dest)];
+                extraFill = std::min(extraFill, extraRoom);
+                if (extraFill > kMinFillMove) {
+                    double m2 = liquidFillToMassKg(id, extraFill, cpm);
+                    addLiquidComponentWithHeat(fluid, dest, id, extraFill,
+                        static_cast<float>(m2) * thermalForSubstance(id).specificHeat * Tm);
+                    m += m2;
+                    dFill += extraFill;
+                    leftover -= m2;
+                }
+                if (leftover > 1.0e-9) {
+                    if (!fluid.addSolidifyPendingKg(dest, id, static_cast<float>(leftover))
+                        && !fluid.addSolidifyPendingKg(index, id, static_cast<float>(leftover))) {
+                        remain = static_cast<float>(leftover / pixelKg);
+                        removePixel = false;
+                    }
+                }
+            }
+        }
+        if (removePixel) {
+            remain = 0.0f;
+            rigid.commitSourcePixelState(site.bodyId, li, 0.0f, 0.0f);
+            meltedDirty = true;
+        } else {
+            MaterialDefinition const &matDef = materialDef(site.material);
+            float massRemain = massKg(matDef.density, remain, 4.0f);
+            float newCap = thermalCapacity(massRemain, solidPhaseSpecificHeat(id));
+            float newHeat = energyFromTemp(newCap, Tm) + leftoverEx;
+            rigid.commitSourcePixelState(site.bodyId, li, remain, newHeat);
+            meltedDirty = true;
+        }
+        fluid.expectedVolume += static_cast<double>(dFill);
+        st.massMeltedKg += m;
+        st.latentFusionAbsorbedJ += m * static_cast<double>(Lf);
+        st.liquidFillAdded += dFill;
+        ++st.meltPixels;
+        wakeAllEngines(fluid, gas, thermal, x, y);
+        wakeAllEngines(fluid, gas, thermal, dx, dy);
+    }
+
+    if (meltedDirty) rigid.finalizeChemistryEdits(fluid);
+    return st;
+}
+
 PhaseChangeTickStats stepPhaseChanges(FluidEngine &fluid, RigidBodyEngine &rigid,
     GasEngine &gas, ThermalEngine &thermal, float dt)
 {
     PhaseChangeTickStats st;
-    WaterPhaseTickStats water = stepWaterPhaseChange(fluid, rigid, gas, thermal, dt);
-    st.liquidGas.massVaporizedKg = water.massBoiledKg;
-    st.liquidGas.massCondensedKg = water.massCondensedKg;
-    st.liquidGas.latentVaporizationAbsorbedJ = water.latentAbsorbedJ;
-    st.liquidGas.latentCondensationReleasedJ = water.latentReleasedJ;
-    st.liquidGas.vaporPlacedAmount = water.vaporPlacedAmount;
-    st.liquidGas.liquidFillRemoved = water.liquidFillRemoved;
-    st.liquidGas.liquidFillAdded = water.liquidFillAdded;
-    st.liquidGas.vaporizedCells = water.boilCells;
-    st.liquidGas.condensedCells = water.condenseCells;
-    st.liquidGas.blockedNoGasSpace = water.blockedBoilNoGasSpace;
-    st.liquidGas.blockedNoLiquidSpace = water.blockedCondenseNoLiquidSpace;
-    st.liquidGas.blockedVaporizationEquilibrium = water.blockedBoilEquilibrium;
-    st.liquidGas.blockedCondensationEquilibrium = water.blockedCondenseEquilibrium;
-    st.liquidGas.blockedVaporizationEnergy = water.blockedBoilEnergy;
-    st.liquidGas.blockedCondensationEnergy = water.blockedCondenseEnergy;
-    st.liquidGas.blockedSafetyLimit = water.blockedBoilSafetyLimit;
+    float dtSafe = (dt > 1.0e-6f && std::isfinite(dt)) ? dt : PHYSICS_DT;
+    static uint32_t phaseSalt = 0;
+    ++phaseSalt;
+    uint32_t salt = (thermal.tickNo + phaseSalt) * 0x9E3779B9u;
+
+    bool anyLiquid = fluid.expectedVolume > 1.0e-10;
+    bool anyVapor = anyEligibleGasVapor(gas);
+    bool anyPending = false;
+    if (!anyLiquid) {
+        for (int i = 0; i < GW * GH; ++i) {
+            if (fluid.solidifyPendingMassKg(i) > 1.0e-12f) { anyPending = true; break; }
+        }
+    }
+    bool anyEligibleSolid = false;
+    for (RigidBody const &b : rigid.bodies) {
+        for (int li : b.occupiedLocal) {
+            if (li < 0 || li >= static_cast<int>(b.mask.size())) continue;
+            MaterialId mat = b.mask[static_cast<size_t>(li)];
+            if (mat == MATERIAL_EMPTY) continue;
+            if (supportsLiveSolidLiquidTransition(substanceForMaterialId(mat))) {
+                anyEligibleSolid = true;
+                break;
+            }
+        }
+        if (anyEligibleSolid) break;
+    }
+    if (!anyLiquid && !anyVapor && !anyEligibleSolid && !anyPending) return st;
+
+    if (anyLiquid || anyVapor)
+        st.liquidGas = stepLiquidGasPhaseChange(fluid, rigid, gas, thermal, dtSafe, salt);
+    if (anyLiquid || anyEligibleSolid || anyPending)
+        st.solidLiquid = stepSolidLiquidPhaseChange(fluid, rigid, gas, thermal, dtSafe, salt);
+
+    double vaporBeforeEdit = gas.sumWaterVapor();
+    gas.handleWorldEdit(fluid);
+    gas.currentWaterVapor = gas.sumWaterVapor();
+    st.worldEditVaporDelta = gas.currentWaterVapor - vaporBeforeEdit;
     return st;
 }

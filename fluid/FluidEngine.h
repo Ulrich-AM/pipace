@@ -37,7 +37,8 @@ struct FluidEngine {
     std::vector<SubstanceId> liquidCompId; // SoA: cell * kMaxLiquidComponents + slot
     std::vector<float> liquidCompAmt;
     std::vector<uint8_t> liquidCompCount;
-    std::vector<float> frozenPendingKg;  // sub-pixel frozen water waiting for an ice pixel
+    std::vector<SubstanceId> solidifyPendingId; // one pending solid SubstanceId per cell
+    std::vector<float> solidifyPendingKg;       // sub-pixel solid mass waiting for a rigid pixel
     std::vector<float> nextDyeR, nextDyeG, nextDyeB;
     std::vector<SubstanceId> nextCompId;
     std::vector<float> nextCompAmt;
@@ -179,6 +180,13 @@ struct FluidEngine {
     void wakeThermalAt(int x, int y);
     void seedAmbientHeat();
     void addLiquidFill(int index, float dFill, float dHeat);
+    void clearSolidifyPending(int index);
+    bool addSolidifyPendingKg(int index, SubstanceId id, float kg);
+    bool takeSolidifyPendingKg(int index, SubstanceId id, float kg);
+    SubstanceId solidifyPendingSubstance(int index) const;
+    float solidifyPendingMassKg(int index) const;
+    // Water diagnostics compatibility: pending kg only when the slot is Water.
+    float waterFrozenPendingKg(int index) const;
     LiquidCarry takeLiquidCarry(int index, float amount);
     float takeLiquidVolume(int index, float amount);
     float honeyFraction(int index) const; // transport convenience; = liquidComponentFraction(..., HONEY)
