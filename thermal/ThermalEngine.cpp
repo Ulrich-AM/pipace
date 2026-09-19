@@ -7,6 +7,7 @@
 #include "substance/SubstanceRegistry.h"
 #include "substance/PhaseTransfer.h"
 #include "substance/LiquidMixtureProperties.h"
+#include "world/PhaseChangeEngine.h"
 
 #include <algorithm>
 #include <array>
@@ -146,6 +147,50 @@ float ThermalEngine::gasTempK(GasEngine const &gas, int index) {
 float ThermalEngine::rigidPixelTempK(RigidBody const &b, int localIndex) {
     if (localIndex < 0 || localIndex >= static_cast<int>(b.heat.size())) return AMBIENT_TEMPERATURE_K;
     return tempFromEnergy(b.heat[static_cast<size_t>(localIndex)], rigidPixelCapacity(b, localIndex));
+}
+
+float ThermalEngine::pendingSolidCapacity(FluidEngine const &fluid, int index) {
+    SubstanceId id = fluid.solidifyPendingSubstance(index);
+    if (id == SUBSTANCE_NONE || !validSubstance(id)) return 0.0f;
+    float kg = fluid.solidifyPendingMassKg(index);
+    if (!(kg > 0.0f) || !std::isfinite(kg)) return 0.0f;
+    float cp = solidPhaseSpecificHeat(id);
+    if (!(cp > 0.0f) || !std::isfinite(cp)) return 0.0f;
+    float cap = thermalCapacity(kg, cp);
+    if (!(cap > MIN_THERMAL_CAPACITY) || !std::isfinite(cap)) return 0.0f;
+    return cap;
+}
+
+float ThermalEngine::pendingSolidTemperatureK(FluidEngine const &fluid, int index) {
+    float cap = pendingSolidCapacity(fluid, index);
+    if (!(cap > MIN_THERMAL_CAPACITY)) return AMBIENT_TEMPERATURE_K;
+    float h = fluid.solidifyPendingSensibleJ(index);
+    if (!std::isfinite(h) || h < 0.0f) return AMBIENT_TEMPERATURE_K;
+    return tempFromEnergy(h, cap);
+}
+
+float ThermalEngine::pendingSolidConductivity(FluidEngine const &fluid, int index) {
+    SubstanceId id = fluid.solidifyPendingSubstance(index);
+    if (id == SUBSTANCE_NONE || !validSubstance(id)) return 0.0f;
+    if (!(fluid.solidifyPendingMassKg(index) > 0.0f)) return 0.0f;
+    float k = solidPhaseConductivity(id);
+    if (!(k > 0.0f) || !std::isfinite(k)) return 0.0f;
+    return k;
+}
+
+bool ThermalEngine::resolvePendingSolid(FluidEngine &fluid, int index, float *&energy, float &cap, float &k) {
+    energy = nullptr;
+    cap = 0.0f;
+    k = 0.0f;
+    if (index < 0 || index >= GW * GH) return false;
+    cap = pendingSolidCapacity(fluid, index);
+    k = pendingSolidConductivity(fluid, index);
+    if (!(cap > MIN_THERMAL_CAPACITY) || !(k > 0.0f)) return false;
+    float &h = fluid.solidifyPendingHeatJ[static_cast<size_t>(index)];
+    if (!std::isfinite(h)) return false;
+    if (h < 0.0f) h = 0.0f;
+    energy = &h;
+    return true;
 }
 
 void ThermalEngine::seedAmbient(FluidEngine &fluid, RigidBodyEngine &rigid, GasEngine &gas) {
@@ -354,6 +399,13 @@ void ThermalEngine::applyBrush(FluidEngine &fluid, RigidBodyEngine &rigid, GasEn
                 addEnergy(gas.heat[static_cast<size_t>(i)], gasCapacity(gas, i), dQcell);
                 any = true;
             }
+            if (!any) {
+                float cap = pendingSolidCapacity(fluid, i);
+                if (cap > MIN_THERMAL_CAPACITY) {
+                    addEnergy(fluid.solidifyPendingHeatJ[static_cast<size_t>(i)], cap, dQcell);
+                    any = true;
+                }
+            }
             if (any) wakeCell(x, y);
             if (any) gas.wakeAt(x, y);
         }
@@ -473,6 +525,98 @@ void ThermalEngine::conductActive(FluidEngine &fluid, RigidBodyEngine &rigid, Ga
         }
     }
     conductRigidBodies(rigid, dt, areaOverDx);
+    conductPendingSolids(fluid, rigid, gas, dt);
+}
+
+static float pendingSolidContactScale(FluidEngine const &fluid, int index) {
+    SubstanceId id = fluid.solidifyPendingSubstance(index);
+    float kg = fluid.solidifyPendingMassKg(index);
+    if (id == SUBSTANCE_NONE || !(kg > 0.0f) || !std::isfinite(kg)) return 0.0f;
+    double fullKg = solidFractionToMassKg(id, 1.0, static_cast<double>(fluid.config.cellsPerMeter));
+    if (!(fullKg > 0.0) || !std::isfinite(fullKg)) return 0.0f;
+    double f = static_cast<double>(kg) / fullKg;
+    if (!std::isfinite(f) || f <= 0.0) return 0.0f;
+    if (f >= 1.0) return 1.0f;
+    return static_cast<float>(f);
+}
+
+void ThermalEngine::conductPendingSolids(FluidEngine &fluid, RigidBodyEngine &rigid, GasEngine &gas, float dt) {
+    float dx = cellLengthM(fluid.config.cellsPerMeter);
+    float areaOverDx = dx;
+    constexpr int kNdx[4] = {1, -1, 0, 0};
+    constexpr int kNdy[4] = {0, 0, 1, -1};
+
+    auto wakePair = [&](int x0, int y0, int x1, int y1, bool gasTouch, float dQ) {
+        if (std::abs(dQ) <= 1.0e-8f) return;
+        ++work.conductionPairs;
+        if (std::abs(dQ) <= 1.0e-3f) return;
+        wakeCell(x0, y0);
+        wakeCell(x1, y1);
+        if (gasTouch) {
+            gas.wakeAt(x0, y0);
+            gas.wakeAt(x1, y1);
+        }
+    };
+
+    auto exchangePendingPrimary = [&](int px, int py, int nx, int ny, float contact, float dtUse) {
+        if (!FluidEngine::inside(nx, ny) || !(contact > 0.0f) || !(dtUse > 0.0f)) return;
+        float *eP = nullptr, cP = 0.0f, kP = 0.0f;
+        if (!resolvePendingSolid(fluid, FluidEngine::ci(px, py), eP, cP, kP)) return;
+        float *eN = nullptr, cN = 0.0f, kN = 0.0f;
+        int bodyId = -1;
+        bool isGas = false;
+        if (!resolveNode(fluid, rigid, gas, nx, ny, eN, cN, kN, bodyId, isGas)) return;
+        if (eP == eN) return;
+        float scale = isGas ? config.gasConductivityScale : config.conductivityScale;
+        float dQ = exchangeThermalEnergy(*eP, cP, kP, *eN, cN, kN, dtUse, areaOverDx * contact, scale);
+        wakePair(px, py, nx, ny, isGas, dQ);
+    };
+
+    auto exchangePendingPending = [&](int x0, int y0, int x1, int y1, float dtUse) {
+        if (!FluidEngine::inside(x1, y1) || !(dtUse > 0.0f)) return;
+        int i0 = FluidEngine::ci(x0, y0);
+        int i1 = FluidEngine::ci(x1, y1);
+        float *eA = nullptr, cA = 0.0f, kA = 0.0f;
+        float *eB = nullptr, cB = 0.0f, kB = 0.0f;
+        if (!resolvePendingSolid(fluid, i0, eA, cA, kA)) return;
+        if (!resolvePendingSolid(fluid, i1, eB, cB, kB)) return;
+        if (eA == eB) return;
+        float contact = std::min(pendingSolidContactScale(fluid, i0), pendingSolidContactScale(fluid, i1));
+        if (!(contact > 0.0f)) return;
+        float dQ = exchangeThermalEnergy(*eA, cA, kA, *eB, cB, kB, dtUse, areaOverDx * contact,
+            config.conductivityScale);
+        wakePair(x0, y0, x1, y1, false, dQ);
+    };
+
+    for (int c = 0; c < CHUNK_W * CHUNK_H; ++c) {
+        if (!chunkActivity[static_cast<size_t>(c)]) continue;
+        int cx = c % CHUNK_W, cy = c / CHUNK_W;
+        int x0 = cx * CHUNK, y0 = cy * CHUNK;
+        int x1 = std::min(GW - 1, x0 + CHUNK - 1);
+        int y1 = std::min(GH - 1, y0 + CHUNK - 1);
+        for (int y = y0; y <= y1; ++y) for (int x = x0; x <= x1; ++x) {
+            int i = FluidEngine::ci(x, y);
+            if (!(fluid.solidifyPendingMassKg(i) > 0.0f)) continue;
+            float contact = pendingSolidContactScale(fluid, i);
+            if (!(contact > 0.0f)) continue;
+            exchangePendingPrimary(x, y, x, y, contact, dt);
+            float neighborContact = contact * 0.25f;
+            for (int n = 0; n < 4; ++n)
+                exchangePendingPrimary(x, y, x + kNdx[n], y + kNdy[n], neighborContact, dt);
+            for (int n = 0; n < 4; ++n) {
+                int nx = x + kNdx[n], ny = y + kNdy[n];
+                if (!FluidEngine::inside(nx, ny)) continue;
+                bool owns = (nx > x) || (nx == x && ny > y);
+                if (!owns) {
+                    int nc = (ny / CHUNK) * CHUNK_W + (nx / CHUNK);
+                    if (nc >= 0 && nc < static_cast<int>(chunkActivity.size())
+                        && chunkActivity[static_cast<size_t>(nc)])
+                        continue;
+                }
+                exchangePendingPending(x, y, nx, ny, dt);
+            }
+        }
+    }
 }
 
 bool ThermalEngine::resolveNode(FluidEngine &fluid, RigidBodyEngine &rigid, GasEngine &gas,
@@ -531,17 +675,31 @@ void ThermalEngine::conductOpenBoundary(FluidEngine &fluid, RigidBodyEngine &rig
         float *e = nullptr, cap = 0.0f, k = 0.0f;
         int bodyId = -1;
         bool isGas = false;
-        if (!resolveNode(fluid, rigid, gas, x, y, e, cap, k, bodyId, isGas)) return;
-        float dQ = exchangeThermalEnergyWithAmbient(*e, cap, k, kAir, dt,
-            areaOverDx * static_cast<float>(faces), config.gasConductivityScale);
-        if (!std::isfinite(dQ) || dQ == 0.0f) return;
-        if (dQ > 0.0f) thermalEnergyEscaped += dQ;
-        else thermalEnergyEntered += static_cast<double>(-dQ);
-        ++work.conductionPairs;
-        if (std::abs(dQ) > 1.0e-3f) {
-            wakeCell(x, y);
-            if (isGas) gas.wakeAt(x, y);
+        if (resolveNode(fluid, rigid, gas, x, y, e, cap, k, bodyId, isGas)) {
+            float dQ = exchangeThermalEnergyWithAmbient(*e, cap, k, kAir, dt,
+                areaOverDx * static_cast<float>(faces), config.gasConductivityScale);
+            if (std::isfinite(dQ) && dQ != 0.0f) {
+                if (dQ > 0.0f) thermalEnergyEscaped += dQ;
+                else thermalEnergyEntered += static_cast<double>(-dQ);
+                ++work.conductionPairs;
+                if (std::abs(dQ) > 1.0e-3f) {
+                    wakeCell(x, y);
+                    if (isGas) gas.wakeAt(x, y);
+                }
+            }
         }
+        float *eP = nullptr, cP = 0.0f, kP = 0.0f;
+        if (!resolvePendingSolid(fluid, FluidEngine::ci(x, y), eP, cP, kP)) return;
+        float contact = pendingSolidContactScale(fluid, FluidEngine::ci(x, y));
+        if (!(contact > 0.0f)) return;
+        float dQp = exchangeThermalEnergyWithAmbient(*eP, cP, kP, kAir, dt,
+            areaOverDx * static_cast<float>(faces) * contact, config.gasConductivityScale);
+        if (!std::isfinite(dQp) || dQp == 0.0f) return;
+        if (dQp > 0.0f) thermalEnergyEscaped += dQp;
+        else thermalEnergyEntered += static_cast<double>(-dQp);
+        ++work.conductionPairs;
+        if (std::abs(dQp) > 1.0e-3f)
+            wakeCell(x, y);
     };
     for (int y = 0; y < GH; ++y) {
         int facesL = 1 + (y == 0 || y == GH - 1 ? 1 : 0);
@@ -569,21 +727,42 @@ void ThermalEngine::sleepChunks(FluidEngine &fluid, RigidBodyEngine &rigid, GasE
             maxAmb = std::max(maxAmb, std::abs(t - AMBIENT_TEMPERATURE_K));
         };
         for (int y = y0; y <= y1; ++y) for (int x = x0; x <= x1; ++x) {
-            float t = sampleTemperatureK(fluid, rigid, gas, x, y);
-            consider(t);
-            if (x + 1 <= x1) maxD = std::max(maxD, std::abs(t - sampleTemperatureK(fluid, rigid, gas, x + 1, y)));
-            if (y + 1 <= y1) maxD = std::max(maxD, std::abs(t - sampleTemperatureK(fluid, rigid, gas, x, y + 1)));
-            auto halo = [&](int nx, int ny) {
+            int i = FluidEngine::ci(x, y);
+            ThermalCellSample cell = sampleCell(fluid, rigid, gas, x, y);
+            float t = cell.temperatureK;
+            if (cell.hasMatter) consider(t);
+            float tPend = 0.0f;
+            bool hasPend = pendingSolidCapacity(fluid, i) > MIN_THERMAL_CAPACITY;
+            if (hasPend) {
+                tPend = pendingSolidTemperatureK(fluid, i);
+                if (cell.hasMatter) {
+                    consider(tPend);
+                    maxD = std::max(maxD, std::abs(tPend - t));
+                }
+            }
+            auto considerNeighbor = [&](int nx, int ny, bool haloEdge) {
                 if (!FluidEngine::inside(nx, ny)) return;
-                float tn = sampleTemperatureK(fluid, rigid, gas, nx, ny);
+                ThermalCellSample ns = sampleCell(fluid, rigid, gas, nx, ny);
+                float tn = ns.temperatureK;
                 float d = std::abs(t - tn);
                 maxD = std::max(maxD, d);
-                if (d >= config.sleepTempEps) wakeCell(nx, ny);
+                int ni = FluidEngine::ci(nx, ny);
+                bool nPend = pendingSolidCapacity(fluid, ni) > MIN_THERMAL_CAPACITY;
+                float tnPend = nPend ? pendingSolidTemperatureK(fluid, ni) : tn;
+                if (hasPend && (ns.hasMatter || nPend)) {
+                    if (ns.hasMatter) d = std::max(d, std::abs(tPend - tn));
+                    if (nPend) d = std::max(d, std::abs(tPend - tnPend));
+                }
+                if (nPend && cell.hasMatter) d = std::max(d, std::abs(t - tnPend));
+                maxD = std::max(maxD, d);
+                if (haloEdge && d >= config.sleepTempEps) wakeCell(nx, ny);
             };
-            if (x == x0) halo(x - 1, y);
-            if (x == x1) halo(x + 1, y);
-            if (y == y0) halo(x, y - 1);
-            if (y == y1) halo(x, y + 1);
+            if (x + 1 <= x1) considerNeighbor(x + 1, y, false);
+            if (y + 1 <= y1) considerNeighbor(x, y + 1, false);
+            if (x == x0) considerNeighbor(x - 1, y, true);
+            if (x == x1) considerNeighbor(x + 1, y, true);
+            if (y == y0) considerNeighbor(x, y - 1, true);
+            if (y == y1) considerNeighbor(x, y + 1, true);
         }
         if (maxD < config.sleepTempEps && maxAmb < config.sleepAmbientEps) {
             uint8_t q = chunkQuietTicks[static_cast<size_t>(c)];
@@ -1002,6 +1181,228 @@ void ThermalEngine::runDiagnostics(FluidEngine &fluid, RigidBodyEngine &rigid, G
         stats << "closed_energy_0 " << eClosed0 << " closed_energy_1 " << eClosed1 << "\n";
         stats.flush();
     }
+
+    auto thermalOnlyN = [&](int n) {
+        for (int i = 0; i < n; ++i)
+            simulationTick(fluid, rigid, gas, PHYSICS_DT);
+    };
+    auto plantPendingWater = [&](int x, int y, double frac, float tempK) {
+        if (!FluidEngine::inside(x, y)) return 0.0f;
+        int i = FluidEngine::ci(x, y);
+        double pixelKg = solidFractionToMassKg(SUBSTANCE_WATER, 1.0,
+            static_cast<double>(fluid.config.cellsPerMeter));
+        float kg = static_cast<float>(pixelKg * frac);
+        float cap = thermalCapacity(kg, solidPhaseSpecificHeat(SUBSTANCE_WATER));
+        fluid.addSolidifyPendingKg(i, SUBSTANCE_WATER, kg, energyFromTemp(cap, tempK));
+        wakeCell(x, y);
+        return kg;
+    };
+    auto heatAllRigid = [&](float tempK) {
+        for (RigidBody &b : rigid.bodies) {
+            for (int li : b.occupiedLocal) {
+                float cap = rigidPixelCapacity(b, li);
+                b.heat[static_cast<size_t>(li)] = energyFromTemp(cap, tempK);
+            }
+            int x0 = std::max(0, static_cast<int>(std::floor(b.aabbX0)));
+            int y0 = std::max(0, static_cast<int>(std::floor(b.aabbY0)));
+            int x1 = std::min(GW - 1, static_cast<int>(std::ceil(b.aabbX1)));
+            int y1 = std::min(GH - 1, static_cast<int>(std::ceil(b.aabbY1)));
+            wakeRect(x0, y0, x1, y1);
+        }
+    };
+    auto rigidHeatSum = [&]() {
+        double e = 0.0;
+        for (RigidBody const &b : rigid.bodies)
+            for (float h : b.heat) e += h;
+        return e;
+    };
+    auto finitePosK = [](float t) {
+        return std::isfinite(t) && t > 0.0f && t < MAX_SAFE_TEMPERATURE_K;
+    };
+
+    // 23. Cold pending next to hot ordinary matter.
+    resetBare();
+    paintBodyRect(MATERIAL_METAL, 80, 50, 90, 55, true);
+    seedAmbient(fluid, rigid, gas);
+    std::fill(gas.amount.begin(), gas.amount.end(), 0.0f);
+    std::fill(gas.heat.begin(), gas.heat.end(), 0.0f);
+    heatAllRigid(400.0f);
+    int heatX = 91, heatY = 52;
+    plantPendingWater(heatX, heatY, 0.4, 250.0f);
+    float tHeat0 = pendingSolidTemperatureK(fluid, FluidEngine::ci(heatX, heatY));
+    double metalE0 = rigidHeatSum();
+    double eHeat0 = totalThermalEnergy(fluid, rigid, gas);
+    thermalOnlyN(45);
+    float tHeat1 = pendingSolidTemperatureK(fluid, FluidEngine::ci(heatX, heatY));
+    double metalE1 = rigidHeatSum();
+    double eHeat1 = totalThermalEnergy(fluid, rigid, gas);
+    bool passPendHeat = finitePosK(tHeat1)
+        && tHeat1 > tHeat0 + 2.0f
+        && metalE1 < metalE0 - 1.0
+        && std::abs(eHeat1 - eHeat0) / std::max(1.0, std::abs(eHeat0)) < 0.04;
+    emit("pending_cold_heats_from_hot_neighbor", 45, eHeat1, tHeat1, passPendHeat);
+
+    // 24. Hot pending next to cold ordinary matter.
+    resetBare();
+    paintBodyRect(MATERIAL_METAL, 80, 50, 90, 55, true);
+    seedAmbient(fluid, rigid, gas);
+    std::fill(gas.amount.begin(), gas.amount.end(), 0.0f);
+    std::fill(gas.heat.begin(), gas.heat.end(), 0.0f);
+    heatAllRigid(250.0f);
+    int coolX = 91, coolY = 52;
+    plantPendingWater(coolX, coolY, 0.4, 350.0f);
+    float tCool0 = pendingSolidTemperatureK(fluid, FluidEngine::ci(coolX, coolY));
+    double metalCool0 = rigidHeatSum();
+    double eCool0 = totalThermalEnergy(fluid, rigid, gas);
+    thermalOnlyN(45);
+    float tCool1 = pendingSolidTemperatureK(fluid, FluidEngine::ci(coolX, coolY));
+    double metalCool1 = rigidHeatSum();
+    double eCool1 = totalThermalEnergy(fluid, rigid, gas);
+    bool passPendCool = finitePosK(tCool1)
+        && tCool1 < tCool0 - 2.0f
+        && metalCool1 > metalCool0 + 1.0
+        && std::abs(eCool1 - eCool0) / std::max(1.0, std::abs(eCool0)) < 0.04;
+    emit("pending_hot_cools_to_cold_neighbor", 45, eCool1, tCool1, passPendCool);
+
+    // 25. Co-located pending + liquid stay distinct and exchange heat.
+    resetBare();
+    int mixX = 80, mixY = 50;
+    setLiquid(mixX, mixY, 0.55f, 350.0f);
+    fluid.setLiquidComponentAmount(FluidEngine::ci(mixX, mixY), SUBSTANCE_WATER, 0.55f);
+    float mixLiqCap = liquidCapacity(fluid, FluidEngine::ci(mixX, mixY));
+    fluid.liquidHeat[static_cast<size_t>(FluidEngine::ci(mixX, mixY))] = energyFromTemp(mixLiqCap, 350.0f);
+    float pendKgMix = plantPendingWater(mixX, mixY, 0.35, 250.0f);
+    float tLiq0 = liquidTempK(fluid, FluidEngine::ci(mixX, mixY));
+    float tPendMix0 = pendingSolidTemperatureK(fluid, FluidEngine::ci(mixX, mixY));
+    float fill0 = fluid.fill[static_cast<size_t>(FluidEngine::ci(mixX, mixY))];
+    thermalOnlyN(40);
+    float tLiq1 = liquidTempK(fluid, FluidEngine::ci(mixX, mixY));
+    float tPendMix1 = pendingSolidTemperatureK(fluid, FluidEngine::ci(mixX, mixY));
+    float fill1 = fluid.fill[static_cast<size_t>(FluidEngine::ci(mixX, mixY))];
+    float pendKgMix1 = fluid.solidifyPendingMassKg(FluidEngine::ci(mixX, mixY));
+    bool passCoexist = finitePosK(tLiq1) && finitePosK(tPendMix1)
+        && tLiq1 < tLiq0 - 0.5f
+        && tPendMix1 > tPendMix0 + 0.5f
+        && std::abs(fill1 - fill0) < 1.0e-8f
+        && std::abs(pendKgMix1 - pendKgMix) < 1.0e-6f;
+    emit("pending_liquid_coexist_conduction", 40, totalThermalEnergy(fluid, rigid, gas),
+        tPendMix1, passCoexist);
+
+    // 26. Natural pending melt-back via ThermalEngine then PhaseChangeEngine.
+    resetBare();
+    paintBodyRect(MATERIAL_METAL, 80, 50, 90, 55, true);
+    seedAmbient(fluid, rigid, gas);
+    std::fill(gas.amount.begin(), gas.amount.end(), 0.0f);
+    std::fill(gas.heat.begin(), gas.heat.end(), 0.0f);
+    heatAllRigid(320.0f);
+    int meltX = 91, meltY = 52;
+    float pendMelt0kg = plantPendingWater(meltX, meltY, 0.4, 250.0f);
+    float tMelt0 = pendingSolidTemperatureK(fluid, FluidEngine::ci(meltX, meltY));
+    double cpm = static_cast<double>(fluid.config.cellsPerMeter);
+    auto waterLiquidKg = [&]() {
+        double m = 0.0;
+        for (int i = 0; i < GW * GH; ++i)
+            m += liquidFillToMassKg(SUBSTANCE_WATER,
+                fluid.liquidComponentAmount(i, SUBSTANCE_WATER), cpm);
+        for (SplashParticle const &p : fluid.splashes) {
+            float water = 0.0f;
+            for (int n = 0; n < p.compCount; ++n)
+                if (p.comps[n].id == SUBSTANCE_WATER) water += p.comps[n].amount;
+            if (water > 0.0f) m += liquidFillToMassKg(SUBSTANCE_WATER, water, cpm);
+        }
+        return m;
+    };
+    auto waterGasKg = [&]() {
+        double m = gasAmountToMassKg(SUBSTANCE_WATER, gas.sumWaterVapor(), cpm);
+        m += gasAmountToMassKg(SUBSTANCE_WATER, gas.escapedWaterVapor, cpm);
+        return m;
+    };
+    auto waterIceKg = [&]() {
+        double pixel = solidFractionToMassKg(SUBSTANCE_WATER, 1.0, cpm);
+        double m = 0.0;
+        for (RigidBody const &b : rigid.bodies) {
+            for (int li : b.occupiedLocal) {
+                if (li < 0 || li >= static_cast<int>(b.mask.size())) continue;
+                if (b.mask[static_cast<size_t>(li)] != MATERIAL_WATER_SOLID) continue;
+                float remain = 1.0f;
+                if (li < static_cast<int>(b.solidRemain.size()))
+                    remain = std::max(0.0f, b.solidRemain[static_cast<size_t>(li)]);
+                m += pixel * static_cast<double>(remain);
+            }
+        }
+        return m;
+    };
+    double liqMelt0 = waterLiquidKg();
+    double gasMelt0 = waterGasKg();
+    double iceMelt0 = waterIceKg();
+    float tMeltPeak = tMelt0;
+    for (int n = 0; n < 180; ++n) {
+        simulationTick(fluid, rigid, gas, PHYSICS_DT);
+        float tp = pendingSolidTemperatureK(fluid, FluidEngine::ci(meltX, meltY));
+        if (fluid.solidifyPendingMassKg(FluidEngine::ci(meltX, meltY)) > 0.0f && finitePosK(tp))
+            tMeltPeak = std::max(tMeltPeak, tp);
+        stepPhaseChanges(fluid, rigid, gas, *this, PHYSICS_DT);
+    }
+    float pendMelt1kg = 0.0f;
+    for (int i = 0; i < GW * GH; ++i) pendMelt1kg += fluid.solidifyPendingMassKg(i);
+    double liqMelt1 = waterLiquidKg();
+    double gasMelt1 = waterGasKg();
+    double iceMelt1 = waterIceKg();
+    double mass0 = static_cast<double>(pendMelt0kg) + liqMelt0 + gasMelt0 + iceMelt0;
+    double mass1 = static_cast<double>(pendMelt1kg) + liqMelt1 + gasMelt1 + iceMelt1;
+    bool passMelt = tMeltPeak > tMelt0 + 2.0f
+        && pendMelt1kg < pendMelt0kg - 0.05f
+        && liqMelt1 > liqMelt0 + 0.05
+        && std::abs(mass1 - mass0) < 0.05;
+    emit("pending_natural_melt_back", 180, mass1, tMeltPeak, passMelt);
+
+    // 27. Pending far from ambient keeps the thermal chunk awake, then may sleep.
+    resetBare();
+    int sleepX = 80, sleepY = 50;
+    for (int y = sleepY - 1; y <= sleepY + 1; ++y)
+        for (int x = sleepX - 1; x <= sleepX + 1; ++x) {
+            if (x == sleepX && y == sleepY) continue;
+            if (FluidEngine::inside(x, y))
+                fluid.solid[static_cast<size_t>(FluidEngine::ci(x, y))] = 1;
+        }
+    seedAmbient(fluid, rigid, gas);
+    std::fill(gas.amount.begin(), gas.amount.end(), 0.0f);
+    std::fill(gas.heat.begin(), gas.heat.end(), 0.0f);
+    plantPendingWater(sleepX, sleepY, 0.5, 250.0f);
+    thermalOnlyN(8);
+    float tSleepEarly = pendingSolidTemperatureK(fluid, FluidEngine::ci(sleepX, sleepY));
+    bool awakeEarly = isChunkActive(sleepX, sleepY)
+        && std::abs(tSleepEarly - AMBIENT_TEMPERATURE_K) > 1.0f;
+    thermalOnlyN(400);
+    float tSleepLate = pendingSolidTemperatureK(fluid, FluidEngine::ci(sleepX, sleepY));
+    bool approaching = tSleepLate > tSleepEarly + 1.0f;
+    bool stayAwakeIfGradient = std::abs(tSleepLate - AMBIENT_TEMPERATURE_K) < config.sleepAmbientEps
+        || isChunkActive(sleepX, sleepY);
+    if (std::abs(tSleepLate - AMBIENT_TEMPERATURE_K) < config.sleepAmbientEps) {
+        thermalOnlyN(config.sleepQuietTicks + 4);
+        stayAwakeIfGradient = !isChunkActive(sleepX, sleepY)
+            || std::abs(pendingSolidTemperatureK(fluid, FluidEngine::ci(sleepX, sleepY))
+                - AMBIENT_TEMPERATURE_K) >= config.sleepAmbientEps;
+    }
+    bool passPendingSleep = awakeEarly && approaching && stayAwakeIfGradient && finitePosK(tSleepLate);
+    emit("pending_keeps_chunk_awake", 8, tSleepEarly, tSleepLate, passPendingSleep);
+
+    // 28. Open-boundary pending exchanges with ambient.
+    resetBare();
+    fluid.config.walledBorders = false;
+    plantPendingWater(0, 60, 0.4, 400.0f);
+    thermalEnergyEscaped = 0.0;
+    thermalEnergyEntered = 0.0;
+    float tOpen0 = pendingSolidTemperatureK(fluid, FluidEngine::ci(0, 60));
+    double netOpen0 = netExternalHeat(fluid, gas);
+    thermalOnlyN(80);
+    float tOpen1 = pendingSolidTemperatureK(fluid, FluidEngine::ci(0, 60));
+    double netOpen1 = netExternalHeat(fluid, gas);
+    bool passOpen = finitePosK(tOpen1)
+        && tOpen1 < tOpen0 - 1.0e-3f
+        && tOpen1 > AMBIENT_TEMPERATURE_K - 1.0f
+        && netOpen1 > netOpen0 + 1.0;
+    emit("pending_open_boundary_ambient", 80, netOpen1, tOpen1, passOpen);
 
     out.flush();
 }

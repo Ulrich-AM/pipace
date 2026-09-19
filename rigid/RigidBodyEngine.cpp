@@ -850,7 +850,7 @@ int RigidBodyEngine::addSameMaterialWorldCells(FluidEngine &fluid, std::vector<i
         if (localIndex < 0 || localIndex >= static_cast<int>(b.heat.size())) return;
         if (localIndex < static_cast<int>(b.solidRemain.size()))
             b.solidRemain[static_cast<size_t>(localIndex)] = 1.0f;
-        float cap = thermalCapacity(massKg(materialDef(material).density, 1.0f),
+        float cap = thermalCapacity(massKg(materialDef(material).density, 1.0f, fluid.config.cellsPerMeter),
             solidPhaseSpecificHeat(substanceForMaterialId(material)));
         float t = std::isfinite(temperatureK) ? temperatureK : AMBIENT_TEMPERATURE_K;
         b.heat[static_cast<size_t>(localIndex)] = energyFromTemp(cap, t);

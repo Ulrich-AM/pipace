@@ -76,6 +76,7 @@ These mappings are **implementation, not laws**:
 | Water + Liquid, Honey + Liquid | FluidEngine (water/honey volume channels) |
 | Wood/Glass/Metal/Carbon + Solid | RigidBodyEngine (MaterialId masks) |
 | Water + Solid | RigidBodyEngine (`MATERIAL_WATER_SOLID` mask, still SUBSTANCE_WATER) |
+| Water + Solid (sub-pixel pending) | `solidifyPendingKg` / `solidifyPendingHeatJ` until a rigid pixel exists. Carries mass and sensible energy and participates in normal ThermalEngine conduction as an extra reservoir, not the primary cell node. |
 | Stone + Solid | rigid body **or** static `solid[]` walls (`kStaticWallSubstance`) |
 | Air + Gas | GasEngine (`SUBSTANCE_AIR` component) |
 | Hydrogen + Gas | GasEngine (`SUBSTANCE_HYDROGEN` component) |
@@ -91,7 +92,9 @@ absorb. Condensation may form liquid in adjacent free cells, not inside the wall
 are generic (`world/PhaseChangeEngine.cpp`) for substances whose metadata supports
 both endpoints; Water is currently the only eligible built-in. Do **not** add
 SUBSTANCE_ICE / SUBSTANCE_STEAM.
-Density stays phase-specific: mechanical.densityRel (solid), fluid.density (liquid),
+Pending sub-pixel solid matter carries mass and sensible energy and participates
+in normal ThermalEngine conduction as an extra reservoir (not the primary cell
+node). Density stays phase-specific: mechanical.densityRel (solid), fluid.density (liquid),
 gas amount/EoS (gas). Honey/water mixtures do not boil or freeze yet.
 
 Water/honey cells that hold both channels are **mixtures**, not a new SubstanceId.
