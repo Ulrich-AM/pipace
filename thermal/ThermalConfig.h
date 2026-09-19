@@ -4,8 +4,8 @@
 
 struct ThermalConfig {
     bool enabled = true;
-    // Conduction/sleep runs every N physics ticks. Liquid/gas still carry heat every tick.
-    int intervalTicks = 2;
+    // Displayed interval. Conduction skip is owned by SimulationScheduleState.
+    int intervalTicks = 1;
     float sleepTempEps = 0.08f;       // K, neighbor |ΔT| to stay awake
     float sleepAmbientEps = 0.25f;    // K from ambient to stay awake
     int sleepQuietTicks = 12;
@@ -24,12 +24,12 @@ struct ThermalConfig {
 
 inline void applyThermalQualityKnobs(ThermalConfig &c, int level) {
     if (level <= 0) {
-        c.intervalTicks = 3;
+        c.intervalTicks = 2;
         c.sleepTempEps = 0.20f;
         c.sleepAmbientEps = 0.50f;
         c.sleepQuietTicks = 8;
     } else if (level == 1) {
-        c.intervalTicks = 2;
+        c.intervalTicks = 1;
         c.sleepTempEps = 0.08f;
         c.sleepAmbientEps = 0.25f;
         c.sleepQuietTicks = 12;

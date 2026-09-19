@@ -1752,9 +1752,11 @@ void RigidBodyEngine::step(FluidEngine &fluid, float dt) {
         collectBodyContacts(contacts);
         reduceStaticManifold(contacts);
         markSupport(contacts);
-        for (int it = 0; it < 8; ++it) solveVelocityContacts(contacts);
+        int velIters = std::max(1, velocityContactIters);
+        for (int it = 0; it < velIters; ++it) solveVelocityContacts(contacts);
         applyContactDamage(contacts);
-        solvePositionalContacts(contacts);
+        int posIters = std::max(1, positionalIters);
+        for (int it = 0; it < posIters; ++it) solvePositionalContacts(contacts);
         if (s == sub - 1) lastContacts = contacts;
     }
     splitDirtyBodies();
@@ -1769,10 +1771,12 @@ void RigidBodyEngine::step(FluidEngine &fluid, float dt) {
         updateAabb(b);
         if (b.sleeping) continue;
         if (grabContainsId(b.id)) { b.quietTicks = 0; continue; }
-        bool still = std::abs(b.vx) < kSleepLin && std::abs(b.vy) < kSleepLin && std::abs(b.omega) < kSleepAng;
+        float sleepV = sleepLin > 0.0f ? sleepLin : kSleepLin;
+        bool still = std::abs(b.vx) < sleepV && std::abs(b.vy) < sleepV && std::abs(b.omega) < kSleepAng;
         if (still && b.supported) {
             b.quietTicks++;
-            if (b.quietTicks >= kSleepTicks) {
+            int quietNeed = sleepQuietTicks > 0 ? sleepQuietTicks : kSleepTicks;
+            if (b.quietTicks >= quietNeed) {
                 b.sleeping = true; b.vx = b.vy = b.omega = 0.0f;
             }
         } else b.quietTicks = 0;

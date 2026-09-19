@@ -17,6 +17,7 @@
 #include "chemistry/ReactionEngine.h"
 #include "substance/SubstanceRegistry.h"
 #include "substance/PhaseTransfer.h"
+#include "sim/SimulationQuality.h"
 
 #include <algorithm>
 #include <array>
@@ -34,6 +35,8 @@ RigidBodyEngine rigid;
 GasEngine gas;
 ThermalEngine thermal;
 ReactionEngine reactions;
+SimulationScheduleState simSchedule;
+SimulationQualityProfile simProfile;
 ui::ShellState shell;
 
 constexpr std::array<float, 6> speedScales{{0.10f, 0.25f, 0.50f, 1.0f, 2.0f, 4.0f}};
@@ -176,10 +179,8 @@ void nudgeStrokeRadius(int delta) {
 }
 
 void applySimQuality(int level) {
-    applyFluidQualityKnobs(engine.config, level);
-    applyThermalQualityKnobs(thermal.config, level);
-    engine.residualConsolidationEnabled = true;
-    applyGasQualitySimMode(gas.config, level);
+    simProfile = profileForQualityLevel(level);
+    applySimulationQuality(simProfile, engine, gas, thermal, rigid, simSchedule);
 }
 
 void setQualityPreset(QualityPreset preset) {
@@ -194,6 +195,11 @@ void setQualityPreset(QualityPreset preset) {
     } else {
         applySimQuality(1);
     }
+    std::string report = describeSimulationQuality(simProfile, simSchedule,
+        gas.config.simMode, thermal.config.enabled);
+    for (char &ch : report) if (ch == '\n') ch = '|';
+    std::wstring wreport(report.begin(), report.end());
+    shell.log(wreport.c_str());
 }
 
 void adaptAutoQuality(double worldMs) {
@@ -227,8 +233,8 @@ void handleMenuCommand(ui::MenuCmd cmd) {
             break;
         case MenuCmd::Pause: paused = !paused; break;
         case MenuCmd::Step: if (paused) worldTick(); break;
-        case MenuCmd::Clear: rigid.clear(); engine.clearWorld(); gas.resetAmbient(engine); thermal.seedAmbient(engine, rigid, gas); reactions.clearActivity(); shell.log(ui::tr("log_cleared")); break;
-        case MenuCmd::Reset: rigid.clear(); engine.resetWorld(); gas.resetAmbient(engine); thermal.seedAmbient(engine, rigid, gas); reactions.clearActivity(); shell.log(ui::tr("log_reset")); break;
+        case MenuCmd::Clear: rigid.clear(); engine.clearWorld(); gas.resetAmbient(engine); thermal.seedAmbient(engine, rigid, gas); reactions.clearActivity(); simSchedule.reset(); shell.log(ui::tr("log_cleared")); break;
+        case MenuCmd::Reset: rigid.clear(); engine.resetWorld(); gas.resetAmbient(engine); thermal.seedAmbient(engine, rigid, gas); reactions.clearActivity(); simSchedule.reset(); shell.log(ui::tr("log_reset")); break;
         case MenuCmd::Slosh: engine.addSloshImpulse(); break;
         case MenuCmd::WalledBorders:
             engine.config.walledBorders = !engine.config.walledBorders;
@@ -290,9 +296,13 @@ void handleMenuCommand(ui::MenuCmd cmd) {
             break;
         case MenuCmd::ThermalIntervalMinus:
             thermal.config.intervalTicks = std::max(1, thermal.config.intervalTicks - 1);
+            simSchedule.setIntervals(thermal.config.intervalTicks,
+                simSchedule.chemistryInterval, simSchedule.phaseInterval);
             break;
         case MenuCmd::ThermalIntervalPlus:
             thermal.config.intervalTicks = std::min(6, thermal.config.intervalTicks + 1);
+            simSchedule.setIntervals(thermal.config.intervalTicks,
+                simSchedule.chemistryInterval, simSchedule.phaseInterval);
             break;
         case MenuCmd::RigidGravity:
             rigid.gravityScale = (rigid.gravityScale > 0.5f) ? 0.0f : 1.0f;
@@ -1031,14 +1041,19 @@ void render(HWND hwnd, HDC dc) {
 void worldTick() {
     auto tickStart = FluidEngine::Clock::now();
     engine.syncWorkerPool();
+    simSchedule.beginPhysicsTick(PHYSICS_DT);
     rigid.step(engine, PHYSICS_DT);
     engine.simulationTick();
     gas.simulationTick(engine);
     rigid.gatherFluidForces(engine);
     gas.applyPressureForces(rigid, engine);
-    thermal.simulationTick(engine, rigid, gas, PHYSICS_DT);
-    stepWaterPhaseChange(engine, rigid, gas, thermal, PHYSICS_DT);
-    reactions.simulationTick(engine, rigid, gas, thermal, PHYSICS_DT);
+    float dtThermal = 0.0f, dtPhase = 0.0f, dtChem = 0.0f;
+    if (simSchedule.takeThermal(dtThermal))
+        thermal.simulationTick(engine, rigid, gas, dtThermal);
+    if (simSchedule.takePhase(dtPhase))
+        stepWaterPhaseChange(engine, rigid, gas, thermal, dtPhase);
+    if (simSchedule.takeChemistry(dtChem))
+        reactions.simulationTick(engine, rigid, gas, thermal, dtChem);
     gas.recomputePressure();
     adaptAutoQuality(FluidEngine::elapsedMs(tickStart));
 }
@@ -1598,6 +1613,11 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR commandLine, int show)
     if (commandLine && wcsstr(commandLine, L"--reaction-engine-sanity")) {
         runReactionEngineSanityCheck();
         gas.runCompositionSanityCheck(engine, rigid);
+        runSimulationQualitySanity();
+        return 0;
+    }
+    if (commandLine && wcsstr(commandLine, L"--quality-profile-sanity")) {
+        runSimulationQualitySanity();
         return 0;
     }
     if (commandLine && wcsstr(commandLine, L"--substance-registry-diag")) { runSubstanceRegistryDiagnostics(); return 0; }
@@ -1646,6 +1666,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR commandLine, int show)
     engine.resetWorld();
     gas.resetAmbient(engine);
     thermal.seedAmbient(engine, rigid, gas);
+    applySimQuality(1);
     shell.applyPalette(ui::PaletteId::Water, activeTool, rigid.drawMaterial);
     shell.log(ui::tr("log_ready"));
     ShowWindow(mainWindow, show); UpdateWindow(mainWindow);

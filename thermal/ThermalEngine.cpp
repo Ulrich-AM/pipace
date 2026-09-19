@@ -649,24 +649,19 @@ void ThermalEngine::simulationTick(FluidEngine &fluid, RigidBodyEngine &rigid, G
         }
     }
 
-    int interval = std::max(1, config.intervalTicks);
-    bool runConduction = (tickNo % static_cast<uint32_t>(interval)) == 0u;
-    if (runConduction) {
-        bool any = false;
-        for (uint8_t a : chunkActivity) if (a) { any = true; break; }
-        float dtCond = dt * static_cast<float>(interval);
-        if (any) {
-            conductActive(fluid, rigid, gas, dtCond);
-            scrubMasslessHeat(fluid);
-        } else {
-            work.activeCells = 0;
-            work.conductionPairs = 0;
-            work.activeBodies = 0;
-        }
-        if (!fluid.config.walledBorders)
-            conductOpenBoundary(fluid, rigid, gas, dtCond);
-        sleepChunks(fluid, rigid, gas);
+    bool any = false;
+    for (uint8_t a : chunkActivity) if (a) { any = true; break; }
+    if (any) {
+        conductActive(fluid, rigid, gas, dt);
+        scrubMasslessHeat(fluid);
+    } else {
+        work.activeCells = 0;
+        work.conductionPairs = 0;
+        work.activeBodies = 0;
     }
+    if (!fluid.config.walledBorders)
+        conductOpenBoundary(fluid, rigid, gas, dt);
+    sleepChunks(fluid, rigid, gas);
 
     lastStepMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
     timingAccum += lastStepMs;
