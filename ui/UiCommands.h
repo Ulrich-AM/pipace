@@ -38,7 +38,7 @@ enum class MenuCmd : int {
     Vorticity,
     Advection,
     Residual,
-    QualityLow, QualityMed, QualityHigh, QualityAuto,
+    QualityLow, QualityMed, QualityHigh, QualityAuto, QualityCustom,
     Tension,
     Spray,
     SubstepsMinus,
@@ -66,7 +66,13 @@ enum class MenuCmd : int {
     CatchUpMinus, CatchUpPlus,
     ThermalIntervalMinus, ThermalIntervalPlus,
     RigidGravity,
-    NoiseMinus, NoisePlus
+    NoiseMinus, NoisePlus,
+    CustomFluidP, CustomFluidB, CustomFluidA,
+    CustomGasP, CustomGasB, CustomGasA,
+    CustomRigidP, CustomRigidB, CustomRigidA,
+    CustomThermalP, CustomThermalB, CustomThermalA,
+    CustomChemP, CustomChemB, CustomChemA,
+    CustomPhaseP, CustomPhaseB, CustomPhaseA
 };
 
 enum class SettingsMouseResult : uint8_t { Miss = 0, Consume, Command, Drag };

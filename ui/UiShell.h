@@ -16,6 +16,7 @@
 #include "fluid/FluidEngine.h"
 #include "gas/GasEngine.h"
 #include "rigid/RigidBodyEngine.h"
+#include "sim/SimulationQuality.h"
 
 #include <string>
 #include <vector>
@@ -110,6 +111,7 @@ struct View {
     int hoverY = -1;
     float heatPower = 1.0f;
     bool thermalEnabled = true;
+    SimulationQualityLevels customLevels;
 };
 
 void computeShellLayout(ShellState &shell, int clientW, int clientH);

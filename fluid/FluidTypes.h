@@ -146,7 +146,7 @@ enum class VelocityAdvection : uint8_t {
     BFECC
 };
 
-enum class QualityPreset : uint8_t { Low = 0, Medium = 1, High = 2, Auto = 3 };
+enum class QualityPreset : uint8_t { Low = 0, Medium = 1, High = 2, Auto = 3, Custom = 4 };
 
 inline VelocityAdvection nextVelocityAdvection(VelocityAdvection mode) {
     switch (mode) {

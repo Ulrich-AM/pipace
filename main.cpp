@@ -37,6 +37,7 @@ ThermalEngine thermal;
 ReactionEngine reactions;
 SimulationScheduleState simSchedule;
 SimulationQualityProfile simProfile;
+SimulationQualityLevels simCustomLevels;
 ui::ShellState shell;
 
 constexpr std::array<float, 6> speedScales{{0.10f, 0.25f, 0.50f, 1.0f, 2.0f, 4.0f}};
@@ -154,13 +155,16 @@ ui::View makeView() {
     v.heatPower = shell.heatPower;
     v.thermalEnabled = thermal.config.enabled;
     v.thermal = &thermal;
+    v.customLevels = simCustomLevels;
     return v;
 }
 
 void worldTick();
 void invalidate();
 void applySimQuality(int level);
+void applyCurrentQualityProfile();
 void setQualityPreset(QualityPreset preset);
+void setCustomQualityLevel(int SimulationQualityLevels::*field, int level);
 void adaptAutoQuality(double worldMs);
 void paintEnergyDisc(int cx, int cy);
 void paintGasDisc(int cx, int cy);
@@ -183,11 +187,21 @@ void applySimQuality(int level) {
     applySimulationQuality(simProfile, engine, gas, thermal, rigid, simSchedule);
 }
 
-void setQualityPreset(QualityPreset preset) {
-    engine.config.quality = preset;
-    if (preset == QualityPreset::Auto) {
-        engine.config.autoQualityLevel = 1;
-        applySimQuality(1);
+void logQualityReport() {
+    std::string report = describeSimulationQuality(simProfile, simSchedule,
+        gas.config.simMode, thermal.config.enabled);
+    for (char &ch : report) if (ch == '\n') ch = '|';
+    std::wstring wreport(report.begin(), report.end());
+    shell.log(wreport.c_str());
+}
+
+void applyCurrentQualityProfile() {
+    QualityPreset preset = engine.config.quality;
+    if (preset == QualityPreset::Custom) {
+        simProfile = profileForCustomLevels(simCustomLevels);
+        applySimulationQuality(simProfile, engine, gas, thermal, rigid, simSchedule);
+    } else if (preset == QualityPreset::Auto) {
+        applySimQuality(engine.config.autoQualityLevel);
     } else if (preset == QualityPreset::Low) {
         applySimQuality(0);
     } else if (preset == QualityPreset::High) {
@@ -195,11 +209,22 @@ void setQualityPreset(QualityPreset preset) {
     } else {
         applySimQuality(1);
     }
-    std::string report = describeSimulationQuality(simProfile, simSchedule,
-        gas.config.simMode, thermal.config.enabled);
-    for (char &ch : report) if (ch == '\n') ch = '|';
-    std::wstring wreport(report.begin(), report.end());
-    shell.log(wreport.c_str());
+}
+
+void setQualityPreset(QualityPreset preset) {
+    engine.config.quality = preset;
+    if (preset == QualityPreset::Auto)
+        engine.config.autoQualityLevel = 1;
+    applyCurrentQualityProfile();
+    logQualityReport();
+}
+
+void setCustomQualityLevel(int SimulationQualityLevels::*field, int level) {
+    simCustomLevels.*field = std::max(0, std::min(2, level));
+    if (engine.config.quality != QualityPreset::Custom)
+        engine.config.quality = QualityPreset::Custom;
+    applyCurrentQualityProfile();
+    logQualityReport();
 }
 
 void adaptAutoQuality(double worldMs) {
@@ -312,6 +337,25 @@ void handleMenuCommand(ui::MenuCmd cmd) {
         case MenuCmd::QualityMed: setQualityPreset(QualityPreset::Medium); break;
         case MenuCmd::QualityHigh: setQualityPreset(QualityPreset::High); break;
         case MenuCmd::QualityAuto: setQualityPreset(QualityPreset::Auto); break;
+        case MenuCmd::QualityCustom: setQualityPreset(QualityPreset::Custom); break;
+        case MenuCmd::CustomFluidP: setCustomQualityLevel(&SimulationQualityLevels::fluid, 0); break;
+        case MenuCmd::CustomFluidB: setCustomQualityLevel(&SimulationQualityLevels::fluid, 1); break;
+        case MenuCmd::CustomFluidA: setCustomQualityLevel(&SimulationQualityLevels::fluid, 2); break;
+        case MenuCmd::CustomGasP: setCustomQualityLevel(&SimulationQualityLevels::gas, 0); break;
+        case MenuCmd::CustomGasB: setCustomQualityLevel(&SimulationQualityLevels::gas, 1); break;
+        case MenuCmd::CustomGasA: setCustomQualityLevel(&SimulationQualityLevels::gas, 2); break;
+        case MenuCmd::CustomRigidP: setCustomQualityLevel(&SimulationQualityLevels::rigid, 0); break;
+        case MenuCmd::CustomRigidB: setCustomQualityLevel(&SimulationQualityLevels::rigid, 1); break;
+        case MenuCmd::CustomRigidA: setCustomQualityLevel(&SimulationQualityLevels::rigid, 2); break;
+        case MenuCmd::CustomThermalP: setCustomQualityLevel(&SimulationQualityLevels::thermal, 0); break;
+        case MenuCmd::CustomThermalB: setCustomQualityLevel(&SimulationQualityLevels::thermal, 1); break;
+        case MenuCmd::CustomThermalA: setCustomQualityLevel(&SimulationQualityLevels::thermal, 2); break;
+        case MenuCmd::CustomChemP: setCustomQualityLevel(&SimulationQualityLevels::chemistry, 0); break;
+        case MenuCmd::CustomChemB: setCustomQualityLevel(&SimulationQualityLevels::chemistry, 1); break;
+        case MenuCmd::CustomChemA: setCustomQualityLevel(&SimulationQualityLevels::chemistry, 2); break;
+        case MenuCmd::CustomPhaseP: setCustomQualityLevel(&SimulationQualityLevels::phase, 0); break;
+        case MenuCmd::CustomPhaseB: setCustomQualityLevel(&SimulationQualityLevels::phase, 1); break;
+        case MenuCmd::CustomPhaseA: setCustomQualityLevel(&SimulationQualityLevels::phase, 2); break;
         case MenuCmd::Tension: engine.config.surfaceTensionEnabled = !engine.config.surfaceTensionEnabled; break;
         case MenuCmd::Spray: engine.config.sprayEnabled = !engine.config.sprayEnabled; break;
         case MenuCmd::SubstepsMinus: engine.config.maxSubsteps = std::max(1, engine.config.maxSubsteps - 1); break;
@@ -344,6 +388,7 @@ void handleMenuCommand(ui::MenuCmd cmd) {
             gas.resetAmbient(engine);
             thermal.seedAmbient(engine, rigid, gas);
             reactions.clearActivity();
+            simSchedule.reset();
             shell.log(ui::tr("log_fluid_scene"));
             break;
         case MenuCmd::Rigid1: case MenuCmd::Rigid2: case MenuCmd::Rigid3: case MenuCmd::Rigid4: case MenuCmd::Rigid5:
@@ -357,6 +402,7 @@ void handleMenuCommand(ui::MenuCmd cmd) {
             gas.resetAmbient(engine);
             thermal.seedAmbient(engine, rigid, gas);
             reactions.clearActivity();
+            simSchedule.reset();
             shell.log(ui::tr("log_rigid_scene"));
             break;
         case MenuCmd::Gas1: case MenuCmd::Gas2: case MenuCmd::Gas3: case MenuCmd::Gas4:
@@ -365,6 +411,7 @@ void handleMenuCommand(ui::MenuCmd cmd) {
             gas.loadTestScene(engine, rigid, static_cast<int>(cmd) - static_cast<int>(MenuCmd::Gas1) + 1);
             thermal.seedAmbient(engine, rigid, gas);
             reactions.clearActivity();
+            simSchedule.reset();
             shell.log(ui::tr("log_gas_scene"));
             break;
     }

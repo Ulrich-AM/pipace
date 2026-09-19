@@ -180,7 +180,7 @@ Performance pass (2026-09-12) landed sparse flux/pressure/surface lists, pressur
 
 Remaining headroom:
 
-- Quality presets (Low/Performance, Medium/Balanced, High/Accurate, Auto) flow through `SimulationQualityProfile` (`sim/SimulationQuality.h`). They change solver iterations, substeps, sleep, and thermal/chemistry/phase **update intervals** (accumulated dt, not slower physics). Auto chooses Performance or Balanced only. Low/Auto-Low use `GasSimMode::Half`; they never silently set `GasSimMode::Off`. Settings → Gas Off and Thermal Off remain explicit. `PHYSICS_DT` is still 1/30 if the menu Hz is 20 (deferred).
+- Quality presets (Performance/Balanced/Accurate/Auto/Custom) flow through `SimulationQualityProfile` (`sim/SimulationQuality.h`). They change solver iterations, substeps, sleep, and thermal/chemistry/phase **update intervals** (accumulated dt, not slower physics). Auto chooses Performance or Balanced only, all subsystems together. Custom composes per-subsystem levels from `profileForQualityLevel` and keeps those selections when leaving Custom. Low/Auto-Low use `GasSimMode::Half`; they never silently set `GasSimMode::Off`. Settings → Gas Off and Thermal Off remain explicit. Quality does not write `physicsHz` or `catchUpTicks`. `PHYSICS_DT` is still 1/30 if the menu Hz is 20 (deferred).
 - Connectivity-aware residual / splash redeposit (correctness)
 - Broader multithreading on **larger grids** (pressure lists ≥20k cells/phase); do not force 200×120 onto many cores
 - Avoid guessing; use `--benchmark` and stage timings
