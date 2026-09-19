@@ -1221,11 +1221,38 @@ void drawSettingsPanel(HDC dc, ShellState &shell, View const &view, RECT const &
 
     section(left0, left1, yL, tr("sec_quality"));
     x = left0;
-    button(left0, left1, x, yL, 52, tr("quality_low"), MenuCmd::QualityLow, engine.config.quality == QualityPreset::Low);
-    button(left0, left1, x, yL, 68, tr("quality_med"), MenuCmd::QualityMed, engine.config.quality == QualityPreset::Medium);
-    button(left0, left1, x, yL, 52, tr("quality_high"), MenuCmd::QualityHigh, engine.config.quality == QualityPreset::High);
-    button(left0, left1, x, yL, 52, tr("quality_auto"), MenuCmd::QualityAuto, engine.config.quality == QualityPreset::Auto);
+    button(left0, left1, x, yL, 88, tr("quality_low"), MenuCmd::QualityLow, engine.config.quality == QualityPreset::Low);
+    button(left0, left1, x, yL, 72, tr("quality_med"), MenuCmd::QualityMed, engine.config.quality == QualityPreset::Medium);
+    button(left0, left1, x, yL, 72, tr("quality_high"), MenuCmd::QualityHigh, engine.config.quality == QualityPreset::High);
+    button(left0, left1, x, yL, 44, tr("quality_auto"), MenuCmd::QualityAuto, engine.config.quality == QualityPreset::Auto);
+    button(left0, left1, x, yL, 60, tr("quality_custom"), MenuCmd::QualityCustom, engine.config.quality == QualityPreset::Custom);
     yL += rowH + 4;
+    if (engine.config.quality == QualityPreset::Custom) {
+        auto customRow = [&](wchar_t const *label, int current,
+            MenuCmd p, MenuCmd b, MenuCmd a)
+        {
+            x = left0;
+            RECT lab{left0, yL, left0 + 92, yL + rowH};
+            drawLabel(dc, lab, label, kDimText, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+            x = left0 + 96;
+            button(left0, left1, x, yL, 22, tr("quality_letter_p"), p, current == 0);
+            button(left0, left1, x, yL, 22, tr("quality_letter_b"), b, current == 1);
+            button(left0, left1, x, yL, 22, tr("quality_letter_a"), a, current == 2);
+            yL += rowH + 4;
+        };
+        customRow(tr("quality_row_fluid"), view.customLevels.fluid,
+            MenuCmd::CustomFluidP, MenuCmd::CustomFluidB, MenuCmd::CustomFluidA);
+        customRow(tr("quality_row_gas"), view.customLevels.gas,
+            MenuCmd::CustomGasP, MenuCmd::CustomGasB, MenuCmd::CustomGasA);
+        customRow(tr("quality_row_rigid"), view.customLevels.rigid,
+            MenuCmd::CustomRigidP, MenuCmd::CustomRigidB, MenuCmd::CustomRigidA);
+        customRow(tr("quality_row_thermal"), view.customLevels.thermal,
+            MenuCmd::CustomThermalP, MenuCmd::CustomThermalB, MenuCmd::CustomThermalA);
+        customRow(tr("quality_row_chemistry"), view.customLevels.chemistry,
+            MenuCmd::CustomChemP, MenuCmd::CustomChemB, MenuCmd::CustomChemA);
+        customRow(tr("quality_row_phase"), view.customLevels.phase,
+            MenuCmd::CustomPhaseP, MenuCmd::CustomPhaseB, MenuCmd::CustomPhaseA);
+    }
     x = left0;
     button(left0, left1, x, yL, 84, tr("thermal_on"), MenuCmd::ThermalOn, view.thermalEnabled);
     button(left0, left1, x, yL, 88, tr("thermal_off"), MenuCmd::ThermalOff, !view.thermalEnabled);
@@ -1242,8 +1269,10 @@ void drawSettingsPanel(HDC dc, ShellState &shell, View const &view, RECT const &
     {
         int shown = engine.config.quality == QualityPreset::Auto ? engine.config.autoQualityLevel
             : (engine.config.quality == QualityPreset::High ? 2
-                : (engine.config.quality == QualityPreset::Low ? 0 : 1));
-        std::wstring usingName = shown <= 0 ? tr("quality_low") : (shown == 1 ? tr("quality_med") : tr("quality_high"));
+                : (engine.config.quality == QualityPreset::Low ? 0
+                    : (engine.config.quality == QualityPreset::Custom ? -1 : 1)));
+        std::wstring usingName = shown < 0 ? tr("quality_custom")
+            : (shown <= 0 ? tr("quality_low") : (shown == 1 ? tr("quality_med") : tr("quality_high")));
         std::wstring qStatus = engine.config.quality == QualityPreset::Auto
             ? trf("quality_auto_using", usingName)
             : trf("quality_using", usingName);
@@ -1558,6 +1587,16 @@ char const *tipKeyForCmd(MenuCmd cmd) {
         case MenuCmd::QualityMed: return "tip_quality_med";
         case MenuCmd::QualityHigh: return "tip_quality_high";
         case MenuCmd::QualityAuto: return "tip_quality_auto";
+        case MenuCmd::QualityCustom: return "tip_quality_custom";
+        case MenuCmd::CustomFluidP: case MenuCmd::CustomGasP: case MenuCmd::CustomRigidP:
+        case MenuCmd::CustomThermalP: case MenuCmd::CustomChemP: case MenuCmd::CustomPhaseP:
+            return "tip_quality_letter_p";
+        case MenuCmd::CustomFluidB: case MenuCmd::CustomGasB: case MenuCmd::CustomRigidB:
+        case MenuCmd::CustomThermalB: case MenuCmd::CustomChemB: case MenuCmd::CustomPhaseB:
+            return "tip_quality_letter_b";
+        case MenuCmd::CustomFluidA: case MenuCmd::CustomGasA: case MenuCmd::CustomRigidA:
+        case MenuCmd::CustomThermalA: case MenuCmd::CustomChemA: case MenuCmd::CustomPhaseA:
+            return "tip_quality_letter_a";
         case MenuCmd::ThermalOn: return "tip_thermal_on";
         case MenuCmd::ThermalOff: return "tip_thermal_off";
         case MenuCmd::Tension: return "tip_tension";

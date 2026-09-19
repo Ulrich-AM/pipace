@@ -18,7 +18,7 @@ struct FluidConfig {
     bool sprayEnabled = true;
     VelocityAdvection velocityAdvection = VelocityAdvection::SemiLagrangian;
     QualityPreset quality = QualityPreset::Medium;
-    int autoQualityLevel = 1; // 0 = Low knobs, 1 = Medium (Auto never climbs to High)
+    int autoQualityLevel = 1; // 0 = Performance knobs, 1 = Balanced (Auto never climbs to Accurate)
     int physicsHz = 30;
     int catchUpTicks = 2;
     // 0 = Auto (conservative hardware pick). 1 = deterministic sequential path.
@@ -39,23 +39,17 @@ inline void applyFluidQualityKnobs(FluidConfig &c, int level) {
         c.surfaceTensionEnabled = false;
         c.sprayEnabled = false;
         c.velocityAdvection = VelocityAdvection::SemiLagrangian;
-        c.physicsHz = 20;
-        c.catchUpTicks = 1;
     } else if (level == 1) {
         c.maxPressureIterations = 24;
         c.maxSubsteps = 6;
         c.maxLimiterPasses = 16;
         c.surfaceTensionEnabled = true;
         c.sprayEnabled = true;
-        c.physicsHz = 30;
-        c.catchUpTicks = 2;
     } else {
         c.maxPressureIterations = 30;
         c.maxSubsteps = 6;
         c.maxLimiterPasses = 16;
         c.surfaceTensionEnabled = true;
         c.sprayEnabled = true;
-        c.physicsHz = 30;
-        c.catchUpTicks = 2;
     }
 }

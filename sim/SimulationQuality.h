@@ -15,8 +15,9 @@ struct RigidBodyEngine;
 // Quality knobs only. Material constants, reaction ΔH, stoichiometry, gravity,
 // and ignition gates are not part of a profile.
 //
-// PHYSICS_DT stays 1/30 even when a preset sets physicsHz = 20. That mismatch
-// is a known issue and is not repaired here. Scheduling is in simulation ticks.
+// Simulation fidelity is independent of simulation rate. physicsHz / catchUpTicks
+// stay on FluidConfig as user Settings. PHYSICS_DT remains 1/30 even when the
+// menu is 20 Hz (known limitation; not repaired here).
 
 struct FluidQualitySettings {
     int maxPressureIterations = 24;
@@ -26,8 +27,6 @@ struct FluidQualitySettings {
     bool surfaceTensionEnabled = true;
     bool sprayEnabled = true;
     VelocityAdvection velocityAdvection = VelocityAdvection::SemiLagrangian;
-    int physicsHz = 30;
-    int catchUpTicks = 2;
 };
 
 struct GasQualitySettings {
@@ -59,8 +58,30 @@ struct PhaseQualitySettings {
     int intervalTicks = 1;
 };
 
+// 0 = Performance, 1 = Balanced, 2 = Accurate. Default all Balanced.
+struct SimulationQualityLevels {
+    int fluid = 1;
+    int gas = 1;
+    int rigid = 1;
+    int thermal = 1;
+    int chemistry = 1;
+    int phase = 1;
+
+    void clampAll() {
+        auto clampLevel = [](int v) { return std::max(0, std::min(2, v)); };
+        fluid = clampLevel(fluid);
+        gas = clampLevel(gas);
+        rigid = clampLevel(rigid);
+        thermal = clampLevel(thermal);
+        chemistry = clampLevel(chemistry);
+        phase = clampLevel(phase);
+    }
+};
+
 struct SimulationQualityProfile {
-    int level = 1; // 0 Performance, 1 Balanced, 2 Accurate
+    int level = 1; // 0 Performance, 1 Balanced, 2 Accurate; -1 Custom mixed
+    bool custom = false;
+    SimulationQualityLevels levels;
     FluidQualitySettings fluid;
     GasQualitySettings gas;
     RigidQualitySettings rigid;
@@ -130,6 +151,7 @@ struct SimulationScheduleState {
 
 // 0 = Performance, 1 = Balanced, 2 = Accurate. Auto selects 0 or 1 only.
 SimulationQualityProfile profileForQualityLevel(int level);
+SimulationQualityProfile profileForCustomLevels(SimulationQualityLevels levels);
 
 void applySimulationQuality(SimulationQualityProfile const &profile,
     FluidEngine &fluid, GasEngine &gas, ThermalEngine &thermal,
