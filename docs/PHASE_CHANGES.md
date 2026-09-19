@@ -1,8 +1,10 @@
 # Phase changes — design note
 
 This is the next milestone after the Substance / MatterPhase architecture pass.
-Water **liquid ⇄ gas** and **liquid ⇄ solid** are implemented. Honey mixtures
-do not boil or freeze yet.
+Live **Liquid ⇄ Gas** is generic (`world/PhaseChangeEngine.cpp`) and driven by
+`SubstanceId` + `PhaseProperties`. Water is currently the only built-in that
+meets both-endpoint eligibility. Live **Solid ⇄ Liquid** is still Water-specific
+(`world/WaterPhaseChange.cpp`). Honey mixtures do not boil or freeze yet.
 
 Target first: **water** `solid ⇄ liquid ⇄ gas` using the existing `SUBSTANCE_WATER`
 id. There will be no `SUBSTANCE_ICE` or `SUBSTANCE_STEAM`.
@@ -19,9 +21,10 @@ Today water is only simulated as liquid (`FluidEngine` volume). Capability flags
 already say it can be solid and gas. Those flags are metadata, not transfer.
 
 Mass/fill/gas-amount conversion helpers live in `substance/PhaseTransfer.h`.
-Live **water liquid ⇄ gas** transfer is in `world/WaterPhaseChange.cpp`.
+Live **Liquid ⇄ Gas** transfer is in `world/PhaseChangeEngine.cpp` (Water
+uses this path; Honey/CO2/Carbon are ineligible with current metadata).
 Live **water liquid ⇄ solid** (rigid `MATERIAL_WATER_SOLID`, still
-`SUBSTANCE_WATER`) is in the same file. Honey mixtures do not boil or freeze yet.
+`SUBSTANCE_WATER`) is in `world/WaterPhaseChange.cpp`. Honey mixtures do not boil or freeze yet.
 
 Vapor placement: the occupancy model is one primary medium per cell, and liquid
 with `fill >= MIN_PRESSURE_FILL` has zero gas volume. Boiling deposits vapor
@@ -31,10 +34,11 @@ currently 10000 atm) that is **not** a thermodynamic law; hits are counted as
 `blockedBoilSafetyLimit`. Boiling/condensation follow a Clausius–Clapeyron
 saturation curve from `PhaseProperties` (`saturationVaporPressurePa` /
 `saturationTemperatureK` in `substance/PhaseTransfer.h`): higher total pressure
-raises `T_sat`, lower pressure lowers it. Condensation compares water-vapor
-**partial** pressure to `P_sat(T)`, not total gas temperature vs 373 K.
-Condensate prefers existing nearby water, then cells next to surfaces that are
-actually cooler than the vapor, then lower neighbors. Hot walls do not get a
+raises `T_sat`, lower pressure lowers it. Condensation compares each eligible
+gas component's **partial** pressure to `P_sat(T)` for that SubstanceId, not
+total gas temperature vs 373 K. Condensate prefers existing nearby liquid of
+the same SubstanceId, then cells next to surfaces that are actually cooler
+than the vapor, then lower neighbors. Hot walls do not get a
 near-solid bonus. Equal destinations cycle by a tick-salted spatial hash.
 
 Phase existence uses `kMinFillMove` (1e-6 fill), separate from the fluid-motion
@@ -76,13 +80,18 @@ lab apparatus except where noted.
 
 ## Implementation status
 
-Water liquid ⇄ gas is live (`world/WaterPhaseChange.cpp`). Remaining:
+Live Liquid ⇄ Gas is generic (`world/PhaseChangeEngine.cpp`). Only substances
+whose registered capabilities support both liquid and gas endpoints, and whose
+saturation/latent/molar-mass data are valid, are eligible. Water is eligible.
+Honey, CO2, and Carbon are not (do not change their capabilities to force it).
+Live Solid ⇄ Liquid remains Water-specific. Remaining:
 
 1. Mixture thermodynamics (honey/water must not boil/freeze until then).
 2. Same-cell liquid/gas occupancy if the one-primary-medium model is relaxed.
 3. Rigid/fluid buoyancy may not yet make ice float; do not add a special ice force.
 4. Clausius–Clapeyron is a two-parameter approximation near the reference
    boiling point, not a steam table / critical-point model.
+5. Generic Solid ⇄ Liquid (Phase Change Generalization - Phase 2).
 
 ## Invariants
 
@@ -120,7 +129,9 @@ Water liquid ⇄ gas is live (`world/WaterPhaseChange.cpp`). Remaining:
 
 8. **Data-driven from `PhaseProperties`.** Melting/boiling points and latent
    heats already live there (copied from thermal authoring at registry init).
-   Do not hard-code 273.15 / 373.15 in the transfer solver.
+   Do not hard-code 273.15 / 373.15 in the transfer solver. Live Liquid ⇄ Gas
+   uses the substance's own table; it does not special-case Water identity
+   except compatibility counters and Water shading.
 
 9. **Mixtures stay honest.** A water/honey cell is not a new SubstanceId. Phase
    change of mixtures is out of scope for the first water milestone.

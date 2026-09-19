@@ -2,6 +2,7 @@
 
 #include "fluid/DiagOutput.h"
 #include "substance/SubstanceRegistry.h"
+#include "world/PhaseChangeEngine.h"
 
 #include <algorithm>
 #include <cmath>
@@ -259,6 +260,20 @@ void runPhaseTransferDiagnostics() {
             + " Tsat=" + f8(saturationTemperatureK(SUBSTANCE_WATER, P0 * 1.5))
             + " Psat(Tsat)=" + f8(saturationVaporPressurePa(SUBSTANCE_WATER,
                 saturationTemperatureK(SUBSTANCE_WATER, P0 * 1.5))));
+
+    emit("live_lg_water_liquid_gas_eligible",
+        supportsLiveLiquidGasTransition(SUBSTANCE_WATER)
+            && canTransition(SUBSTANCE_WATER, MatterPhase::Liquid, MatterPhase::Gas)
+            && canTransition(SUBSTANCE_WATER, MatterPhase::Gas, MatterPhase::Liquid), "");
+    emit("live_lg_honey_not_eligible",
+        !supportsLiveLiquidGasTransition(SUBSTANCE_HONEY), "");
+    emit("live_lg_co2_not_eligible",
+        !supportsLiveLiquidGasTransition(SUBSTANCE_CARBON_DIOXIDE), "");
+    emit("live_lg_carbon_not_eligible",
+        !supportsLiveLiquidGasTransition(SUBSTANCE_CARBON), "");
+    emit("live_lg_none_not_eligible",
+        !supportsLiveLiquidGasTransition(SUBSTANCE_NONE)
+            && !supportsLiveLiquidGasTransition(static_cast<SubstanceId>(0xFFFF)), "");
 
     out << "summary\t" << (failed == 0 ? "PASS" : "FAIL") << '\t'
         << passed << " passed, " << failed << " failed\n";

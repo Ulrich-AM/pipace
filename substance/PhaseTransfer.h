@@ -8,7 +8,8 @@
 #include <cmath>
 
 // Phase-transfer accounting helpers (fill ↔ mass ↔ gas amount, latent energy,
-// Clausius–Clapeyron saturation). Live water solid ⇄ liquid ⇄ gas is in
+// Clausius–Clapeyron saturation). Live Liquid ⇄ Gas is in
+// world/PhaseChangeEngine.cpp. Live water solid ⇄ liquid is in
 // world/WaterPhaseChange.cpp.
 //
 // Current sandbox units (do not invent a second system):
