@@ -713,3 +713,14 @@ Implemented under chemistry/SaceDescriptors.* :
 - Element-pair/bond-order histogram is order-independent and does not silently truncate.
 - Graph + binding key + descriptors commit atomically on trusted attach.
 - Property estimation from descriptors is a later milestone.
+
+PHASE 6 LANDING (FUNCTIONAL MOTIFS)
+===================================
+Implemented under chemistry/SaceFunctional.* :
+
+- Hydroxyl = O with at least one C and one H single neighbor (not Water).
+- Ether oxygen = neutral O with exactly two C single neighbors and no H.
+- carbonylCount = number of C=O bonds, not a ketone/liquid classifier.
+- H-bond donor/acceptor are oxygen-site counts for H/C/O; O=O is not an acceptor.
+- Unsupported elements store supported=false without invented H/C/O motifs.
+- Functional profile is not canonical identity and not a physical-property estimate.

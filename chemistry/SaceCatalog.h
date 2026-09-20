@@ -4,6 +4,7 @@
 #include "chemistry/SaceProperties.h"
 #include "chemistry/SaceMolecule.h"
 #include "chemistry/SaceDescriptors.h"
+#include "chemistry/SaceFunctional.h"
 #include "substance/SubstanceTypes.h"
 
 #include <cstddef>
@@ -49,6 +50,8 @@ struct SaceGeneratedRecord {
     std::string molecularGraphStructureKey;
     bool hasMolecularDescriptors = false;
     SaceMolecularDescriptors molecularDescriptors{};
+    bool hasFunctionalProfile = false;
+    SaceFunctionalProfile functionalProfile{};
 };
 
 // Player-facing display only. Uppercase hex, never part of canonical identity.
@@ -71,7 +74,7 @@ public:
 
     // Trusted provenance: claimedStructureKey must equal record.structureKey.
     // This is not graph-isomorphism proof. First exact attach wins.
-    // Graph + binding key + descriptors commit together or not at all.
+    // Graph + binding key + descriptors + functional profile commit together.
     // Does not change canonical signature, record id, display ordinal, or properties.
     bool attachMolecularGraph(SaceRecordId id, char const *claimedStructureKey,
         SaceMolecularGraph const &graph);
