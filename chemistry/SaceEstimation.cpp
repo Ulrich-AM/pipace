@@ -8,6 +8,7 @@
 #include <cmath>
 #include <cstring>
 #include <fstream>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -336,7 +337,117 @@ SaceScalarProperty jobackLowScalar(double value) {
     return p;
 }
 
+SaceScalarProperty jobackLowFiniteScalar(double value) {
+    SaceScalarProperty p = saceUnknownScalarProperty();
+    if (!std::isfinite(value))
+        return p;
+    p.value = static_cast<float>(value);
+    p.known = true;
+    p.source = SacePropertySource::StructuralEstimate;
+    p.confidence = SaceConfidence::Low;
+    return p;
+}
+
+bool estimateLeeKeslerOmega(double tb, double tc, double pc, double &omega) {
+    omega = 0.0;
+    if (!(tb > 0.0) || !(tc > 0.0) || !(pc > 0.0))
+        return false;
+    if (!std::isfinite(tb) || !std::isfinite(tc) || !std::isfinite(pc))
+        return false;
+    double tbr = tb / tc;
+    if (!(tbr > 0.0) || !(tbr < 1.0) || !std::isfinite(tbr))
+        return false;
+    double lnTbr = std::log(tbr);
+    double tbr6 = tbr * tbr * tbr * tbr * tbr * tbr;
+    double num = std::log(kLeeKeslerAtmPa / pc)
+        - 5.92714
+        + 6.09648 / tbr
+        + 1.28862 * lnTbr
+        - 0.169347 * tbr6;
+    double den = 15.2518
+        - 15.6875 / tbr
+        - 13.4721 * lnTbr
+        + 0.43577 * tbr6;
+    if (!std::isfinite(num) || !std::isfinite(den) || std::fabs(den) < 1.0e-14)
+        return false;
+    omega = num / den;
+    return std::isfinite(omega);
+}
+
 } // namespace
+
+bool saceLeeKeslerSaturationPressurePa(
+    double temperatureK,
+    double criticalTemperatureK,
+    double criticalPressurePa,
+    double acentricFactor,
+    double &outPressurePa)
+{
+    outPressurePa = 0.0;
+    if (!std::isfinite(temperatureK) || !std::isfinite(criticalTemperatureK)
+        || !std::isfinite(criticalPressurePa) || !std::isfinite(acentricFactor))
+        return false;
+    if (!(temperatureK > 0.0) || !(criticalTemperatureK > 0.0) || !(criticalPressurePa > 0.0))
+        return false;
+    if (temperatureK > criticalTemperatureK)
+        return false;
+    if (temperatureK == criticalTemperatureK) {
+        outPressurePa = criticalPressurePa;
+        return true;
+    }
+    double tr = temperatureK / criticalTemperatureK;
+    if (!(tr > 0.0) || !(tr < 1.0) || !std::isfinite(tr))
+        return false;
+    double lnTr = std::log(tr);
+    double tr6 = tr * tr * tr * tr * tr * tr;
+    double f0 = 5.92714 - 6.09648 / tr - 1.28862 * lnTr + 0.169347 * tr6;
+    double f1 = 15.2518 - 15.6875 / tr - 13.4721 * lnTr + 0.43577 * tr6;
+    if (!std::isfinite(f0) || !std::isfinite(f1))
+        return false;
+    double lnPr = f0 + acentricFactor * f1;
+    if (!std::isfinite(lnPr))
+        return false;
+    double pr = std::exp(lnPr);
+    if (!std::isfinite(pr) || !(pr > 0.0))
+        return false;
+    double psat = pr * criticalPressurePa;
+    if (!std::isfinite(psat) || !(psat > 0.0))
+        return false;
+    if (psat > criticalPressurePa)
+        return false;
+    outPressurePa = psat;
+    return true;
+}
+
+bool saceBuildLeeKeslerVaporModelFromJoback(
+    SaceJobackEstimateBundle const &bundle,
+    SaceLeeKeslerVaporModel &out)
+{
+    out = {};
+    if (!bundle.normalBoilingPointK.known || !bundle.criticalTemperatureK.known
+        || !bundle.criticalPressurePa.known || !bundle.acentricFactor.known)
+        return false;
+    if (bundle.normalBoilingPointK.source == SacePropertySource::Unknown
+        || bundle.criticalTemperatureK.source == SacePropertySource::Unknown
+        || bundle.criticalPressurePa.source == SacePropertySource::Unknown
+        || bundle.acentricFactor.source == SacePropertySource::Unknown)
+        return false;
+    out.normalBoilingPointK = bundle.normalBoilingPointK.value;
+    out.criticalTemperatureK = bundle.criticalTemperatureK.value;
+    out.criticalPressurePa = bundle.criticalPressurePa.value;
+    out.acentricFactor = bundle.acentricFactor.value;
+    if (!(out.normalBoilingPointK > 0.0) || !(out.criticalTemperatureK > 0.0)
+        || !(out.criticalPressurePa > 0.0)
+        || !std::isfinite(out.normalBoilingPointK)
+        || !std::isfinite(out.criticalTemperatureK)
+        || !std::isfinite(out.criticalPressurePa)
+        || !std::isfinite(out.acentricFactor))
+        return false;
+    if (!(out.normalBoilingPointK < out.criticalTemperatureK))
+        return false;
+    out.valid = true;
+    return true;
+}
 
 bool saceEstimateJobackBundle(SaceMolecularGraph const &graph, SaceJobackEstimateBundle &out) {
     saceResetJobackEstimateBundle(out);
@@ -376,6 +487,20 @@ bool saceEstimateJobackBundle(SaceMolecularGraph const &graph, SaceJobackEstimat
     double vcCm3 = kJobackVcInterceptCm3 + saceJobackVcContributionSumCm3PerMol(out.groups);
     if (vcCm3 > 0.0 && std::isfinite(vcCm3))
         out.criticalMolarVolumeM3PerMol = jobackLowScalar(vcCm3 * kJobackCm3ToM3);
+
+    if (tb > 0.0 && std::isfinite(tb)
+        && out.criticalTemperatureK.known && out.criticalPressurePa.known) {
+        double tc = tb / denom;
+        double pc = 0.0;
+        if (base > 0.0 && std::isfinite(base)) {
+            double pcBar = 1.0 / (base * base);
+            if (pcBar > 0.0 && std::isfinite(pcBar))
+                pc = pcBar * kJobackBarToPa;
+        }
+        double omega = 0.0;
+        if (pc > 0.0 && estimateLeeKeslerOmega(tb, tc, pc, omega))
+            out.acentricFactor = jobackLowFiniteScalar(omega);
+    }
 
     return true;
 }
@@ -584,7 +709,8 @@ void runSaceEstimationDiagnostics() {
             && !recE->properties.normalBoilingPointK.known
             && !recE->properties.criticalTemperatureK.known
             && !recE->properties.criticalPressurePa.known
-            && !recE->properties.criticalMolarVolumeM3PerMol.known, "");
+            && !recE->properties.criticalMolarVolumeM3PerMol.known
+            && !recE->properties.acentricFactor.known, "");
 
     SaceJobackEstimateBundle bunA{}, bunB{};
     emit("c2h6o_a_bundle_ok", saceEstimateJobackBundle(gA, bunA), "");
@@ -648,10 +774,12 @@ void runSaceEstimationDiagnostics() {
             && x.criticalTemperatureK.known && y.criticalTemperatureK.known
             && x.criticalPressurePa.known && y.criticalPressurePa.known
             && x.criticalMolarVolumeM3PerMol.known && y.criticalMolarVolumeM3PerMol.known
+            && x.acentricFactor.known && y.acentricFactor.known
             && nearK(x.normalBoilingPointK.value, y.normalBoilingPointK.value)
             && nearK(x.criticalTemperatureK.value, y.criticalTemperatureK.value, 0.05)
             && nearK(x.criticalPressurePa.value, y.criticalPressurePa.value, 80.0)
-            && nearK(x.criticalMolarVolumeM3PerMol.value, y.criticalMolarVolumeM3PerMol.value, 1e-7);
+            && nearK(x.criticalMolarVolumeM3PerMol.value, y.criticalMolarVolumeM3PerMol.value, 1e-7)
+            && nearK(x.acentricFactor.value, y.acentricFactor.value, 1e-5);
     };
     SaceJobackEstimateBundle permB{}, bondB{}, endB{};
     emit("atom_permutation_preserves_joback_bundle",
@@ -663,7 +791,8 @@ void runSaceEstimationDiagnostics() {
 
     auto allJobackUnknown = [](SaceJobackEstimateBundle const &b) {
         return !b.normalBoilingPointK.known && !b.criticalTemperatureK.known
-            && !b.criticalPressurePa.known && !b.criticalMolarVolumeM3PerMol.known;
+            && !b.criticalPressurePa.known && !b.criticalMolarVolumeM3PerMol.known
+            && !b.acentricFactor.known;
     };
     SaceJobackEstimateBundle waterB{}, methaneB{}, unsB{};
     emit("water_all_joback_unknown",
@@ -689,6 +818,9 @@ void runSaceEstimationDiagnostics() {
             && recA->properties.criticalPressurePa.source == SacePropertySource::StructuralEstimate
             && recA->properties.criticalMolarVolumeM3PerMol.known
             && recA->properties.criticalMolarVolumeM3PerMol.source == SacePropertySource::StructuralEstimate
+            && recA->properties.acentricFactor.known
+            && recA->properties.acentricFactor.source == SacePropertySource::StructuralEstimate
+            && recA->properties.acentricFactor.confidence == SaceConfidence::Low
             && nearK(recA->properties.criticalTemperatureK.value, 499.407, 0.05), "");
 
     SaceGeneratedRecord *mutA = cat.recordMutable(refA.generatedId);
@@ -696,6 +828,7 @@ void runSaceEstimationDiagnostics() {
         mutA->properties.criticalTemperatureK = saceUnknownScalarProperty();
         mutA->properties.criticalPressurePa = saceUnknownScalarProperty();
         mutA->properties.criticalMolarVolumeM3PerMol = saceUnknownScalarProperty();
+        mutA->properties.acentricFactor = saceUnknownScalarProperty();
     }
     bool reattachFill = cat.attachMolecularGraph(refA.generatedId, "synthetic-structure-a", gA);
     recA = cat.record(refA.generatedId);
@@ -720,6 +853,139 @@ void runSaceEstimationDiagnostics() {
             && recA->properties.criticalTemperatureK.source == SacePropertySource::Reference
             && recA->properties.criticalTemperatureK.confidence == SaceConfidence::High
             && nearK(recA->properties.criticalTemperatureK.value, 513.9, 0.05), "");
+
+    auto omegaOk = [](SaceScalarProperty const &p) {
+        return p.known
+            && p.source == SacePropertySource::StructuralEstimate
+            && p.confidence == SaceConfidence::Low;
+    };
+    emit("a_omega_0_556081", bunA.acentricFactor.known
+        && nearK(bunA.acentricFactor.value, 0.556081, 2e-5),
+        std::to_string(bunA.acentricFactor.value));
+    emit("b_omega_0_193764", bunB.acentricFactor.known
+        && nearK(bunB.acentricFactor.value, 0.193764, 2e-5),
+        std::to_string(bunB.acentricFactor.value));
+    emit("a_b_omega_structural_estimate_low",
+        omegaOk(bunA.acentricFactor) && omegaOk(bunB.acentricFactor), "");
+
+    SaceLeeKeslerVaporModel modelA{}, modelB{};
+    emit("a_vapor_model_from_joback_bundle",
+        saceBuildLeeKeslerVaporModelFromJoback(bunA, modelA) && modelA.valid, "");
+    emit("b_vapor_model_from_joback_bundle",
+        saceBuildLeeKeslerVaporModelFromJoback(bunB, modelB) && modelB.valid, "");
+
+    auto psatAt = [](SaceLeeKeslerVaporModel const &m, double t, double &p) {
+        return m.valid && saceLeeKeslerSaturationPressurePa(
+            t, m.criticalTemperatureK, m.criticalPressurePa, m.acentricFactor, p);
+    };
+    double aTbPsat = 0, bTbPsat = 0, aTcPsat = 0, bTcPsat = 0;
+    bool aTbOk = psatAt(modelA, modelA.normalBoilingPointK, aTbPsat)
+        && nearK(aTbPsat, kLeeKeslerAtmPa, 50.0);
+    emit("a_psat_at_tb_approx_1_atm", aTbOk, std::to_string(aTbPsat));
+    bool bTbOk = psatAt(modelB, modelB.normalBoilingPointK, bTbPsat)
+        && nearK(bTbPsat, kLeeKeslerAtmPa, 50.0);
+    emit("b_psat_at_tb_approx_1_atm", bTbOk, std::to_string(bTbPsat));
+    bool aTcOk = psatAt(modelA, modelA.criticalTemperatureK, aTcPsat)
+        && aTcPsat == modelA.criticalPressurePa;
+    emit("a_psat_at_tc_equals_pc", aTcOk, std::to_string(aTcPsat));
+    bool bTcOk = psatAt(modelB, modelB.criticalTemperatureK, bTcPsat)
+        && bTcPsat == modelB.criticalPressurePa;
+    emit("b_psat_at_tc_equals_pc", bTcOk, std::to_string(bTcPsat));
+
+    auto omegaDefOk = [&](SaceLeeKeslerVaporModel const &m, double expect) {
+        double t = 0.7 * m.criticalTemperatureK;
+        double p = 0.0;
+        if (!psatAt(m, t, p) || !(p > 0.0) || !(m.criticalPressurePa > 0.0))
+            return false;
+        double pr = p / m.criticalPressurePa;
+        if (!(pr > 0.0) || !std::isfinite(pr))
+            return false;
+        double omegaDef = -std::log10(pr) - 1.0;
+        return nearK(omegaDef, expect, 2e-4) && nearK(omegaDef, m.acentricFactor, 2e-4);
+    };
+    emit("a_omega_definition_at_tr_0_7", omegaDefOk(modelA, bunA.acentricFactor.value), "");
+    emit("b_omega_definition_at_tr_0_7", omegaDefOk(modelB, bunB.acentricFactor.value), "");
+
+    auto checkTr = [&](char const *name, SaceLeeKeslerVaporModel const &m, double tr, double expect, double tol) {
+        double p = 0.0;
+        bool ok = psatAt(m, tr * m.criticalTemperatureK, p) && nearK(p, expect, tol);
+        emit(name, ok, std::to_string(p));
+        return p;
+    };
+    double a06 = checkTr("a_psat_tr_0_6", modelA, 0.6, 17651.9, 20.0);
+    double a07 = checkTr("a_psat_tr_0_7", modelA, 0.7, 159999.0, 80.0);
+    double a08 = checkTr("a_psat_tr_0_8", modelA, 0.8, 741479.0, 200.0);
+    double a09 = checkTr("a_psat_tr_0_9", modelA, 0.9, 2.30695e6, 400.0);
+    double b06 = checkTr("b_psat_tr_0_6", modelB, 0.6, 63957.8, 40.0);
+    double b07 = checkTr("b_psat_tr_0_7", modelB, 0.7, 314341.0, 150.0);
+    double b08 = checkTr("b_psat_tr_0_8", modelB, 0.8, 990254.0, 300.0);
+    double b09 = checkTr("b_psat_tr_0_9", modelB, 0.9, 2.38267e6, 400.0);
+    emit("a_psat_monotonic_sampled_tr",
+        a06 < a07 && a07 < a08 && a08 < a09 && a09 < modelA.criticalPressurePa, "");
+    emit("b_psat_monotonic_sampled_tr",
+        b06 < b07 && b07 < b08 && b08 < b09 && b09 < modelB.criticalPressurePa, "");
+
+    double rejected = 0.0;
+    emit("psat_rejects_t_above_tc",
+        !saceLeeKeslerSaturationPressurePa(modelA.criticalTemperatureK + 1.0,
+            modelA.criticalTemperatureK, modelA.criticalPressurePa, modelA.acentricFactor, rejected), "");
+    emit("psat_rejects_nonpositive_t",
+        !saceLeeKeslerSaturationPressurePa(0.0, modelA.criticalTemperatureK,
+            modelA.criticalPressurePa, modelA.acentricFactor, rejected)
+            && !saceLeeKeslerSaturationPressurePa(-1.0, modelA.criticalTemperatureK,
+                modelA.criticalPressurePa, modelA.acentricFactor, rejected), "");
+    emit("psat_rejects_invalid_tc",
+        !saceLeeKeslerSaturationPressurePa(300.0, 0.0, modelA.criticalPressurePa,
+            modelA.acentricFactor, rejected), "");
+    emit("psat_rejects_invalid_pc",
+        !saceLeeKeslerSaturationPressurePa(300.0, modelA.criticalTemperatureK, 0.0,
+            modelA.acentricFactor, rejected), "");
+    double nan = std::numeric_limits<double>::quiet_NaN();
+    double inf = std::numeric_limits<double>::infinity();
+    emit("psat_rejects_nan_inf_inputs",
+        !saceLeeKeslerSaturationPressurePa(nan, modelA.criticalTemperatureK,
+            modelA.criticalPressurePa, modelA.acentricFactor, rejected)
+            && !saceLeeKeslerSaturationPressurePa(300.0, inf, modelA.criticalPressurePa,
+                modelA.acentricFactor, rejected)
+            && !saceLeeKeslerSaturationPressurePa(300.0, modelA.criticalTemperatureK, nan,
+                modelA.acentricFactor, rejected)
+            && !saceLeeKeslerSaturationPressurePa(300.0, modelA.criticalTemperatureK,
+                modelA.criticalPressurePa, inf, rejected), "");
+
+    emit("water_no_joback_omega", !waterB.acentricFactor.known, "");
+    emit("methane_no_joback_omega", !methaneB.acentricFactor.known, "");
+    emit("omega_not_in_canonical_signature",
+        std::strstr(sig, "omega") == nullptr && std::strstr(sig, "0.556") == nullptr
+            && std::strstr(sig, "Lee") == nullptr, sig);
+    emit("vapor_model_not_in_canonical_identity",
+        std::strstr(sig, "vapor") == nullptr && std::strstr(sig, "Psat") == nullptr
+            && std::strstr(sig, "acentric") == nullptr, sig);
+
+    SaceGeneratedRecord *mutOmega = cat.recordMutable(refA.generatedId);
+    if (mutOmega)
+        mutOmega->properties.acentricFactor = saceUnknownScalarProperty();
+    bool reattachOmega = cat.attachMolecularGraph(refA.generatedId, "synthetic-structure-a", gA);
+    recA = cat.record(refA.generatedId);
+    emit("same_graph_reattach_backfills_omega",
+        reattachOmega && recA && recA->properties.acentricFactor.known
+            && recA->properties.acentricFactor.source == SacePropertySource::StructuralEstimate
+            && nearK(recA->properties.acentricFactor.value, 0.556081, 2e-5), "");
+
+    SaceGeneratedRecord *mutOmegaRef = cat.recordMutable(refA.generatedId);
+    if (mutOmegaRef) {
+        mutOmegaRef->properties.acentricFactor.known = true;
+        mutOmegaRef->properties.acentricFactor.value = 0.644f;
+        mutOmegaRef->properties.acentricFactor.source = SacePropertySource::Reference;
+        mutOmegaRef->properties.acentricFactor.confidence = SaceConfidence::High;
+    }
+    bool reattachOmegaKeep = cat.attachMolecularGraph(refA.generatedId, "synthetic-structure-a", gA);
+    recA = cat.record(refA.generatedId);
+    emit("same_graph_backfill_preserves_reference_high_omega",
+        reattachOmegaKeep && recA
+            && recA->properties.acentricFactor.source == SacePropertySource::Reference
+            && recA->properties.acentricFactor.confidence == SaceConfidence::High
+            && nearK(recA->properties.acentricFactor.value, 0.644, 1e-4), "");
+    emit("generated_record_still_unspawnable", recA && !recA->spawnable, "");
 
     cat.clear();
     out << "summary\t" << (failed == 0 ? "PASS" : "FAIL") << '\t' << passed << " passed, "

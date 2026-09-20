@@ -71,6 +71,7 @@ struct SaceGeneratedProperties {
     SaceScalarProperty criticalTemperatureK{};
     SaceScalarProperty criticalPressurePa{};
     SaceScalarProperty criticalMolarVolumeM3PerMol{};
+    SaceScalarProperty acentricFactor{};
 };
 
 inline char const *sacePropertySourceKey(SacePropertySource source) {

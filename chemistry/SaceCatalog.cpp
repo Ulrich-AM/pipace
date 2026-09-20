@@ -53,6 +53,7 @@ void SaceCatalog::applyJobackEstimates(SaceGeneratedRecord &record,
     saceAssignScalarProperty(record.properties.criticalPressurePa, bundle.criticalPressurePa);
     saceAssignScalarProperty(record.properties.criticalMolarVolumeM3PerMol,
         bundle.criticalMolarVolumeM3PerMol);
+    saceAssignScalarProperty(record.properties.acentricFactor, bundle.acentricFactor);
 }
 
 ChemicalIdentity SaceCatalog::identityView(SaceGeneratedRecord const &rec) const {

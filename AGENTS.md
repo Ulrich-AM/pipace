@@ -55,7 +55,7 @@ PIPACE/
     SaceMolecule.h/.cpp                        # Phase 4 small-molecule graphs (not canonical identity)
     SaceDescriptors.h/.cpp                     # Phase 5 trusted graph binding helpers + structural descriptors
     SaceFunctional.h/.cpp                      # Phase 6 H/C/O functional motifs (not identity, not properties)
-    SaceEstimation.h/.cpp                      # Phase 7/8 Joback-Reid 1987 Tb+Tc/Pc/Vc subset (StructuralEstimate/Low)
+    SaceEstimation.h/.cpp                      # Phase 7–9 Joback Tb/Tc/Pc/Vc + Lee-Kesler omega/Psat (StructuralEstimate/Low)
   sim/
     SimulationQuality.h/.cpp                   # SimulationQualityProfile + tick scheduler
   docs/
@@ -96,7 +96,9 @@ SACE Phase 6 (`chemistry/SaceFunctional`) derives H/C/O motifs (hydroxyl C–O�
 
 SACE Phase 7 (`chemistry/SaceEstimation`) is the first structure-derived numerical physical property: normal boiling point from a documented Joback–Reid 1987 subset. `Tb [K] = 198.2 + SUM(group contributions)` using published coefficients for `-CH3`, `-CH2-`, `>CH-`, `>C<`, alcohol `-OH`, and non-ring `-O-` only. Applicability is acyclic, net-neutral, fully single-bonded H/C/O molecules completely coverable by those six groups. Source is `StructuralEstimate`, confidence `Low`. Unsupported chemistry (Water, methane/CH4, H2, O2, CO2, rings, charge, N, unsaturation, incomplete coverage) stays `Unknown` — no fallback formula. Joback failure must not fail trusted graph attachment. The estimate is not canonical identity, not live `PhaseProperties`, and is not copied into spawnable generated matter. Same-formula isomers (C2H6O A vs B) may receive different estimates. A later better estimator or reference value should replace Joback through existing precedence.
 
-SACE Phase 8 extends the same six-group Joback subset to critical temperature, critical pressure (stored in Pa), and critical molar volume (stored in m³/mol). Tc uses the Joback-estimated Tb from the same fragmentation, not a later stored/reference Tb. Same-graph reattach may backfill missing estimates through property precedence and must not downgrade higher-quality data. Critical molar volume is not ordinary liquid molar volume; Tc is not Tb. These values do not define vapor-pressure curves or live phase equilibrium.
+SACE Phase 8 extends the same six-group Joback subset to critical temperature, critical pressure (stored in Pa), and critical molar volume (stored in m³/mol). Tc uses the Joback-estimated Tb from the same fragmentation, not a later stored/reference Tb. Same-graph reattach may backfill missing estimates through property precedence and must not downgrade higher-quality data. Critical molar volume is not ordinary liquid molar volume; Tc is not Tb.
+
+SACE Phase 9 (`chemistry/SaceEstimation`) adds a Lee–Kesler (1975) acentric factor and saturation vapor pressure Psat(T) from the same self-consistent Joback Tb/Tc/Pc tuple (`StructuralEstimate` / `Low`). Psat is a calculation helper, not live phase physics. Independently replaced generated properties (for example Reference Tc with Structural Pc/omega) must not be treated as a coherent corresponding-states set. There is no ordinary saturation curve above Tc; Psat(Tc) returns Pc. No Antoine coefficients are invented. The public catalog API does not expose mutable generated records.
 
 These mappings are **implementation, not laws**:
 
@@ -252,7 +254,9 @@ normal-boiling-point estimate (`StructuralEstimate` / `Low`) for acyclic
 neutral saturated H/C/O alcohol/ether molecules; unsupported chemistry stays
 Unknown and is not live phase data. **SACE Phase 8** extends that subset to
 Joback Tc/Pc/Vc (`StructuralEstimate` / `Low`); critical volume is not liquid
-density and Tc is not boiling temperature. Live `Liquid ⇄ Gas` and `Solid ⇄ Liquid` are generic by
+density and Tc is not boiling temperature. **SACE Phase 9** adds Lee–Kesler
+omega and Psat(T) from the same Joback Tb/Tc/Pc tuple; it is not live phase
+integration. Live `Liquid ⇄ Gas` and `Solid ⇄ Liquid` are generic by
 SubstanceId (`world/PhaseChangeEngine.cpp`). Honey mixtures still skip phase
 change. Runtime-generated world matter, reaction families, graph isomorphism,
 and broader property estimates are not started.

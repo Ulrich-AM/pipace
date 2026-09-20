@@ -69,7 +69,6 @@ public:
 
     // Pointer remains valid across later insertions. Invalid after clear().
     SaceGeneratedRecord const *record(SaceRecordId id) const;
-    SaceGeneratedRecord *recordMutable(SaceRecordId id);
 
     // Pointers in the returned view remain valid until that record is destroyed
     // (clear). Inserting other records does not invalidate them.
@@ -86,9 +85,11 @@ public:
         SaceMolecularGraph const &graph);
 
 private:
+    friend void runSaceEstimationDiagnostics();
     bool eligibleForGeneratedIdentity(ChemicalIdentity const &id, char *signature, int cap) const;
     SaceRecordId insertGenerated(ChemicalIdentity const &id, char const *signature);
     void applyJobackEstimates(SaceGeneratedRecord &record, SaceJobackEstimateBundle const &bundle);
+    SaceGeneratedRecord *recordMutable(SaceRecordId id);
 
     std::deque<SaceGeneratedRecord> records_;
     std::unordered_map<std::string, SaceRecordId> bySignature_;
