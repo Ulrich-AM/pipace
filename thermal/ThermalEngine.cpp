@@ -541,6 +541,8 @@ static float pendingSolidContactScale(FluidEngine const &fluid, int index) {
 }
 
 void ThermalEngine::conductPendingSolids(FluidEngine &fluid, RigidBodyEngine &rigid, GasEngine &gas, float dt) {
+    work.pendingCellsVisited = 0;
+    if (!fluid.hasPendingSolid()) return;
     float dx = cellLengthM(fluid.config.cellsPerMeter);
     float areaOverDx = dx;
     constexpr int kNdx[4] = {1, -1, 0, 0};
@@ -597,6 +599,7 @@ void ThermalEngine::conductPendingSolids(FluidEngine &fluid, RigidBodyEngine &ri
         for (int y = y0; y <= y1; ++y) for (int x = x0; x <= x1; ++x) {
             int i = FluidEngine::ci(x, y);
             if (!(fluid.solidifyPendingMassKg(i) > 0.0f)) continue;
+            ++work.pendingCellsVisited;
             float contact = pendingSolidContactScale(fluid, i);
             if (!(contact > 0.0f)) continue;
             exchangePendingPrimary(x, y, x, y, contact, dt);
@@ -667,6 +670,7 @@ bool ThermalEngine::resolveNode(FluidEngine &fluid, RigidBodyEngine &rigid, GasE
 void ThermalEngine::conductOpenBoundary(FluidEngine &fluid, RigidBodyEngine &rigid, GasEngine &gas, float dt)
 {
     if (fluid.config.walledBorders) return;
+    bool anyPending = fluid.hasPendingSolid();
     float dx = cellLengthM(fluid.config.cellsPerMeter);
     float areaOverDx = dx;
     float kAir = thermalForSubstance(SUBSTANCE_AIR).conductivity;
@@ -689,6 +693,7 @@ void ThermalEngine::conductOpenBoundary(FluidEngine &fluid, RigidBodyEngine &rig
             }
         }
         float *eP = nullptr, cP = 0.0f, kP = 0.0f;
+        if (!anyPending) return;
         if (!resolvePendingSolid(fluid, FluidEngine::ci(x, y), eP, cP, kP)) return;
         float contact = pendingSolidContactScale(fluid, FluidEngine::ci(x, y));
         if (!(contact > 0.0f)) return;
@@ -715,6 +720,7 @@ void ThermalEngine::conductOpenBoundary(FluidEngine &fluid, RigidBodyEngine &rig
 
 void ThermalEngine::sleepChunks(FluidEngine &fluid, RigidBodyEngine &rigid, GasEngine &gas) {
     work.activeChunks = 0;
+    bool anyPending = fluid.hasPendingSolid();
     for (int c = 0; c < CHUNK_W * CHUNK_H; ++c) {
         if (!chunkActivity[static_cast<size_t>(c)]) continue;
         int cx = c % CHUNK_W, cy = c / CHUNK_W;
@@ -732,7 +738,7 @@ void ThermalEngine::sleepChunks(FluidEngine &fluid, RigidBodyEngine &rigid, GasE
             float t = cell.temperatureK;
             if (cell.hasMatter) consider(t);
             float tPend = 0.0f;
-            bool hasPend = pendingSolidCapacity(fluid, i) > MIN_THERMAL_CAPACITY;
+            bool hasPend = anyPending && pendingSolidCapacity(fluid, i) > MIN_THERMAL_CAPACITY;
             if (hasPend) {
                 tPend = pendingSolidTemperatureK(fluid, i);
                 if (cell.hasMatter) {
@@ -747,7 +753,7 @@ void ThermalEngine::sleepChunks(FluidEngine &fluid, RigidBodyEngine &rigid, GasE
                 float d = std::abs(t - tn);
                 maxD = std::max(maxD, d);
                 int ni = FluidEngine::ci(nx, ny);
-                bool nPend = pendingSolidCapacity(fluid, ni) > MIN_THERMAL_CAPACITY;
+                bool nPend = anyPending && pendingSolidCapacity(fluid, ni) > MIN_THERMAL_CAPACITY;
                 float tnPend = nPend ? pendingSolidTemperatureK(fluid, ni) : tn;
                 if (hasPend && (ns.hasMatter || nPend)) {
                     if (ns.hasMatter) d = std::max(d, std::abs(tPend - tn));
@@ -915,6 +921,29 @@ void ThermalEngine::runDiagnostics(FluidEngine &fluid, RigidBodyEngine &rigid, G
         wakeCell(x, y);
     };
 
+    // 0. Pending occupancy count is an acceleration invariant, not a second store.
+    resetBare();
+    bool countA = fluid.pendingSolidCellCount == 0 && !fluid.hasPendingSolid();
+    int c0 = FluidEngine::ci(10, 10);
+    int c1 = FluidEngine::ci(11, 10);
+    (void)fluid.addSolidifyPendingKg(c0, SUBSTANCE_WATER, 0.50f, 10.0f);
+    bool countB = fluid.pendingSolidCellCount == 1 && fluid.hasPendingSolid();
+    (void)fluid.addSolidifyPendingKg(c0, SUBSTANCE_WATER, 0.25f, 5.0f);
+    bool countC = fluid.pendingSolidCellCount == 1;
+    (void)fluid.addSolidifyPendingKg(c1, SUBSTANCE_WATER, 0.40f, 8.0f);
+    bool countD = fluid.pendingSolidCellCount == 2;
+    (void)fluid.takeSolidifyPendingKg(c0, SUBSTANCE_WATER, 0.10f);
+    bool countE = fluid.pendingSolidCellCount == 2;
+    fluid.clearSolidifyPending(c0);
+    bool countF = fluid.pendingSolidCellCount == 1;
+    fluid.clearSolidifyPending(c1);
+    bool countG = fluid.pendingSolidCellCount == 0 && !fluid.hasPendingSolid();
+    (void)fluid.addSolidifyPendingKg(c0, SUBSTANCE_WATER, 1.0f, 1.0f);
+    fluid.zeroFluidState();
+    bool countH = fluid.pendingSolidCellCount == 0 && !fluid.hasPendingSolid();
+    emit("pending_cell_count_invariant", 0, fluid.pendingSolidCellCount, 0.0,
+        countA && countB && countC && countD && countE && countF && countG && countH);
+
     // 1. Hot/cold liquid mixing
     resetBare();
     for (int x = 40; x <= 160; ++x) fluid.solid[static_cast<size_t>(FluidEngine::ci(x, 90))] = 1;
@@ -945,6 +974,8 @@ void ThermalEngine::runDiagnostics(FluidEngine &fluid, RigidBodyEngine &rigid, G
     bool passMix = std::abs(tMean - tExpect) < 12.0f
         && std::abs(eMix1 - eMix0) / std::max(1.0, std::abs(eMix0)) < 0.04;
     emit("mix_hot_cold", 90, eMix1, tMean, passMix);
+    emit("pending_fast_path_no_scan", 90, work.pendingCellsVisited, lastStepMs,
+        work.pendingCellsVisited == 0 && !fluid.hasPendingSolid());
 
     // 2. Metal vs wood conduction
     resetBare();

@@ -590,9 +590,11 @@ void FluidEngine::addLiquidFill(int index, float dFill, float dHeat) {
 void FluidEngine::clearSolidifyPending(int index) {
     if (index < 0 || index >= GW * GH) return;
     size_t i = static_cast<size_t>(index);
+    bool occupied = std::isfinite(solidifyPendingKg[i]) && solidifyPendingKg[i] > 1.0e-12f;
     solidifyPendingId[i] = SUBSTANCE_NONE;
     solidifyPendingKg[i] = 0.0f;
     solidifyPendingHeatJ[i] = 0.0f;
+    if (occupied && pendingSolidCellCount > 0) --pendingSolidCellCount;
 }
 
 bool FluidEngine::addSolidifyPendingKg(int index, SubstanceId id, float kg, float heatJ) {
@@ -604,10 +606,12 @@ bool FluidEngine::addSolidifyPendingKg(int index, SubstanceId id, float kg, floa
     SubstanceId &pendId = solidifyPendingId[i];
     float &heat = solidifyPendingHeatJ[i];
     float addHeat = (std::isfinite(heatJ) && heatJ > 0.0f) ? heatJ : 0.0f;
+    bool wasOccupied = std::isfinite(pending) && pending > 1.0e-12f && pendId != SUBSTANCE_NONE;
     if (!(pending > 1.0e-12f) || !std::isfinite(pending) || pendId == SUBSTANCE_NONE) {
         pendId = id;
         pending = kg;
         heat = addHeat;
+        if (!wasOccupied) ++pendingSolidCellCount;
         return true;
     }
     if (pendId != id) return false;
@@ -624,6 +628,7 @@ bool FluidEngine::takeSolidifyPendingKg(int index, SubstanceId id, float kg, flo
     float &pending = solidifyPendingKg[i];
     float &heat = solidifyPendingHeatJ[i];
     if (!(pending + 1.0e-9f >= kg) || !std::isfinite(pending)) return false;
+    bool wasOccupied = pending > 1.0e-12f;
     float frac = kg / pending;
     float takeHeat = 0.0f;
     if (std::isfinite(heat) && heat > 0.0f)
@@ -634,6 +639,7 @@ bool FluidEngine::takeSolidifyPendingKg(int index, SubstanceId id, float kg, flo
         pending = 0.0f;
         heat = 0.0f;
         solidifyPendingId[i] = SUBSTANCE_NONE;
+        if (wasOccupied && pendingSolidCellCount > 0) --pendingSolidCellCount;
     } else if (!(heat > 0.0f) || !std::isfinite(heat)) {
         heat = 0.0f;
     }
@@ -2574,6 +2580,7 @@ void FluidEngine::zeroFluidState() {
     std::fill(pressure.begin(), pressure.end(), 0.0f); std::fill(divergenceField.begin(), divergenceField.end(), 0.0f);
     std::fill(u.begin(), u.end(), 0.0f); std::fill(v.begin(), v.end(), 0.0f);
     splashes.clear(); expectedVolume = 0.0; escapedHeat = 0.0; tickNo = 1;
+    pendingSolidCellCount = 0;
 }
 
 void FluidEngine::clearWorld() {
