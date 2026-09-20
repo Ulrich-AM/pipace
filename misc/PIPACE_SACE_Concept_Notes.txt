@@ -724,3 +724,24 @@ Implemented under chemistry/SaceFunctional.* :
 - H-bond donor/acceptor are oxygen-site counts for H/C/O; O=O is not an acceptor.
 - Unsupported elements store supported=false without invented H/C/O motifs.
 - Functional profile is not canonical identity and not a physical-property estimate.
+
+PHASE 7 LANDING (JOBACK NORMAL BOILING POINT)
+=============================================
+Implemented under chemistry/SaceEstimation.* :
+
+- First structure-derived numerical physical property: normal boiling point.
+- Method: K. G. Joback and R. C. Reid, Chem. Eng. Commun. 57, 233-243 (1987).
+- Equation: Tb [K] = 198.2 + SUM of published group contributions.
+- Phase-7 groups only: -CH3 23.58, -CH2- 22.88, >CH- 21.74, >C< 18.25,
+  alcohol -OH 92.88, non-ring -O- 22.42. Coefficients are not fitted.
+- Applicability: acyclic, net-neutral, fully single-bonded H/C/O molecules
+  with complete atom coverage by those six groups.
+- Provenance: StructuralEstimate / Low. Higher-quality known values win.
+- Unsupported chemistry (Water, CH4, H2, O2, CO2, rings, charge, N,
+  unsaturation, incomplete coverage) stays Unknown. No fallback formula.
+- Joback failure is not graph-attachment failure.
+- Not live PhaseProperties, not vapor-pressure curves, not spawnable matter.
+- Same-formula C2H6O isomers A (C-C-O-H) and B (C-O-C) receive different Tb.
+- Joback-Reid is approximate first-order group contribution; subset coverage
+  means the method applies, not that the boiling point is physically exact.
+

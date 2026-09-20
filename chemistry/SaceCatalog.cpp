@@ -1,5 +1,6 @@
 #include "chemistry/SaceCatalog.h"
 
+#include "chemistry/SaceEstimation.h"
 #include "chemistry/SaceIdentity.h"
 #include "fluid/DiagOutput.h"
 
@@ -150,6 +151,10 @@ bool SaceCatalog::attachMolecularGraph(SaceRecordId id, char const *claimedStruc
     SaceFunctionalProfile func{};
     if (!deriveFunctionalProfile(graph, func))
         return false;
+    SaceScalarProperty jobackTb = saceUnknownScalarProperty();
+    SaceJobackGroupCounts jobackCounts{};
+    (void)saceEstimateJobackNormalBoilingPoint(graph, jobackTb, jobackCounts);
+    (void)jobackCounts;
     if (rec.hasMolecularGraph) {
         if (rec.molecularGraphStructureKey != rec.structureKey)
             return false;
@@ -162,6 +167,8 @@ bool SaceCatalog::attachMolecularGraph(SaceRecordId id, char const *claimedStruc
     rec.hasMolecularGraph = true;
     rec.hasMolecularDescriptors = true;
     rec.hasFunctionalProfile = true;
+    if (jobackTb.known)
+        saceAssignScalarProperty(rec.properties.normalBoilingPointK, jobackTb);
     return true;
 }
 

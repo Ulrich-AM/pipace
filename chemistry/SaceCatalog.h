@@ -75,7 +75,9 @@ public:
     // Trusted provenance: claimedStructureKey must equal record.structureKey.
     // This is not graph-isomorphism proof. First exact attach wins.
     // Graph + binding key + descriptors + functional profile commit together.
-    // Does not change canonical signature, record id, display ordinal, or properties.
+    // Joback boiling-point estimate is attempted after local analysis; failure
+    // does not fail attachment. Does not change canonical signature, record id,
+    // or display ordinal. Molar mass stays identity-derived.
     bool attachMolecularGraph(SaceRecordId id, char const *claimedStructureKey,
         SaceMolecularGraph const &graph);
 

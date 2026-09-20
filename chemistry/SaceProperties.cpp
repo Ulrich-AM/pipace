@@ -245,6 +245,28 @@ void runSacePropertyDiagnostics() {
             && waterMm.source == SacePropertySource::IdentityDerived
             && waterMm.confidence == SaceConfidence::High, "");
 
+    SaceGeneratedProperties blankProps{};
+    emit("normal_boiling_point_defaults_unknown",
+        !blankProps.normalBoilingPointK.known
+            && blankProps.normalBoilingPointK.source == SacePropertySource::Unknown
+            && blankProps.normalBoilingPointK.confidence == SaceConfidence::Unknown, "");
+
+    SaceScalarProperty refTb = makeKnown(351.44f, SacePropertySource::Reference, SaceConfidence::High);
+    SaceScalarProperty jobackTb = makeKnown(337.54f, SacePropertySource::StructuralEstimate, SaceConfidence::Low);
+    emit("structural_estimate_low_does_not_overwrite_reference_high_tb",
+        !saceAssignScalarProperty(refTb, jobackTb)
+            && refTb.source == SacePropertySource::Reference
+            && refTb.confidence == SaceConfidence::High
+            && nearMass(refTb.value, 351.44), "");
+
+    SaceScalarProperty jobackDst = makeKnown(337.54f, SacePropertySource::StructuralEstimate, SaceConfidence::Low);
+    SaceScalarProperty refSrc = makeKnown(351.44f, SacePropertySource::Reference, SaceConfidence::High);
+    emit("reference_high_overwrites_structural_estimate_low_tb",
+        saceAssignScalarProperty(jobackDst, refSrc)
+            && jobackDst.source == SacePropertySource::Reference
+            && jobackDst.confidence == SaceConfidence::High
+            && nearMass(jobackDst.value, 351.44), "");
+
     out << "summary\t" << (failed == 0 ? "PASS" : "FAIL") << '\t' << passed << " passed, "
         << failed << " failed\n";
 }
