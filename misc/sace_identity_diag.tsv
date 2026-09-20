@@ -1,0 +1,23 @@
+test	water_elemental_H2_O1	PASS	H=2 O=1
+test	hydrogen_elemental_H2	PASS	
+test	oxygen_elemental_O2	PASS	
+test	carbon_elemental_C1	PASS	
+test	co2_elemental_C1_O2	PASS	
+test	water_canonical_key_deterministic	PASS	molecule|1:2,8:1|water
+test	reordered_HO_normalizes_to_water	PASS	H=2 O=1
+test	different_structure_key_is_not_water	PASS	
+test	lookup_water	PASS	
+test	lookup_co2	PASS	
+test	lookup_hydrogen	PASS	
+test	lookup_oxygen	PASS	
+test	lookup_carbon	PASS	
+test	honey_not_exact_molecule	PASS	unknown
+test	air_is_mixture_not_o2_n2	PASS	
+test	h2_o2_atom_balanced	PASS	balanced
+test	c_o2_atom_balanced	PASS	balanced
+test	synthetic_unbalanced	PASS	unbalanced
+test	unknown_composition_reaction	PASS	unknown
+test	formula_is_not_identity	PASS	
+test	display_name_not_in_signature	PASS	molecule|1:2,8:1|water
+test	no_runtime_generated_ids	PASS	12
+summary	PASS	22 passed, 0 failed

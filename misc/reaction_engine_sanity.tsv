@@ -3,9 +3,99 @@ test	extent_3_commit	PASS	A=4.000000 B=0.000000 C=3.000000
 test	exothermic_heat	PASS	heat=130.000000
 test	rate_limit_extent_1	PASS	e=1.000000
 test	insufficient_reactant_no_mutation	PASS	
-test	unsupported_gas_product	PASS	
+test	storage_ok_synthetic_gas_product	PASS	
+test	mixed_phase_liquid_gas_to_gas	PASS	liqA=2.000000 gasB=0.000000 gasC=2.000000
 test	unsupported_solid_reactant	PASS	
 test	no_slot_no_mutation	PASS	count=4
 test	endothermic_heat_bound	PASS	e=1.000000 heat=0.000000
-test	empty_registry_fast_path	PASS	count=0
-summary	PASS	10 passed, 0 failed
+test	mixed_endo_split_nonnegative	PASS	liqH=6.000000 gasH=2.000000
+test	molar_limit_2_water	PASS	moles=173.466562 extent=86.733284
+test	physical_mass_liquid_to_gas	PASS	m0=3.125000 mL=0.000000 mG=3.125000
+test	physical_skip_missing_molar_mass	PASS	
+test	gas_merge_reject_full_slots	PASS	
+test	gas_merge_accept_into_air	PASS	
+test	hydrogen_combustion_registered	PASS	
+test	hydrogen_combustion_mass_balanced	PASS	
+test	hydrogen_combustion_cold_no_react	PASS	
+test	hydrogen_combustion_hot_reacts	PASS	
+test	hydrogen_combustion_stoich_2_1	PASS	extent=1.000000 waterMol=2.000000
+test	hydrogen_combustion_excess_h2	PASS	h2Remain=2.000000 water=2.000000
+test	hydrogen_combustion_heat_released	PASS	q=483600.000000
+test	hydrogen_combustion_composition_valid	PASS	
+test	hydrogen_combustion_no_identityless	PASS	dom=1 air=1.000000 water=3.079055
+test	mixture_density_air_reference	PASS	rhoAir=1.204000
+test	mixture_density_hydrogen_lighter	PASS	rhoH2=0.083808
+test	mixture_density_oxygen_heavier	PASS	rhoO2=1.330195
+test	mixture_conductivity_hydrogen_faster	PASS	kH2=0.180000 kAir=0.026000
+test	ambient_air_fails_h2o2_prefilter	PASS	
+test	h2o2_cell_passes_prefilter	PASS	
+test	hydrogen_combustion_rate_scale	PASS	
+test	explicit_gas_off_survives_auto_quality	PASS	
+test	quality_low_sets_half_when_enabled	PASS	
+test	sleeping_composition_buoyancy_frozen	PASS	vT=0.000000 vB=0.000000
+test	activity_zero_without_reaction	PASS	
+test	cold_h2o2_still_does_not_react	PASS	
+test	activity_positive_on_extent	PASS	e=0.133333 a=1.000000
+test	activity_decays_toward_zero	PASS	a0=1.000000 a1=0.818731
+test	ignition_propagates_by_heat	PASS	nT=1635.357178 nWater=0.410541
+test	pressure_ambient_air_1atm	PASS	P=1.000000
+test	pressure_doubles_with_T	PASS	P2T=2.000000
+test	pressure_doubles_with_amount	PASS	P2a=2.000000
+test	pressure_doubles_with_half_volume	PASS	PhalfV=2.000000
+test	water_partial_pressure_rises_with_T	PASS	cold=40530.000000 hot=55302.746094
+test	pressure_recompute_does_not_modify_heat	PASS	heat=3894.306641
+test	live_water_partial_pressure_rises_with_T	PASS	cold=40530.000000 hot=55302.746094
+test	live_water_partial_pressure_ignores_stale_cache	PASS	cached=40530.000000 live=55302.746094
+test	saturation_amount_round_trips_to_Psat	PASS	Psat=42536.256404 Pback=42536.253906 satAmt=0.351613
+test	hotter_gas_needs_less_saturation_vapor	PASS	sat=0.351613 satHot=0.175806
+test	condensation_excess_never_exceeds_water_vapor	PASS	vap=0.400000 excess=0.048387
+test	condensation_leaves_nonwater_components	PASS	air=0.600000 vap=0.400000
+test	combustion_pressure_matches_equation	PASS	T0=900.000000 T1=7498.140625 P0=14.179513 P1=64.000000 Peq=64.000000
+test	combustion_pressure_does_not_spend_heat	PASS	h=561928.625000
+test	idle_reaction_glow_fast_path	PASS	
+test	scene_load_clears_reaction_glow	PASS	
+test	hydrogen_combustion_homogeneous_topology	PASS	
+test	solid_storage_supported_for_rigid_water	PASS	
+test	wood_solid_storage_without_molar_mass	PASS	
+test	surface_topology_water_h2_ok	PASS	
+test	surface_rejects_solid_product	PASS	
+test	surface_rejects_two_solid_reactants	PASS	
+test	solid_fraction_mole_round_trip	PASS	f0=0.400000 f1=0.400000 mol=318.137672
+test	insufficient_solid_limits_extent	PASS	e=1.590688 solidAvail=1.590688 gasAvail=50.000000
+test	gas_slot_failure_leaves_solid	PASS	frac=1.000000
+test	resolve_rigid_source_pixel	PASS	id=1 li=0 f=1.000000
+test	static_wall_rejected_as_reaction_solid	PASS	
+test	interior_rigid_pixel_not_surface_candidate	PASS	edge exposed
+test	partial_solid_consumption	PASS	e=0.020000 f0=1.000000 f1=0.999975 dm=0.000023
+test	zero_dh_surface_conserves_sensible_heat	PASS	H0=8888217.000000 H1=8888217.000000
+test	exothermic_surface_adds_reaction_heat	PASS	dH=80.000000 q=80.000000
+test	full_solid_pixel_removed	PASS	e=0.397672 mat=0
+test	consumed_solid_does_not_respawn	PASS	
+test	surface_no_negative_mass_or_heat	PASS	
+test	carbon_id_appended	PASS	
+test	carbon_maps_to_material	PASS	
+test	carbon_solid_only_phases	PASS	
+test	co2_gas_only_phases	PASS	
+test	carbon_molar_mass_12	PASS	12.011000
+test	co2_molar_mass_44	PASS	44.009499
+test	carbon_combustion_registered_surface	PASS	
+test	carbon_combustion_mass_balanced	PASS	
+test	carbon_combustion_heat_released	PASS	393500.000000
+test	ambient_air_fails_carbon_prefilter	PASS	
+test	co2_density_heavier_than_air	PASS	rhoCO2=1.829528 rhoAir=1.204000
+test	carbon_stoich_1_1_1	PASS	co2=1.000000 o2=0.000000 c=0.000000
+test	carbon_reaction_heat_into_matter	PASS	H=993500.000000 q=393500.000000
+test	excess_carbon_remains_when_o2_limits	PASS	cRemain=1.000000
+test	excess_o2_remains_when_carbon_limits	PASS	o2Remain=1.000000
+test	cold_carbon_oxygen_no_react	PASS	e=0.000000
+test	hot_carbon_oxygen_reacts	PASS	e=8.000000 f=0.997279 co2=12.316219
+test	carbon_fraction_and_o2_decrease	PASS	
+test	co2_appears_in_gas	PASS	
+test	rigid_mass_decreases_with_carbon	PASS	m0=2.260000 m1=2.253850
+test	consumed_carbon_pixel_removed	PASS	e=1.470007
+test	consumed_carbon_does_not_respawn	PASS	
+test	exposed_carbon_surface_reacts	PASS	e=8.000000
+test	interior_carbon_does_not_react	PASS	f=1.000000
+test	co2_slot_failure_leaves_carbon	PASS	frac=0.000340
+test	carbon_no_negative_mass_or_heat	PASS	
+summary	PASS	100 passed, 0 failed

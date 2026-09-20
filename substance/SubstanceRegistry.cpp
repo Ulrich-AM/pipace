@@ -1,5 +1,6 @@
 #include "substance/SubstanceRegistry.h"
 
+#include "chemistry/SaceIdentity.h"
 #include "fluid/DiagOutput.h"
 
 #include <cmath>
@@ -58,6 +59,7 @@ SubstanceDefinition makeWater() {
     s.classification = SubstanceClass::PureSubstance;
     s.compositionKind = CompositionKind::PureChemical;
     s.formulaHint = "H2O";
+    s.chemicalIdentity = saceBuiltinWaterIdentity();
 
     // Thermal
     s.thermal.valid = true;
@@ -137,6 +139,7 @@ SubstanceDefinition makeHoney() {
     s.classification = SubstanceClass::Mixture;
     s.compositionKind = CompositionKind::Mixture;
     s.formulaHint = nullptr;
+    s.chemicalIdentity = saceUnknownIdentity(ChemicalRepresentationKind::Mixture);
 
     // Thermal
     s.thermal.valid = true;
@@ -186,6 +189,7 @@ SubstanceDefinition makeWood() {
     // Classification / composition
     s.classification = SubstanceClass::Biological;
     s.compositionKind = CompositionKind::Composite;
+    s.chemicalIdentity = saceUnknownIdentity(ChemicalRepresentationKind::Composite);
 
     // Thermal
     s.thermal.valid = true;
@@ -262,6 +266,7 @@ SubstanceDefinition makeStone() {
     // Classification / composition
     s.classification = SubstanceClass::Mixture;
     s.compositionKind = CompositionKind::Mixture;
+    s.chemicalIdentity = saceUnknownIdentity(ChemicalRepresentationKind::Composite);
 
     // Thermal
     s.thermal.valid = true;
@@ -336,6 +341,7 @@ SubstanceDefinition makeGlass() {
     // Classification / composition
     s.classification = SubstanceClass::Mixture;
     s.compositionKind = CompositionKind::Mixture;
+    s.chemicalIdentity = saceUnknownIdentity(ChemicalRepresentationKind::NetworkSolid);
 
     // Thermal
     s.thermal.valid = true;
@@ -395,6 +401,7 @@ SubstanceDefinition makeMetal() {
     // Classification / composition
     s.classification = SubstanceClass::Mixture;
     s.compositionKind = CompositionKind::Mixture;
+    s.chemicalIdentity = saceUnknownIdentity(ChemicalRepresentationKind::Unknown);
 
     // Thermal — generic metal, steel-ish table, not a specific element
     s.thermal.valid = true;
@@ -454,6 +461,7 @@ SubstanceDefinition makeAir() {
     // Classification / composition
     s.classification = SubstanceClass::Mixture;
     s.compositionKind = CompositionKind::Mixture;
+    s.chemicalIdentity = saceUnknownIdentity(ChemicalRepresentationKind::Mixture);
 
     // Thermal
     s.thermal.valid = true;
@@ -489,6 +497,7 @@ SubstanceDefinition makeHydrogen() {
     s.classification = SubstanceClass::PureSubstance;
     s.compositionKind = CompositionKind::PureChemical;
     s.formulaHint = "H2";
+    s.chemicalIdentity = saceBuiltinHydrogenIdentity();
 
     s.thermal.valid = true;
     s.thermal.specificHeat = 14300.0f;
@@ -530,6 +539,7 @@ SubstanceDefinition makeOxygen() {
     s.classification = SubstanceClass::PureSubstance;
     s.compositionKind = CompositionKind::PureChemical;
     s.formulaHint = "O2";
+    s.chemicalIdentity = saceBuiltinOxygenIdentity();
 
     s.thermal.valid = true;
     s.thermal.specificHeat = 918.0f;
@@ -571,6 +581,7 @@ SubstanceDefinition makeCarbon() {
     s.classification = SubstanceClass::PureSubstance;
     s.compositionKind = CompositionKind::PureChemical;
     s.formulaHint = "C";
+    s.chemicalIdentity = saceBuiltinCarbonIdentity();
 
     s.thermal.valid = true;
     s.thermal.specificHeat = 710.0f;
@@ -623,6 +634,7 @@ SubstanceDefinition makeCarbonDioxide() {
     s.classification = SubstanceClass::PureSubstance;
     s.compositionKind = CompositionKind::PureChemical;
     s.formulaHint = "CO2";
+    s.chemicalIdentity = saceBuiltinCarbonDioxideIdentity();
 
     s.thermal.valid = true;
     s.thermal.specificHeat = 844.0f;
@@ -878,6 +890,43 @@ void runSubstanceRegistryDiagnostics() {
         co2.chemical.valid && !co2.chemical.flammable && !co2.chemical.oxidizer
             && near(co2.chemical.molarMass, 44.0095f, 0.001f),
         std::to_string(co2.chemical.molarMass));
+
+    emit("water_sace_identity_exact",
+        water.chemicalIdentity.exact
+            && water.chemicalIdentity.kind == ChemicalRepresentationKind::SmallMolecule
+            && elementalCountOf(water.chemicalIdentity.elemental, kAtomicHydrogen) == 2
+            && elementalCountOf(water.chemicalIdentity.elemental, kAtomicOxygen) == 1
+            && findBuiltInByChemicalIdentity(water.chemicalIdentity) == SUBSTANCE_WATER, "");
+    emit("hydrogen_sace_identity_exact",
+        hydrogen.chemicalIdentity.exact
+            && findBuiltInByChemicalIdentity(hydrogen.chemicalIdentity) == SUBSTANCE_HYDROGEN, "");
+    emit("oxygen_sace_identity_exact",
+        oxygen.chemicalIdentity.exact
+            && findBuiltInByChemicalIdentity(oxygen.chemicalIdentity) == SUBSTANCE_OXYGEN, "");
+    emit("carbon_sace_identity_exact",
+        carbon.chemicalIdentity.exact
+            && carbon.chemicalIdentity.kind == ChemicalRepresentationKind::AtomicSpecies
+            && findBuiltInByChemicalIdentity(carbon.chemicalIdentity) == SUBSTANCE_CARBON, "");
+    emit("co2_sace_identity_exact",
+        co2.chemicalIdentity.exact
+            && findBuiltInByChemicalIdentity(co2.chemicalIdentity) == SUBSTANCE_CARBON_DIOXIDE, "");
+    emit("honey_sace_identity_unknown",
+        !honey.chemicalIdentity.exact
+            && honey.chemicalIdentity.kind == ChemicalRepresentationKind::Mixture
+            && honey.chemicalIdentity.elemental.count == 0, "");
+    emit("air_sace_identity_mixture",
+        !air.chemicalIdentity.exact
+            && air.chemicalIdentity.kind == ChemicalRepresentationKind::Mixture
+            && air.chemicalIdentity.elemental.count == 0, "");
+    emit("wood_sace_identity_composite",
+        !wood.chemicalIdentity.exact
+            && wood.chemicalIdentity.kind == ChemicalRepresentationKind::Composite, "");
+    emit("metal_sace_identity_not_iron",
+        !metal.chemicalIdentity.exact
+            && metal.chemicalIdentity.elemental.count == 0, "");
+    emit("sace_does_not_use_display_name",
+        water.chemicalIdentity.structureKey
+            && std::strcmp(water.chemicalIdentity.structureKey, water.displayName) != 0, "");
 
     emit("no_ice_or_steam_slots",
         substanceFromInternalName("ice") == SUBSTANCE_NONE

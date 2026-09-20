@@ -1,6 +1,7 @@
 #pragma once
 
 #include "substance/SubstanceProperties.h"
+#include "chemistry/SaceTypes.h"
 
 #include <cstdint>
 
@@ -87,7 +88,8 @@ struct SubstanceDefinition {
     ThermalProperties thermal{};
     PhaseProperties phase{};
     PorousProperties porous{};
-    ChemicalProperties chemical{};       // placeholder; not simulated
+    ChemicalProperties chemical{};       // physical/reactive metadata (molarMass, flammable)
+    ChemicalIdentity chemicalIdentity{}; // what it contains; not ChemicalProperties
     ElectricalProperties electrical{};   // placeholder; not simulated
     SubstanceVisualMetadata visual{};    // RGB seed; renderer still owns MaterialVisual
 };
