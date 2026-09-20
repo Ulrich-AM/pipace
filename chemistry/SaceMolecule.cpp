@@ -327,6 +327,14 @@ bool saceBuiltinMolecularGraph(SubstanceId id, SaceMolecularGraph &out) {
     return false;
 }
 
+char const *saceBuiltinMolecularStructureKey(SubstanceId id) {
+    SaceMolecularGraph unused{};
+    if (!saceBuiltinMolecularGraph(id, unused))
+        return nullptr;
+    char const *key = substanceDef(id).chemicalIdentity.structureKey;
+    return saceStructureKeyOrEmpty(key)[0] ? key : nullptr;
+}
+
 bool saceSyntheticC2H6OGraphA(SaceMolecularGraph &out) {
     out = {};
     addAtom(out, kAtomicCarbon); // 0
@@ -421,6 +429,14 @@ void runSaceMoleculeDiagnostics() {
     emit("water_net_formal_charge_zero",
         molecularGraphNetFormalCharge(h2o) == 0, std::to_string(molecularGraphNetFormalCharge(h2o)));
 
+    emit("builtin_structure_keys",
+        saceBuiltinMolecularStructureKey(SUBSTANCE_WATER)
+            && std::strcmp(saceBuiltinMolecularStructureKey(SUBSTANCE_WATER), "water") == 0
+            && std::strcmp(saceBuiltinMolecularStructureKey(SUBSTANCE_HYDROGEN), "molecular-hydrogen") == 0
+            && std::strcmp(saceBuiltinMolecularStructureKey(SUBSTANCE_OXYGEN), "molecular-oxygen") == 0
+            && std::strcmp(saceBuiltinMolecularStructureKey(SUBSTANCE_CARBON_DIOXIDE), "carbon-dioxide") == 0
+            && saceBuiltinMolecularStructureKey(SUBSTANCE_CARBON) == nullptr, "");
+
     SaceMolecularGraph carbonGraph{};
     emit("carbon_has_no_small_molecule_graph",
         !saceBuiltinMolecularGraph(SUBSTANCE_CARBON, carbonGraph), "");
@@ -470,10 +486,38 @@ void runSaceMoleculeDiagnostics() {
     SaceRecordId ridB = recB ? recB->recordId : kSaceRecordNone;
     float massA = recA ? recA->properties.molarMassGPerMol.value : 0.0f;
 
-    bool attachA = recA && cat.attachMolecularGraph(refA.generatedId, gA);
-    bool attachBOnA = cat.attachMolecularGraph(refA.generatedId, gB);
-    bool attachB = recB && cat.attachMolecularGraph(refB.generatedId, gB);
-    bool attachAOnB = cat.attachMolecularGraph(refB.generatedId, gA);
+    char const *keyA = "synthetic-structure-a";
+    char const *keyB = "synthetic-structure-b";
+    bool rejectBOnFreshA = cat.attachMolecularGraph(refA.generatedId, keyB, gB);
+    recA = cat.record(refA.generatedId);
+    emit("fresh_a_rejects_graph_b_key_b",
+        !rejectBOnFreshA && recA && !recA->hasMolecularGraph && !recA->hasMolecularDescriptors, "");
+
+    bool attachA = recA && cat.attachMolecularGraph(refA.generatedId, keyA, gA);
+    recA = cat.record(refA.generatedId);
+    emit("fresh_a_accepts_graph_a_key_a",
+        attachA && recA && recA->hasMolecularGraph
+            && recA->molecularGraphStructureKey == recA->structureKey
+            && recA->structureKey == keyA
+            && recA->hasMolecularDescriptors
+            && molecularGraphsStoredEqual(recA->molecularGraph, gA), "");
+
+    recB = cat.record(refB.generatedId);
+    bool rejectAOnFreshB = recB && !recB->hasMolecularGraph
+        && cat.attachMolecularGraph(refB.generatedId, keyA, gA);
+    recB = cat.record(refB.generatedId);
+    emit("fresh_b_rejects_graph_a_key_a",
+        !rejectAOnFreshB && recB && !recB->hasMolecularGraph && !recB->hasMolecularDescriptors, "");
+
+    bool attachB = recB && cat.attachMolecularGraph(refB.generatedId, keyB, gB);
+    recB = cat.record(refB.generatedId);
+    emit("fresh_b_accepts_graph_b_key_b",
+        attachB && recB && recB->hasMolecularGraph
+            && recB->molecularGraphStructureKey == recB->structureKey
+            && recB->structureKey == keyB, "");
+
+    bool attachBOnA = cat.attachMolecularGraph(refA.generatedId, keyB, gB);
+    bool attachAOnB = cat.attachMolecularGraph(refB.generatedId, keyA, gA);
     recA = cat.record(refA.generatedId);
     recB = cat.record(refB.generatedId);
     emit("graph_a_attaches_only_to_identity_a",
@@ -484,7 +528,7 @@ void runSaceMoleculeDiagnostics() {
             && molecularGraphsStoredEqual(recB->molecularGraph, gB)
             && recA && recA->recordId != recB->recordId, "");
 
-    bool mismatch = cat.attachMolecularGraph(refA.generatedId, h2o);
+    bool mismatch = cat.attachMolecularGraph(refA.generatedId, keyA, h2o);
     emit("mismatched_graph_identity_rejected", !mismatch, "");
 
     recA = cat.record(refA.generatedId);
@@ -505,6 +549,10 @@ void runSaceMoleculeDiagnostics() {
         && std::fabs(mmFromGraph.value - recA->properties.molarMassGPerMol.value) < 1.0e-6f
         && std::fabs(recA->properties.molarMassGPerMol.value - massA) < 1.0e-6f;
     emit("graph_composition_molar_mass_agrees", massAgree, "");
+    emit("attached_descriptors_from_stored_graph",
+        recA && recA->hasMolecularDescriptors
+            && recA->molecularDescriptors.atomCount == atomCount(recA->molecularGraph)
+            && recA->properties.molarMassGPerMol.value == massA, "");
 
     emit("debug_serialization_is_not_catalog_key",
         recA && recA->canonicalSignature.find("debug|") == std::string::npos, "");

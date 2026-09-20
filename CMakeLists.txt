@@ -23,6 +23,7 @@ add_executable(pipace WIN32
   chemistry/SaceCatalog.cpp
   chemistry/SaceProperties.cpp
   chemistry/SaceMolecule.cpp
+  chemistry/SaceDescriptors.cpp
   world/WorldQuery.cpp
   world/WaterPhaseChange.cpp
   world/PhaseChangeEngine.cpp

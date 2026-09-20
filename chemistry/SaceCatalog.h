@@ -3,6 +3,7 @@
 #include "chemistry/SaceTypes.h"
 #include "chemistry/SaceProperties.h"
 #include "chemistry/SaceMolecule.h"
+#include "chemistry/SaceDescriptors.h"
 #include "substance/SubstanceTypes.h"
 
 #include <cstddef>
@@ -45,6 +46,9 @@ struct SaceGeneratedRecord {
     SaceGeneratedProperties properties{};
     bool hasMolecularGraph = false;
     SaceMolecularGraph molecularGraph{};
+    std::string molecularGraphStructureKey;
+    bool hasMolecularDescriptors = false;
+    SaceMolecularDescriptors molecularDescriptors{};
 };
 
 // Player-facing display only. Uppercase hex, never part of canonical identity.
@@ -65,9 +69,12 @@ public:
     // (clear). Inserting other records does not invalidate them.
     ChemicalIdentity identityView(SaceGeneratedRecord const &rec) const;
 
-    // First successful exact graph wins. Composition must match identity.
+    // Trusted provenance: claimedStructureKey must equal record.structureKey.
+    // This is not graph-isomorphism proof. First exact attach wins.
+    // Graph + binding key + descriptors commit together or not at all.
     // Does not change canonical signature, record id, display ordinal, or properties.
-    bool attachMolecularGraph(SaceRecordId id, SaceMolecularGraph const &graph);
+    bool attachMolecularGraph(SaceRecordId id, char const *claimedStructureKey,
+        SaceMolecularGraph const &graph);
 
 private:
     bool eligibleForGeneratedIdentity(ChemicalIdentity const &id, char *signature, int cap) const;

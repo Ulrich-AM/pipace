@@ -125,7 +125,9 @@ SaceSubstanceRef SaceCatalog::resolve(ChemicalIdentity const &query, bool create
     return result;
 }
 
-bool SaceCatalog::attachMolecularGraph(SaceRecordId id, SaceMolecularGraph const &graph) {
+bool SaceCatalog::attachMolecularGraph(SaceRecordId id, char const *claimedStructureKey,
+    SaceMolecularGraph const &graph)
+{
     if (id == kSaceRecordNone || id > records_.size())
         return false;
     SaceGeneratedRecord &rec = records_[id - 1];
@@ -133,15 +135,28 @@ bool SaceCatalog::attachMolecularGraph(SaceRecordId id, SaceMolecularGraph const
     if (!rec.exactIdentity) return false;
     if (rec.kind != ChemicalRepresentationKind::SmallMolecule)
         return false;
+    if (!claimedStructureKey || claimedStructureKey[0] == '\0')
+        return false;
+    if (rec.structureKey != claimedStructureKey)
+        return false;
     if (validateMolecularGraph(graph, true) != SaceGraphValidation::Ok)
         return false;
     ChemicalIdentity view = identityView(rec);
     if (!graphMatchesChemicalIdentity(graph, view))
         return false;
-    if (rec.hasMolecularGraph)
+    SaceMolecularDescriptors desc{};
+    if (!deriveMolecularDescriptors(graph, desc))
+        return false;
+    if (rec.hasMolecularGraph) {
+        if (rec.molecularGraphStructureKey != rec.structureKey)
+            return false;
         return molecularGraphsStoredEqual(rec.molecularGraph, graph);
-    rec.hasMolecularGraph = true;
+    }
     rec.molecularGraph = graph;
+    rec.molecularGraphStructureKey = rec.structureKey;
+    rec.molecularDescriptors = desc;
+    rec.hasMolecularGraph = true;
+    rec.hasMolecularDescriptors = true;
     return true;
 }
 

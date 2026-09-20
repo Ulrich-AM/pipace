@@ -99,6 +99,8 @@ bool writeMolecularGraphDebug(SaceMolecularGraph const &graph, char *out, int ca
 bool saceCommonValenceLooksTypical(SaceMolecularGraph const &graph);
 
 bool saceBuiltinMolecularGraph(SubstanceId id, SaceMolecularGraph &out);
+// Associated built-in structureKey from ChemicalIdentity. nullptr if no graph.
+char const *saceBuiltinMolecularStructureKey(SubstanceId id);
 bool saceSyntheticC2H6OGraphA(SaceMolecularGraph &out); // C-C-O skeleton, explicit H
 bool saceSyntheticC2H6OGraphB(SaceMolecularGraph &out); // C-O-C skeleton, explicit H
 

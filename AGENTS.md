@@ -53,6 +53,7 @@ PIPACE/
     SaceCatalog.h/.cpp                         # Phase 2 in-memory generated identity catalog (not live SubstanceId)
     SaceProperties.h/.cpp                      # Phase 3 property provenance + identity-derived molar mass
     SaceMolecule.h/.cpp                        # Phase 4 small-molecule graphs (not canonical identity)
+    SaceDescriptors.h/.cpp                     # Phase 5 trusted graph binding helpers + structural descriptors
   sim/
     SimulationQuality.h/.cpp                   # SimulationQualityProfile + tick scheduler
   docs/
@@ -85,7 +86,9 @@ SACE Phase 2 (`chemistry/SaceCatalog`) is an in-memory canonical cache of genera
 
 SACE Phase 3 (`chemistry/SaceProperties`) adds property provenance (`SacePropertySource` / `SaceConfidence`) and the first identity-derived property: molar mass from exact elemental composition and a tiny H/C/O atomic-mass table. Identity may be exact while properties remain unknown. Properties never enter the canonical signature. Lower-quality estimates must not silently overwrite higher-quality known data (`Reference` > `IdentityDerived` > structural/empirical > mixture > fallback). Equal source rank uses confidence (`Unknown` < `Low` < `Medium` < `High`); an exact rank+confidence tie keeps the existing value. Do not copy Water as a default for unknown generated matter.
 
-SACE Phase 4 (`chemistry/SaceMolecule`) stores optional small-molecule atom/bond graphs as supporting identity data. The molecular graph does **not** replace `structureKey` canonicalization. Graph atom order is not chemical identity. Attached graphs must validate and match elemental composition; they do not change catalog signatures, display IDs, or properties.
+SACE Phase 4 (`chemistry/SaceMolecule`) stores optional small-molecule atom/bond graphs as supporting identity data. The molecular graph does **not** replace `structureKey` canonicalization. Graph atom order is not chemical identity.
+
+SACE Phase 5 (`chemistry/SaceDescriptors`) derives order-independent structural descriptors from a trusted graph. Descriptors are **not** canonical identity. Graph-to-`structureKey` association is trusted provenance (claimed key must equal the record key) until general molecular-graph canonicalization exists. Graph, binding key, and descriptors commit atomically. Attachment does not change catalog signatures, display IDs, or properties.
 
 These mappings are **implementation, not laws**:
 
@@ -232,10 +235,12 @@ in-memory generated identity catalog (`SaceRecordId`); generated records are
 not live or spawnable. **SACE Phase 3** adds property provenance and
 identity-derived molar mass; identity may be exact while properties remain
 unknown. **SACE Phase 4** adds optional small-molecule graphs; they do not
-replace `structureKey` canonicalization. Live `Liquid ⇄ Gas` and `Solid ⇄ Liquid`
-are generic by SubstanceId (`world/PhaseChangeEngine.cpp`). Honey mixtures still
-skip phase change. Runtime-generated world matter, reaction families, graph
-isomorphism, and broader property estimates are not started.
+replace `structureKey` canonicalization. **SACE Phase 5** adds trusted
+graph-to-structureKey binding and structural descriptors; descriptors are not
+canonical identity. Live `Liquid ⇄ Gas` and `Solid ⇄ Liquid` are generic by
+SubstanceId (`world/PhaseChangeEngine.cpp`). Honey mixtures still skip phase
+change. Runtime-generated world matter, reaction families, graph isomorphism,
+and broader property estimates are not started.
 
 Longer sequence (historical): liquid correctness → performance → modularization →
 honey composition → rigid coupling → temperature/gas → **phase changes** → SACE.
