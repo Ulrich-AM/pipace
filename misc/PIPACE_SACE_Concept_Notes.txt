@@ -652,3 +652,18 @@ brute force.
 The developer supplies a trustworthy foundation.
 SACE supplies the connective tissue.
 The player discovers what emerges.
+
+
+PHASE 1 LANDING (IDENTITY)
+==========================
+Implemented under chemistry/SaceTypes.h and chemistry/SaceIdentity.* :
+
+- Exact elemental composition is the authoritative atom inventory.
+- Formula text is display/reference only; structureKey distinguishes isomers later.
+- Player-facing names are not part of the canonical signature.
+- Built-in exact identities: Water, Hydrogen, Oxygen, Carbon, Carbon Dioxide.
+- Honey / Air / Wood / Stone / Glass / Metal stay unknown, mixture, composite,
+  or network representations rather than invented molecules.
+- Atom-balance checking is diagnostic / registration-time, not per-cell.
+- Runtime-generated SubstanceIds, reaction generation, and property estimates
+  remain later milestones.

@@ -7,10 +7,14 @@ id	internal_name	classification	composition_kind	solid_capable	liquid_capable	ga
 5	glass	mixture	mixture	1	1	0	1	0	1	0	0	0
 6	metal	mixture	mixture	1	1	0	1	0	1	0	0	0
 7	air	mixture	mixture	0	0	1	0	0	1	0	0	0
+8	hydrogen	pure	pure_chemical	0	0	1	0	0	1	0	1	0
+9	oxygen	pure	pure_chemical	0	0	1	0	0	1	0	1	0
+10	carbon	pure	pure_chemical	1	0	0	1	0	1	0	1	0
+11	carbon_dioxide	pure	pure_chemical	0	0	1	0	0	1	0	1	0
 test	ids_unique	PASS	
 test	names_unique	PASS	
 test	table_index_matches_id	PASS	
-test	builtin_count	PASS	8
+test	builtin_count	PASS	12
 test	none_is_slot_zero	PASS	
 test	none_no_fake_physics	PASS	
 test	invalid_lookup_fallback_none	PASS	
@@ -58,5 +62,23 @@ test	glass_mechanical_valid	PASS
 test	static_wall_is_stone	PASS	
 test	static_wall_thermal_matches_stone	PASS	
 test	all_electrical_inactive	PASS	
+test	hydrogen_gas_only	PASS	
+test	hydrogen_flammable	PASS	2.016000
+test	oxygen_gas_only	PASS	
+test	oxygen_oxidizer	PASS	31.997999
+test	carbon_solid_only	PASS	
+test	carbon_molar_mass	PASS	12.011000
+test	co2_gas_only	PASS	
+test	co2_molar_mass	PASS	44.009499
+test	water_sace_identity_exact	PASS	
+test	hydrogen_sace_identity_exact	PASS	
+test	oxygen_sace_identity_exact	PASS	
+test	carbon_sace_identity_exact	PASS	
+test	co2_sace_identity_exact	PASS	
+test	honey_sace_identity_unknown	PASS	
+test	air_sace_identity_mixture	PASS	
+test	wood_sace_identity_composite	PASS	
+test	metal_sace_identity_not_iron	PASS	
+test	sace_does_not_use_display_name	PASS	
 test	no_ice_or_steam_slots	PASS	
-summary	PASS	52 passed, 0 failed
+summary	PASS	70 passed, 0 failed
