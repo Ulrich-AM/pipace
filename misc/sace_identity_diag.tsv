@@ -20,4 +20,8 @@ test	unknown_composition_reaction	PASS	unknown
 test	formula_is_not_identity	PASS	
 test	display_name_not_in_signature	PASS	molecule|1:2,8:1|water
 test	no_runtime_generated_ids	PASS	12
-summary	PASS	22 passed, 0 failed
+test	elemental_count_over_capacity	PASS	
+test	exact_constructor_over_capacity	PASS	
+test	signature_small_buffer	PASS	
+test	malformed_reaction_participant_count	PASS	unknown
+summary	PASS	26 passed, 0 failed

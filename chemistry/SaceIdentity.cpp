@@ -12,9 +12,11 @@
 #include <string>
 
 CompositionNormalizeResult normalizeElementalComposition(ElementalComposition &c) {
+    if (c.count > kMaxElementalSpecies)
+        return CompositionNormalizeResult::Overflow;
     ElementCount merged[kMaxElementalSpecies]{};
     int nMerged = 0;
-    int nIn = std::min(static_cast<int>(c.count), kMaxElementalSpecies);
+    int nIn = static_cast<int>(c.count);
     for (int i = 0; i < nIn; ++i) {
         AtomicNumber z = c.entries[i].atomicNumber;
         uint16_t n = c.entries[i].count;
@@ -55,8 +57,10 @@ CompositionNormalizeResult normalizeElementalComposition(ElementalComposition &c
 }
 
 bool addScaledComposition(ElementalInventory &acc, ElementalComposition const &src, int64_t scale) {
+    if (src.count > kMaxElementalSpecies) return false;
+    if (acc.count > kMaxElementalInventory) return false;
     if (scale == 0) return true;
-    for (int i = 0; i < src.count && i < kMaxElementalSpecies; ++i) {
+    for (int i = 0; i < src.count; ++i) {
         AtomicNumber z = src.entries[i].atomicNumber;
         uint16_t n = src.entries[i].count;
         if (n == 0) continue;
@@ -78,9 +82,11 @@ bool addScaledComposition(ElementalInventory &acc, ElementalComposition const &s
 }
 
 bool elementalInventoriesEqual(ElementalInventory const &a, ElementalInventory const &b) {
+    if (a.count > kMaxElementalInventory || b.count > kMaxElementalInventory)
+        return false;
     int64_t counts[kMaxAtomicNumber + 1]{};
     auto fold = [&](ElementalInventory const &inv, int sign) {
-        for (int i = 0; i < inv.count && i < kMaxElementalInventory; ++i) {
+        for (int i = 0; i < inv.count; ++i) {
             AtomicNumber z = inv.entries[i].atomicNumber;
             if (!validAtomicNumber(z)) return false;
             counts[z] += static_cast<int64_t>(sign) * inv.entries[i].count;
@@ -95,37 +101,46 @@ bool elementalInventoriesEqual(ElementalInventory const &a, ElementalInventory c
 
 namespace {
 
-int appendStr(char *out, int cap, int used, char const *s) {
-    if (!out || cap <= 0 || !s) return used;
-    while (*s && used < cap - 1) {
+bool appendStr(char *out, int cap, int &used, char const *s) {
+    if (!out || cap <= 0 || !s) return false;
+    while (*s) {
+        if (used >= cap - 1) return false;
         out[used++] = *s++;
     }
-    if (used < cap) out[used] = '\0';
-    return used;
+    out[used] = '\0';
+    return true;
 }
 
-int appendU32(char *out, int cap, int used, unsigned v) {
+bool appendU32(char *out, int cap, int &used, unsigned v) {
     char buf[16];
     int n = std::snprintf(buf, sizeof(buf), "%u", v);
-    if (n <= 0) return used;
+    if (n <= 0) return false;
     return appendStr(out, cap, used, buf);
 }
 
-ChemicalIdentity makeExactIdentity(ChemicalRepresentationKind kind, char const *formula,
+} // namespace
+
+ChemicalIdentity saceExactIdentity(ChemicalRepresentationKind kind, char const *formula,
     char const *structureKey, ElementCount const *items, int n)
 {
+    if (n < 0 || n > kMaxElementalSpecies)
+        return saceUnknownIdentity();
+    if (n > 0 && !items)
+        return saceUnknownIdentity();
     ChemicalIdentity id{};
     id.kind = kind;
     id.formula = formula;
     id.structureKey = structureKey;
     id.exact = true;
-    for (int i = 0; i < n && i < kMaxElementalSpecies; ++i)
+    for (int i = 0; i < n; ++i)
         id.elemental.entries[i] = items[i];
-    id.elemental.count = static_cast<uint8_t>(std::max(0, std::min(n, kMaxElementalSpecies)));
+    id.elemental.count = static_cast<uint8_t>(n);
     if (normalizeElementalComposition(id.elemental) != CompositionNormalizeResult::Ok)
         return saceUnknownIdentity();
     return id;
 }
+
+namespace {
 
 bool stoichInteger(float coefficient, int64_t &out) {
     if (!std::isfinite(coefficient) || !(coefficient > 0.0f)) return false;
@@ -139,7 +154,8 @@ bool stoichInteger(float coefficient, int64_t &out) {
 bool accumulateReactionSide(ReactionParticipant const *parts, uint8_t nParts,
     ElementalInventory &inv)
 {
-    for (int i = 0; i < nParts && i < kMaxReactionParticipants; ++i) {
+    if (nParts > kMaxReactionParticipants) return false;
+    for (int i = 0; i < nParts; ++i) {
         ReactionParticipant const &p = parts[i];
         if (!reactionParticipantUsed(p)) continue;
         if (!validSubstance(p.substance)) return false;
@@ -158,22 +174,31 @@ bool writeChemicalSignature(ChemicalIdentity const &id, char *out, int cap) {
     if (!out || cap <= 0) return false;
     out[0] = '\0';
     ChemicalIdentity norm = id;
+    if (norm.elemental.count > kMaxElementalSpecies)
+        return false;
     if (normalizeElementalComposition(norm.elemental) != CompositionNormalizeResult::Ok)
         return false;
-    int used = appendStr(out, cap, 0, chemicalRepresentationKindKey(norm.kind));
-    used = appendStr(out, cap, used, "|");
-    for (int i = 0; i < norm.elemental.count && i < kMaxElementalSpecies; ++i) {
-        if (i > 0) used = appendStr(out, cap, used, ",");
-        used = appendU32(out, cap, used, norm.elemental.entries[i].atomicNumber);
-        used = appendStr(out, cap, used, ":");
-        used = appendU32(out, cap, used, norm.elemental.entries[i].count);
+    int used = 0;
+    auto fail = [&]() {
+        out[0] = '\0';
+        return false;
+    };
+    if (!appendStr(out, cap, used, chemicalRepresentationKindKey(norm.kind))) return fail();
+    if (!appendStr(out, cap, used, "|")) return fail();
+    for (int i = 0; i < norm.elemental.count; ++i) {
+        if (i > 0 && !appendStr(out, cap, used, ",")) return fail();
+        if (!appendU32(out, cap, used, norm.elemental.entries[i].atomicNumber)) return fail();
+        if (!appendStr(out, cap, used, ":")) return fail();
+        if (!appendU32(out, cap, used, norm.elemental.entries[i].count)) return fail();
     }
-    used = appendStr(out, cap, used, "|");
-    used = appendStr(out, cap, used, saceStructureKeyOrEmpty(norm.structureKey));
-    return used < cap;
+    if (!appendStr(out, cap, used, "|")) return fail();
+    if (!appendStr(out, cap, used, saceStructureKeyOrEmpty(norm.structureKey))) return fail();
+    return true;
 }
 
 bool chemicalIdentitiesEquivalent(ChemicalIdentity const &a, ChemicalIdentity const &b) {
+    if (a.elemental.count > kMaxElementalSpecies || b.elemental.count > kMaxElementalSpecies)
+        return false;
     ChemicalIdentity na = a;
     ChemicalIdentity nb = b;
     if (normalizeElementalComposition(na.elemental) != CompositionNormalizeResult::Ok)
@@ -187,6 +212,8 @@ bool chemicalIdentitiesEquivalent(ChemicalIdentity const &a, ChemicalIdentity co
 }
 
 SubstanceId findBuiltInByChemicalIdentity(ChemicalIdentity const &query) {
+    if (query.elemental.count > kMaxElementalSpecies)
+        return SUBSTANCE_NONE;
     ChemicalIdentity q = query;
     if (normalizeElementalComposition(q.elemental) != CompositionNormalizeResult::Ok)
         return SUBSTANCE_NONE;
@@ -202,6 +229,9 @@ SubstanceId findBuiltInByChemicalIdentity(ChemicalIdentity const &query) {
 }
 
 ConservationCheck reactionAtomConservation(ReactionDefinition const &def) {
+    if (def.reactantCount > kMaxReactionParticipants
+        || def.productCount > kMaxReactionParticipants)
+        return ConservationCheck::Unknown;
     ElementalInventory react{};
     ElementalInventory prod{};
     if (!accumulateReactionSide(def.reactants, def.reactantCount, react))
@@ -224,31 +254,31 @@ ChemicalIdentity saceUnknownIdentity(ChemicalRepresentationKind kind) {
 
 ChemicalIdentity saceBuiltinWaterIdentity() {
     ElementCount items[] = {{kAtomicHydrogen, 2}, {kAtomicOxygen, 1}};
-    return makeExactIdentity(ChemicalRepresentationKind::SmallMolecule, "H2O", "water",
+    return saceExactIdentity(ChemicalRepresentationKind::SmallMolecule, "H2O", "water",
         items, 2);
 }
 
 ChemicalIdentity saceBuiltinHydrogenIdentity() {
     ElementCount items[] = {{kAtomicHydrogen, 2}};
-    return makeExactIdentity(ChemicalRepresentationKind::SmallMolecule, "H2",
+    return saceExactIdentity(ChemicalRepresentationKind::SmallMolecule, "H2",
         "molecular-hydrogen", items, 1);
 }
 
 ChemicalIdentity saceBuiltinOxygenIdentity() {
     ElementCount items[] = {{kAtomicOxygen, 2}};
-    return makeExactIdentity(ChemicalRepresentationKind::SmallMolecule, "O2",
+    return saceExactIdentity(ChemicalRepresentationKind::SmallMolecule, "O2",
         "molecular-oxygen", items, 1);
 }
 
 ChemicalIdentity saceBuiltinCarbonIdentity() {
     ElementCount items[] = {{kAtomicCarbon, 1}};
-    return makeExactIdentity(ChemicalRepresentationKind::AtomicSpecies, "C",
+    return saceExactIdentity(ChemicalRepresentationKind::AtomicSpecies, "C",
         "elemental-carbon", items, 1);
 }
 
 ChemicalIdentity saceBuiltinCarbonDioxideIdentity() {
     ElementCount items[] = {{kAtomicCarbon, 1}, {kAtomicOxygen, 2}};
-    return makeExactIdentity(ChemicalRepresentationKind::SmallMolecule, "CO2",
+    return saceExactIdentity(ChemicalRepresentationKind::SmallMolecule, "CO2",
         "carbon-dioxide", items, 2);
 }
 
@@ -378,6 +408,37 @@ void runSaceIdentityDiagnostics() {
             && std::strstr(sigA, "ins_mat_water") == nullptr, sigA);
 
     emit("no_runtime_generated_ids", SUBSTANCE_COUNT == 12, std::to_string(SUBSTANCE_COUNT));
+
+    ElementalComposition overCap{};
+    overCap.count = static_cast<uint8_t>(kMaxElementalSpecies + 1);
+    overCap.entries[0] = {kAtomicHydrogen, 1};
+    CompositionNormalizeResult overNorm = normalizeElementalComposition(overCap);
+    emit("elemental_count_over_capacity",
+        overNorm == CompositionNormalizeResult::Overflow
+            && overCap.count == static_cast<uint8_t>(kMaxElementalSpecies + 1),
+        "");
+
+    ElementCount tooMany[kMaxElementalSpecies + 1]{};
+    for (int i = 0; i < kMaxElementalSpecies + 1; ++i)
+        tooMany[i] = {static_cast<AtomicNumber>(i + 1), 1};
+    ChemicalIdentity overId = saceExactIdentity(ChemicalRepresentationKind::SmallMolecule,
+        "X", "synthetic-over-capacity", tooMany, kMaxElementalSpecies + 1);
+    emit("exact_constructor_over_capacity",
+        !overId.exact && overId.elemental.count == 0, "");
+
+    char tiny[8]{};
+    bool tinyOk = writeChemicalSignature(water, tiny, 8);
+    emit("signature_small_buffer", !tinyOk && tiny[0] == '\0', "");
+
+    ReactionDefinition malformedCount{};
+    malformedCount.reactants[0] = {SUBSTANCE_HYDROGEN, MatterPhase::Gas, 2.0f};
+    malformedCount.reactants[1] = {SUBSTANCE_OXYGEN, MatterPhase::Gas, 1.0f};
+    malformedCount.reactantCount = static_cast<uint8_t>(kMaxReactionParticipants + 1);
+    malformedCount.products[0] = {SUBSTANCE_WATER, MatterPhase::Gas, 2.0f};
+    malformedCount.productCount = 1;
+    ConservationCheck malformedRx = reactionAtomConservation(malformedCount);
+    emit("malformed_reaction_participant_count",
+        malformedRx == ConservationCheck::Unknown, conservationCheckKey(malformedRx));
 
     out << "summary\t" << (failed == 0 ? "PASS" : "FAIL") << '\t' << passed << " passed, "
         << failed << " failed\n";

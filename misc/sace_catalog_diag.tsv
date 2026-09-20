@@ -1,0 +1,20 @@
+test	fresh_catalog_empty	PASS	
+test	water_resolves_builtin	PASS	
+test	water_creates_zero_generated	PASS	0
+test	co2_resolves_builtin	PASS	
+test	synthetic_creates_one_generated	PASS	
+test	generated_record_not_spawnable	PASS	
+test	display_name_element_hex	PASS	Element #1
+test	same_identity_same_handle	PASS	
+test	same_identity_does_not_increment	PASS	1
+test	reordered_entries_same_record	PASS	
+test	formula_text_ignored	PASS	
+test	different_structure_different_record	PASS	
+test	different_element_hex	PASS	Element #2
+test	ambiguous_molecule_rejected	PASS	
+test	inexact_identity_rejected	PASS	
+test	malformed_elemental_count_rejected	PASS	
+test	tiny_signature_buffer_fails	PASS	
+test	no_truncated_signature_in_cache	PASS	
+test	clear_returns_empty	PASS	
+summary	PASS	19 passed, 0 failed
