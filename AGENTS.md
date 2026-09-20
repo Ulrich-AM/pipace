@@ -55,7 +55,7 @@ PIPACE/
     SaceMolecule.h/.cpp                        # Phase 4 small-molecule graphs (not canonical identity)
     SaceDescriptors.h/.cpp                     # Phase 5 trusted graph binding helpers + structural descriptors
     SaceFunctional.h/.cpp                      # Phase 6 H/C/O functional motifs (not identity, not properties)
-    SaceEstimation.h/.cpp                      # Phase 7 Joback-Reid 1987 Tb subset (StructuralEstimate/Low)
+    SaceEstimation.h/.cpp                      # Phase 7/8 Joback-Reid 1987 Tb+Tc/Pc/Vc subset (StructuralEstimate/Low)
   sim/
     SimulationQuality.h/.cpp                   # SimulationQualityProfile + tick scheduler
   docs/
@@ -95,6 +95,8 @@ SACE Phase 5 (`chemistry/SaceDescriptors`) derives order-independent structural 
 SACE Phase 6 (`chemistry/SaceFunctional`) derives H/C/O motifs (hydroxyl C–O–H, ether C–O–C, C=O count) and hydrogen-bond donor/acceptor classification from graph connectivity. The functional profile is graph-derived metadata, not canonical identity and not a physical-property estimate. Water is not an organic hydroxyl. O=O is not an ordinary H-bond acceptor. Graphs with elements other than H/C/O store `supported = false` without invented motif counts.
 
 SACE Phase 7 (`chemistry/SaceEstimation`) is the first structure-derived numerical physical property: normal boiling point from a documented Joback–Reid 1987 subset. `Tb [K] = 198.2 + SUM(group contributions)` using published coefficients for `-CH3`, `-CH2-`, `>CH-`, `>C<`, alcohol `-OH`, and non-ring `-O-` only. Applicability is acyclic, net-neutral, fully single-bonded H/C/O molecules completely coverable by those six groups. Source is `StructuralEstimate`, confidence `Low`. Unsupported chemistry (Water, methane/CH4, H2, O2, CO2, rings, charge, N, unsaturation, incomplete coverage) stays `Unknown` — no fallback formula. Joback failure must not fail trusted graph attachment. The estimate is not canonical identity, not live `PhaseProperties`, and is not copied into spawnable generated matter. Same-formula isomers (C2H6O A vs B) may receive different estimates. A later better estimator or reference value should replace Joback through existing precedence.
+
+SACE Phase 8 extends the same six-group Joback subset to critical temperature, critical pressure (stored in Pa), and critical molar volume (stored in m³/mol). Tc uses the Joback-estimated Tb from the same fragmentation, not a later stored/reference Tb. Same-graph reattach may backfill missing estimates through property precedence and must not downgrade higher-quality data. Critical molar volume is not ordinary liquid molar volume; Tc is not Tb. These values do not define vapor-pressure curves or live phase equilibrium.
 
 These mappings are **implementation, not laws**:
 
@@ -248,7 +250,9 @@ feature classification from graphs; the functional profile is not identity and
 not a property estimate. **SACE Phase 7** adds a Joback–Reid 1987 subset
 normal-boiling-point estimate (`StructuralEstimate` / `Low`) for acyclic
 neutral saturated H/C/O alcohol/ether molecules; unsupported chemistry stays
-Unknown and is not live phase data. Live `Liquid ⇄ Gas` and `Solid ⇄ Liquid` are generic by
+Unknown and is not live phase data. **SACE Phase 8** extends that subset to
+Joback Tc/Pc/Vc (`StructuralEstimate` / `Low`); critical volume is not liquid
+density and Tc is not boiling temperature. Live `Liquid ⇄ Gas` and `Solid ⇄ Liquid` are generic by
 SubstanceId (`world/PhaseChangeEngine.cpp`). Honey mixtures still skip phase
 change. Runtime-generated world matter, reaction families, graph isomorphism,
 and broader property estimates are not started.

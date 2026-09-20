@@ -67,7 +67,10 @@ inline SaceScalarProperty saceUnknownScalarProperty() {
 
 struct SaceGeneratedProperties {
     SaceScalarProperty molarMassGPerMol{};
-    SaceScalarProperty normalBoilingPointK{}; // Unknown until a supported structural estimate
+    SaceScalarProperty normalBoilingPointK{};
+    SaceScalarProperty criticalTemperatureK{};
+    SaceScalarProperty criticalPressurePa{};
+    SaceScalarProperty criticalMolarVolumeM3PerMol{};
 };
 
 inline char const *sacePropertySourceKey(SacePropertySource source) {

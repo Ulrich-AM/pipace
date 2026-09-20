@@ -37,6 +37,24 @@ SaceGeneratedRecord const *SaceCatalog::record(SaceRecordId id) const {
     return &rec;
 }
 
+SaceGeneratedRecord *SaceCatalog::recordMutable(SaceRecordId id) {
+    if (id == kSaceRecordNone || id > records_.size())
+        return nullptr;
+    SaceGeneratedRecord &rec = records_[id - 1];
+    if (rec.recordId != id) return nullptr;
+    return &rec;
+}
+
+void SaceCatalog::applyJobackEstimates(SaceGeneratedRecord &record,
+    SaceJobackEstimateBundle const &bundle)
+{
+    saceAssignScalarProperty(record.properties.normalBoilingPointK, bundle.normalBoilingPointK);
+    saceAssignScalarProperty(record.properties.criticalTemperatureK, bundle.criticalTemperatureK);
+    saceAssignScalarProperty(record.properties.criticalPressurePa, bundle.criticalPressurePa);
+    saceAssignScalarProperty(record.properties.criticalMolarVolumeM3PerMol,
+        bundle.criticalMolarVolumeM3PerMol);
+}
+
 ChemicalIdentity SaceCatalog::identityView(SaceGeneratedRecord const &rec) const {
     ChemicalIdentity id{};
     id.kind = rec.kind;
@@ -151,14 +169,15 @@ bool SaceCatalog::attachMolecularGraph(SaceRecordId id, char const *claimedStruc
     SaceFunctionalProfile func{};
     if (!deriveFunctionalProfile(graph, func))
         return false;
-    SaceScalarProperty jobackTb = saceUnknownScalarProperty();
-    SaceJobackGroupCounts jobackCounts{};
-    (void)saceEstimateJobackNormalBoilingPoint(graph, jobackTb, jobackCounts);
-    (void)jobackCounts;
+    SaceJobackEstimateBundle joback{};
+    (void)saceEstimateJobackBundle(graph, joback);
     if (rec.hasMolecularGraph) {
         if (rec.molecularGraphStructureKey != rec.structureKey)
             return false;
-        return molecularGraphsStoredEqual(rec.molecularGraph, graph);
+        if (!molecularGraphsStoredEqual(rec.molecularGraph, graph))
+            return false;
+        applyJobackEstimates(rec, joback);
+        return true;
     }
     rec.molecularGraph = graph;
     rec.molecularGraphStructureKey = rec.structureKey;
@@ -167,8 +186,7 @@ bool SaceCatalog::attachMolecularGraph(SaceRecordId id, char const *claimedStruc
     rec.hasMolecularGraph = true;
     rec.hasMolecularDescriptors = true;
     rec.hasFunctionalProfile = true;
-    if (jobackTb.known)
-        saceAssignScalarProperty(rec.properties.normalBoilingPointK, jobackTb);
+    applyJobackEstimates(rec, joback);
     return true;
 }
 

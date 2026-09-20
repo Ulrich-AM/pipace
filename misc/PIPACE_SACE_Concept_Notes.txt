@@ -745,3 +745,19 @@ Implemented under chemistry/SaceEstimation.* :
 - Joback-Reid is approximate first-order group contribution; subset coverage
   means the method applies, not that the boiling point is physically exact.
 
+PHASE 8 LANDING (JOBACK CRITICAL PROPERTIES)
+============================================
+Implemented under chemistry/SaceEstimation.* (same six-group subset):
+
+- Tc = Tb_joback / (0.584 + 0.965*S_Tc - S_Tc^2); uses Joback Tb, not stored Tb.
+- Pc [bar] = (0.113 + 0.0032*N_atoms - S_Pc)^-2; stored as Pa (1 bar = 1e5 Pa).
+  N_atoms counts every explicit graph atom, including hydrogen.
+- Vc [cm^3/mol] = 17.5 + S_Vc; stored as m^3/mol (1 cm^3/mol = 1e-6 m^3/mol).
+- Provenance remains StructuralEstimate / Low. Precedence still applies.
+- Same-graph reattach may backfill missing Joback estimates; it must not
+  replace Reference/High data.
+- Critical molar volume is not ordinary liquid molar volume or density.
+- Critical temperature is not the normal boiling temperature.
+- These estimates do not define vapor pressure, latent heat, or live phases.
+
+

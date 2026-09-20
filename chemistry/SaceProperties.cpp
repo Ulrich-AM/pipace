@@ -267,6 +267,33 @@ void runSacePropertyDiagnostics() {
             && jobackDst.confidence == SaceConfidence::High
             && nearMass(jobackDst.value, 351.44), "");
 
+    SaceGeneratedProperties blankCrit{};
+    emit("critical_temperature_defaults_unknown",
+        !blankCrit.criticalTemperatureK.known
+            && blankCrit.criticalTemperatureK.source == SacePropertySource::Unknown, "");
+    emit("critical_pressure_defaults_unknown",
+        !blankCrit.criticalPressurePa.known
+            && blankCrit.criticalPressurePa.source == SacePropertySource::Unknown, "");
+    emit("critical_molar_volume_defaults_unknown",
+        !blankCrit.criticalMolarVolumeM3PerMol.known
+            && blankCrit.criticalMolarVolumeM3PerMol.source == SacePropertySource::Unknown, "");
+
+    SaceScalarProperty refTc = makeKnown(513.9f, SacePropertySource::Reference, SaceConfidence::High);
+    SaceScalarProperty jobackTc = makeKnown(499.407f, SacePropertySource::StructuralEstimate, SaceConfidence::Low);
+    emit("structural_estimate_low_does_not_overwrite_reference_high_tc",
+        !saceAssignScalarProperty(refTc, jobackTc)
+            && refTc.source == SacePropertySource::Reference
+            && refTc.confidence == SaceConfidence::High
+            && nearMass(refTc.value, 513.9), "");
+
+    SaceScalarProperty jobackTcDst = makeKnown(499.407f, SacePropertySource::StructuralEstimate, SaceConfidence::Low);
+    SaceScalarProperty refTcSrc = makeKnown(513.9f, SacePropertySource::Reference, SaceConfidence::High);
+    emit("reference_high_overwrites_structural_estimate_low_tc",
+        saceAssignScalarProperty(jobackTcDst, refTcSrc)
+            && jobackTcDst.source == SacePropertySource::Reference
+            && jobackTcDst.confidence == SaceConfidence::High
+            && nearMass(jobackTcDst.value, 513.9), "");
+
     out << "summary\t" << (failed == 0 ? "PASS" : "FAIL") << '\t' << passed << " passed, "
         << failed << " failed\n";
 }

@@ -41,4 +41,33 @@ test	higher_quality_not_overwritten_by_joback	PASS
 test	catalog_a_joback_tb	PASS	337.540009
 test	catalog_b_joback_tb	PASS	267.779999
 test	unsupported_joback_still_attaches_graph	PASS	
-summary	PASS	43 passed, 0 failed
+test	c2h6o_a_bundle_ok	PASS	
+test	a_tc_contribution_sum_0_1071	PASS	0.107100
+test	a_pc_contribution_sum_0_0100	PASS	0.010000
+test	a_vc_contribution_sum_149	PASS	149.000000
+test	a_tc_499_407	PASS	499.407379
+test	a_pc_5_75664e6	PASS	5756641.500000
+test	a_vc_1_665e-4	PASS	0.000167
+test	a_critical_structural_estimate_low	PASS	
+test	c2h6o_b_bundle_ok	PASS	
+test	b_tc_contribution_sum_0_0450	PASS	0.045000
+test	b_pc_contribution_sum_minus_0_0009	PASS	-0.000900
+test	b_vc_contribution_sum_148	PASS	148.000000
+test	b_tc_428_174	PASS	428.173981
+test	b_pc_4_91080e6	PASS	4910798.000000
+test	b_vc_1_655e-4	PASS	0.000165
+test	b_critical_structural_estimate_low	PASS	
+test	a_b_tc_differ	PASS	
+test	a_b_pc_differ	PASS	
+test	a_b_vc_differ	PASS	
+test	atom_permutation_preserves_joback_bundle	PASS	
+test	bond_reorder_preserves_joback_bundle	PASS	
+test	reversed_endpoints_preserve_joback_bundle	PASS	
+test	water_all_joback_unknown	PASS	
+test	methane_all_joback_unknown	PASS	
+test	unsaturated_all_joback_unknown	PASS	
+test	critical_properties_not_in_canonical_signature	PASS	molecule|1:2,8:1|water
+test	catalog_a_joback_critical_and_unspawnable	PASS	
+test	same_graph_reattach_backfills_critical	PASS	
+test	same_graph_backfill_preserves_reference_high	PASS	
+summary	PASS	72 passed, 0 failed

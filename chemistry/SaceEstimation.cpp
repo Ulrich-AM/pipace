@@ -319,32 +319,75 @@ SaceJobackFragmentationResult saceFragmentJobackGroups(
     return SaceJobackFragmentationResult::Ok;
 }
 
+void saceResetJobackEstimateBundle(SaceJobackEstimateBundle &out) {
+    out = {};
+}
+
+namespace {
+
+SaceScalarProperty jobackLowScalar(double value) {
+    SaceScalarProperty p = saceUnknownScalarProperty();
+    if (!(value > 0.0) || !std::isfinite(value))
+        return p;
+    p.value = static_cast<float>(value);
+    p.known = true;
+    p.source = SacePropertySource::StructuralEstimate;
+    p.confidence = SaceConfidence::Low;
+    return p;
+}
+
+} // namespace
+
+bool saceEstimateJobackBundle(SaceMolecularGraph const &graph, SaceJobackEstimateBundle &out) {
+    saceResetJobackEstimateBundle(out);
+    SaceJobackFragmentationResult r = saceFragmentJobackGroups(graph, out.groups);
+    if (r != SaceJobackFragmentationResult::Ok) {
+        out.groups = {};
+        return false;
+    }
+
+    double tb = kJobackTbInterceptK
+        + kJobackTbCH3K * out.groups.carbonCH3
+        + kJobackTbCH2K * out.groups.carbonCH2
+        + kJobackTbCHK * out.groups.carbonCH
+        + kJobackTbCK * out.groups.carbonC
+        + kJobackTbAlcoholOHK * out.groups.hydroxylAlcohol
+        + kJobackTbEtherOK * out.groups.etherNonRing;
+    if (tb > 0.0 && std::isfinite(tb))
+        out.normalBoilingPointK = jobackLowScalar(tb);
+
+    double sTc = saceJobackTcContributionSum(out.groups);
+    double denom = 0.584 + 0.965 * sTc - sTc * sTc;
+    if (tb > 0.0 && std::isfinite(tb) && denom > 0.0 && std::isfinite(denom)) {
+        double tc = tb / denom;
+        if (tc > 0.0 && std::isfinite(tc))
+            out.criticalTemperatureK = jobackLowScalar(tc);
+    }
+
+    double sPc = saceJobackPcContributionSum(out.groups);
+    double nAtoms = static_cast<double>(graph.atoms.size());
+    double base = 0.113 + 0.0032 * nAtoms - sPc;
+    if (base > 0.0 && std::isfinite(base)) {
+        double pcBar = 1.0 / (base * base);
+        if (pcBar > 0.0 && std::isfinite(pcBar))
+            out.criticalPressurePa = jobackLowScalar(pcBar * kJobackBarToPa);
+    }
+
+    double vcCm3 = kJobackVcInterceptCm3 + saceJobackVcContributionSumCm3PerMol(out.groups);
+    if (vcCm3 > 0.0 && std::isfinite(vcCm3))
+        out.criticalMolarVolumeM3PerMol = jobackLowScalar(vcCm3 * kJobackCm3ToM3);
+
+    return true;
+}
+
 bool saceEstimateJobackNormalBoilingPoint(
     SaceMolecularGraph const &graph, SaceScalarProperty &out, SaceJobackGroupCounts &counts)
 {
-    out = saceUnknownScalarProperty();
-    counts = {};
-    SaceJobackFragmentationResult r = saceFragmentJobackGroups(graph, counts);
-    if (r != SaceJobackFragmentationResult::Ok) {
-        counts = {};
-        return false;
-    }
-    double tb = kJobackTbInterceptK
-        + kJobackTbCH3K * counts.carbonCH3
-        + kJobackTbCH2K * counts.carbonCH2
-        + kJobackTbCHK * counts.carbonCH
-        + kJobackTbCK * counts.carbonC
-        + kJobackTbAlcoholOHK * counts.hydroxylAlcohol
-        + kJobackTbEtherOK * counts.etherNonRing;
-    if (!(tb > 0.0) || !std::isfinite(tb)) {
-        counts = {};
-        return false;
-    }
-    out.value = static_cast<float>(tb);
-    out.known = true;
-    out.source = SacePropertySource::StructuralEstimate;
-    out.confidence = SaceConfidence::Low;
-    return true;
+    SaceJobackEstimateBundle bundle{};
+    bool ok = saceEstimateJobackBundle(graph, bundle);
+    counts = bundle.groups;
+    out = bundle.normalBoilingPointK;
+    return ok && out.known;
 }
 
 bool saceEstimateJobackNormalBoilingPoint(
@@ -537,7 +580,146 @@ void runSaceEstimationDiagnostics() {
     SaceGeneratedRecord const *recE = cat.record(refE.generatedId);
     emit("unsupported_joback_still_attaches_graph",
         attached && recE && recE->hasMolecularGraph && recE->hasFunctionalProfile
-            && !recE->properties.normalBoilingPointK.known, "");
+            && recE->hasMolecularDescriptors
+            && !recE->properties.normalBoilingPointK.known
+            && !recE->properties.criticalTemperatureK.known
+            && !recE->properties.criticalPressurePa.known
+            && !recE->properties.criticalMolarVolumeM3PerMol.known, "");
+
+    SaceJobackEstimateBundle bunA{}, bunB{};
+    emit("c2h6o_a_bundle_ok", saceEstimateJobackBundle(gA, bunA), "");
+    double aTcSum = saceJobackTcContributionSum(bunA.groups);
+    double aPcSum = saceJobackPcContributionSum(bunA.groups);
+    double aVcSum = saceJobackVcContributionSumCm3PerMol(bunA.groups);
+    emit("a_tc_contribution_sum_0_1071", nearK(aTcSum, 0.1071, 1e-6), std::to_string(aTcSum));
+    emit("a_pc_contribution_sum_0_0100", nearK(aPcSum, 0.0100, 1e-6), std::to_string(aPcSum));
+    emit("a_vc_contribution_sum_149", nearK(aVcSum, 149.0, 1e-6), std::to_string(aVcSum));
+    emit("a_tc_499_407", bunA.criticalTemperatureK.known
+        && nearK(bunA.criticalTemperatureK.value, 499.407, 0.05),
+        std::to_string(bunA.criticalTemperatureK.value));
+    emit("a_pc_5_75664e6", bunA.criticalPressurePa.known
+        && nearK(bunA.criticalPressurePa.value, 5.75664e6, 80.0),
+        std::to_string(bunA.criticalPressurePa.value));
+    emit("a_vc_1_665e-4", bunA.criticalMolarVolumeM3PerMol.known
+        && nearK(bunA.criticalMolarVolumeM3PerMol.value, 1.665e-4, 1e-7),
+        std::to_string(bunA.criticalMolarVolumeM3PerMol.value));
+    emit("a_critical_structural_estimate_low",
+        bunA.criticalTemperatureK.source == SacePropertySource::StructuralEstimate
+            && bunA.criticalTemperatureK.confidence == SaceConfidence::Low
+            && bunA.criticalPressurePa.source == SacePropertySource::StructuralEstimate
+            && bunA.criticalPressurePa.confidence == SaceConfidence::Low
+            && bunA.criticalMolarVolumeM3PerMol.source == SacePropertySource::StructuralEstimate
+            && bunA.criticalMolarVolumeM3PerMol.confidence == SaceConfidence::Low, "");
+
+    emit("c2h6o_b_bundle_ok", saceEstimateJobackBundle(gB, bunB), "");
+    double bTcSum = saceJobackTcContributionSum(bunB.groups);
+    double bPcSum = saceJobackPcContributionSum(bunB.groups);
+    double bVcSum = saceJobackVcContributionSumCm3PerMol(bunB.groups);
+    emit("b_tc_contribution_sum_0_0450", nearK(bTcSum, 0.0450, 1e-6), std::to_string(bTcSum));
+    emit("b_pc_contribution_sum_minus_0_0009", nearK(bPcSum, -0.0009, 1e-6), std::to_string(bPcSum));
+    emit("b_vc_contribution_sum_148", nearK(bVcSum, 148.0, 1e-6), std::to_string(bVcSum));
+    emit("b_tc_428_174", bunB.criticalTemperatureK.known
+        && nearK(bunB.criticalTemperatureK.value, 428.174, 0.05),
+        std::to_string(bunB.criticalTemperatureK.value));
+    emit("b_pc_4_91080e6", bunB.criticalPressurePa.known
+        && nearK(bunB.criticalPressurePa.value, 4.91080e6, 80.0),
+        std::to_string(bunB.criticalPressurePa.value));
+    emit("b_vc_1_655e-4", bunB.criticalMolarVolumeM3PerMol.known
+        && nearK(bunB.criticalMolarVolumeM3PerMol.value, 1.655e-4, 1e-7),
+        std::to_string(bunB.criticalMolarVolumeM3PerMol.value));
+    emit("b_critical_structural_estimate_low",
+        bunB.criticalTemperatureK.source == SacePropertySource::StructuralEstimate
+            && bunB.criticalTemperatureK.confidence == SaceConfidence::Low
+            && bunB.criticalPressurePa.source == SacePropertySource::StructuralEstimate
+            && bunB.criticalPressurePa.confidence == SaceConfidence::Low
+            && bunB.criticalMolarVolumeM3PerMol.source == SacePropertySource::StructuralEstimate
+            && bunB.criticalMolarVolumeM3PerMol.confidence == SaceConfidence::Low, "");
+
+    emit("a_b_tc_differ", bunA.criticalTemperatureK.known && bunB.criticalTemperatureK.known
+        && !nearK(bunA.criticalTemperatureK.value, bunB.criticalTemperatureK.value, 0.5), "");
+    emit("a_b_pc_differ", bunA.criticalPressurePa.known && bunB.criticalPressurePa.known
+        && !nearK(bunA.criticalPressurePa.value, bunB.criticalPressurePa.value, 100.0), "");
+    emit("a_b_vc_differ", bunA.criticalMolarVolumeM3PerMol.known && bunB.criticalMolarVolumeM3PerMol.known
+        && !nearK(bunA.criticalMolarVolumeM3PerMol.value, bunB.criticalMolarVolumeM3PerMol.value, 1e-8), "");
+
+    auto bundleMatches = [&](SaceJobackEstimateBundle const &x, SaceJobackEstimateBundle const &y) {
+        return saceJobackGroupCountsEqual(x.groups, y.groups)
+            && x.normalBoilingPointK.known && y.normalBoilingPointK.known
+            && x.criticalTemperatureK.known && y.criticalTemperatureK.known
+            && x.criticalPressurePa.known && y.criticalPressurePa.known
+            && x.criticalMolarVolumeM3PerMol.known && y.criticalMolarVolumeM3PerMol.known
+            && nearK(x.normalBoilingPointK.value, y.normalBoilingPointK.value)
+            && nearK(x.criticalTemperatureK.value, y.criticalTemperatureK.value, 0.05)
+            && nearK(x.criticalPressurePa.value, y.criticalPressurePa.value, 80.0)
+            && nearK(x.criticalMolarVolumeM3PerMol.value, y.criticalMolarVolumeM3PerMol.value, 1e-7);
+    };
+    SaceJobackEstimateBundle permB{}, bondB{}, endB{};
+    emit("atom_permutation_preserves_joback_bundle",
+        saceEstimateJobackBundle(permuteGraph(gA), permB) && bundleMatches(bunA, permB), "");
+    emit("bond_reorder_preserves_joback_bundle",
+        saceEstimateJobackBundle(reorderBonds(gA), bondB) && bundleMatches(bunA, bondB), "");
+    emit("reversed_endpoints_preserve_joback_bundle",
+        saceEstimateJobackBundle(reverseEnds(gA), endB) && bundleMatches(bunA, endB), "");
+
+    auto allJobackUnknown = [](SaceJobackEstimateBundle const &b) {
+        return !b.normalBoilingPointK.known && !b.criticalTemperatureK.known
+            && !b.criticalPressurePa.known && !b.criticalMolarVolumeM3PerMol.known;
+    };
+    SaceJobackEstimateBundle waterB{}, methaneB{}, unsB{};
+    emit("water_all_joback_unknown",
+        !saceEstimateJobackBundle(water, waterB) && allJobackUnknown(waterB), "");
+    emit("methane_all_joback_unknown",
+        !saceEstimateJobackBundle(methaneGraph(), methaneB) && allJobackUnknown(methaneB), "");
+    emit("unsaturated_all_joback_unknown",
+        !saceEstimateJobackBundle(ethene, unsB) && allJobackUnknown(unsB), "");
+
+    emit("critical_properties_not_in_canonical_signature",
+        std::strstr(sig, "499") == nullptr && std::strstr(sig, "critical") == nullptr
+            && std::strstr(sig, "Joback") == nullptr, sig);
+
+    emit("catalog_a_joback_critical_and_unspawnable",
+        recA && !recA->spawnable
+            && recA->properties.molarMassGPerMol.known
+            && recA->properties.molarMassGPerMol.source == SacePropertySource::IdentityDerived
+            && recA->properties.molarMassGPerMol.confidence == SaceConfidence::High
+            && recA->properties.criticalTemperatureK.known
+            && recA->properties.criticalTemperatureK.source == SacePropertySource::StructuralEstimate
+            && recA->properties.criticalTemperatureK.confidence == SaceConfidence::Low
+            && recA->properties.criticalPressurePa.known
+            && recA->properties.criticalPressurePa.source == SacePropertySource::StructuralEstimate
+            && recA->properties.criticalMolarVolumeM3PerMol.known
+            && recA->properties.criticalMolarVolumeM3PerMol.source == SacePropertySource::StructuralEstimate
+            && nearK(recA->properties.criticalTemperatureK.value, 499.407, 0.05), "");
+
+    SaceGeneratedRecord *mutA = cat.recordMutable(refA.generatedId);
+    if (mutA) {
+        mutA->properties.criticalTemperatureK = saceUnknownScalarProperty();
+        mutA->properties.criticalPressurePa = saceUnknownScalarProperty();
+        mutA->properties.criticalMolarVolumeM3PerMol = saceUnknownScalarProperty();
+    }
+    bool reattachFill = cat.attachMolecularGraph(refA.generatedId, "synthetic-structure-a", gA);
+    recA = cat.record(refA.generatedId);
+    emit("same_graph_reattach_backfills_critical",
+        reattachFill && recA && recA->properties.criticalTemperatureK.known
+            && recA->properties.criticalPressurePa.known
+            && recA->properties.criticalMolarVolumeM3PerMol.known
+            && recA->properties.criticalTemperatureK.source == SacePropertySource::StructuralEstimate
+            && nearK(recA->properties.criticalTemperatureK.value, 499.407, 0.05), "");
+
+    SaceGeneratedRecord *mutA2 = cat.recordMutable(refA.generatedId);
+    if (mutA2) {
+        mutA2->properties.criticalTemperatureK.known = true;
+        mutA2->properties.criticalTemperatureK.value = 513.9f;
+        mutA2->properties.criticalTemperatureK.source = SacePropertySource::Reference;
+        mutA2->properties.criticalTemperatureK.confidence = SaceConfidence::High;
+    }
+    bool reattachKeep = cat.attachMolecularGraph(refA.generatedId, "synthetic-structure-a", gA);
+    recA = cat.record(refA.generatedId);
+    emit("same_graph_backfill_preserves_reference_high",
+        reattachKeep && recA
+            && recA->properties.criticalTemperatureK.source == SacePropertySource::Reference
+            && recA->properties.criticalTemperatureK.confidence == SaceConfidence::High
+            && nearK(recA->properties.criticalTemperatureK.value, 513.9, 0.05), "");
 
     cat.clear();
     out << "summary\t" << (failed == 0 ? "PASS" : "FAIL") << '\t' << passed << " passed, "
