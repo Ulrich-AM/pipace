@@ -70,4 +70,37 @@ test	critical_properties_not_in_canonical_signature	PASS	molecule|1:2,8:1|water
 test	catalog_a_joback_critical_and_unspawnable	PASS	
 test	same_graph_reattach_backfills_critical	PASS	
 test	same_graph_backfill_preserves_reference_high	PASS	
-summary	PASS	72 passed, 0 failed
+test	a_omega_0_556081	PASS	0.556081
+test	b_omega_0_193764	PASS	0.193764
+test	a_b_omega_structural_estimate_low	PASS	
+test	a_vapor_model_from_joback_bundle	PASS	
+test	b_vapor_model_from_joback_bundle	PASS	
+test	a_psat_at_tb_approx_1_atm	PASS	101325.022224
+test	b_psat_at_tb_approx_1_atm	PASS	101324.965725
+test	a_psat_at_tc_equals_pc	PASS	5756641.500000
+test	b_psat_at_tc_equals_pc	PASS	4910798.000000
+test	a_omega_definition_at_tr_0_7	PASS	
+test	b_omega_definition_at_tr_0_7	PASS	
+test	a_psat_tr_0_6	PASS	17651.875123
+test	a_psat_tr_0_7	PASS	159998.701868
+test	a_psat_tr_0_8	PASS	741478.770867
+test	a_psat_tr_0_9	PASS	2306953.479879
+test	b_psat_tr_0_6	PASS	63957.775641
+test	b_psat_tr_0_7	PASS	314340.586856
+test	b_psat_tr_0_8	PASS	990253.549050
+test	b_psat_tr_0_9	PASS	2382665.526599
+test	a_psat_monotonic_sampled_tr	PASS	
+test	b_psat_monotonic_sampled_tr	PASS	
+test	psat_rejects_t_above_tc	PASS	
+test	psat_rejects_nonpositive_t	PASS	
+test	psat_rejects_invalid_tc	PASS	
+test	psat_rejects_invalid_pc	PASS	
+test	psat_rejects_nan_inf_inputs	PASS	
+test	water_no_joback_omega	PASS	
+test	methane_no_joback_omega	PASS	
+test	omega_not_in_canonical_signature	PASS	molecule|1:2,8:1|water
+test	vapor_model_not_in_canonical_identity	PASS	molecule|1:2,8:1|water
+test	same_graph_reattach_backfills_omega	PASS	
+test	same_graph_backfill_preserves_reference_high_omega	PASS	
+test	generated_record_still_unspawnable	PASS	
+summary	PASS	105 passed, 0 failed

@@ -6,9 +6,10 @@
 
 #include <cstdint>
 
-// SACE Phase 7/8: Joback-Reid 1987 subset. Published coefficients only.
+// SACE Phase 7/8/9: Joback-Reid 1987 subset + Lee-Kesler vapor metadata.
 // Phase 7: Tb[K] = 198.2 + SUM(Tb groups).
 // Phase 8: Tc, Pc, Vc from the same six groups and the Joback Tb (not stored Tb).
+// Phase 9: Lee-Kesler omega and Psat(T) from the same Joback Tb/Tc/Pc tuple.
 // StructuralEstimate / Low. Unsupported chemistry stays Unknown.
 // Not canonical identity. Not live PhaseProperties. Do not call from physics ticks.
 //
@@ -73,7 +74,23 @@ struct SaceJobackEstimateBundle {
     SaceScalarProperty criticalTemperatureK{};
     SaceScalarProperty criticalPressurePa{};
     SaceScalarProperty criticalMolarVolumeM3PerMol{};
+    SaceScalarProperty acentricFactor{};
 };
+
+// Lee-Kesler 1975 corresponding-states vapor-pressure model.
+// Built from a self-consistent Joback Tb/Tc/Pc/omega tuple, not mixed
+// independently replaced SaceGeneratedProperties. Not canonical identity.
+// Not live phase behavior. Independent Reference/Structural fields must not
+// be assumed to form a coherent Psat(T) set.
+struct SaceLeeKeslerVaporModel {
+    double normalBoilingPointK = 0.0;
+    double criticalTemperatureK = 0.0;
+    double criticalPressurePa = 0.0;
+    double acentricFactor = 0.0;
+    bool valid = false;
+};
+
+constexpr double kLeeKeslerAtmPa = 101325.0;
 
 enum class SaceJobackFragmentationResult : uint8_t {
     Ok = 0,
@@ -143,5 +160,16 @@ bool saceEstimateJobackNormalBoilingPoint(
     SaceMolecularGraph const &graph, SaceScalarProperty &out);
 bool saceEstimateJobackNormalBoilingPoint(
     SaceMolecularGraph const &graph, SaceScalarProperty &out, SaceJobackGroupCounts &counts);
+
+bool saceLeeKeslerSaturationPressurePa(
+    double temperatureK,
+    double criticalTemperatureK,
+    double criticalPressurePa,
+    double acentricFactor,
+    double &outPressurePa);
+
+bool saceBuildLeeKeslerVaporModelFromJoback(
+    SaceJobackEstimateBundle const &bundle,
+    SaceLeeKeslerVaporModel &out);
 
 void runSaceEstimationDiagnostics();

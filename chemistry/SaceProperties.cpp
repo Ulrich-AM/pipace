@@ -294,6 +294,23 @@ void runSacePropertyDiagnostics() {
             && jobackTcDst.confidence == SaceConfidence::High
             && nearMass(jobackTcDst.value, 513.9), "");
 
+    SaceGeneratedProperties blankOmega{};
+    emit("acentric_factor_defaults_unknown",
+        !blankOmega.acentricFactor.known
+            && blankOmega.acentricFactor.source == SacePropertySource::Unknown, "");
+    SaceScalarProperty refOmega = makeKnown(0.644f, SacePropertySource::Reference, SaceConfidence::High);
+    SaceScalarProperty jobackOmega = makeKnown(0.556081f, SacePropertySource::StructuralEstimate, SaceConfidence::Low);
+    emit("structural_estimate_low_does_not_overwrite_reference_high_omega",
+        !saceAssignScalarProperty(refOmega, jobackOmega)
+            && refOmega.source == SacePropertySource::Reference
+            && nearMass(refOmega.value, 0.644), "");
+    SaceScalarProperty jobackOmegaDst = makeKnown(0.556081f, SacePropertySource::StructuralEstimate, SaceConfidence::Low);
+    SaceScalarProperty refOmegaSrc = makeKnown(0.644f, SacePropertySource::Reference, SaceConfidence::High);
+    emit("reference_high_overwrites_structural_estimate_low_omega",
+        saceAssignScalarProperty(jobackOmegaDst, refOmegaSrc)
+            && jobackOmegaDst.source == SacePropertySource::Reference
+            && nearMass(jobackOmegaDst.value, 0.644), "");
+
     out << "summary\t" << (failed == 0 ? "PASS" : "FAIL") << '\t' << passed << " passed, "
         << failed << " failed\n";
 }

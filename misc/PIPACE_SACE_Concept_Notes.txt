@@ -760,4 +760,19 @@ Implemented under chemistry/SaceEstimation.* (same six-group subset):
 - Critical temperature is not the normal boiling temperature.
 - These estimates do not define vapor pressure, latent heat, or live phases.
 
+PHASE 9 LANDING (LEE-KESLER VAPOR PRESSURE)
+===========================================
+Implemented under chemistry/SaceEstimation.* :
+
+- Omega from Lee-Kesler using the same Joback Tb/Tc/Pc (not later stored values).
+- Psat(T) = Pc * exp(f0 + omega*f1) with published Lee-Kesler f0/f1.
+- Psat(Tb) recovers ~101325 Pa by construction; Psat(Tc) returns Pc.
+- No ordinary saturation curve for T > Tc. T <= 0 / nonfinite inputs fail.
+- StructuralEstimate / Low. Precedence still applies on catalog backfill.
+- Corresponding-states estimate, not reference thermodynamics.
+- Not live PhaseChangeEngine / world physics. No Antoine coefficients.
+- Mixed independently replaced generated properties are not a coherent model.
+- Public catalog API exposes only const record(); diagnostics may friend-access.
+
+
 
