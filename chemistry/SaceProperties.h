@@ -29,6 +29,8 @@ enum class SaceConfidence : uint8_t {
 // Future precedence (higher wins; never silently overwrite with worse data):
 //   Reference > IdentityDerived > StructuralEstimate / EmpiricalEstimate
 //   > MixtureEstimate > Fallback
+// Equal source rank: higher confidence wins. Exact source-rank + confidence
+// tie preserves the existing value.
 inline int sacePropertySourceRank(SacePropertySource source) {
     switch (source) {
         case SacePropertySource::Reference: return 5;
@@ -38,6 +40,16 @@ inline int sacePropertySourceRank(SacePropertySource source) {
         case SacePropertySource::MixtureEstimate: return 2;
         case SacePropertySource::Fallback: return 1;
         case SacePropertySource::Unknown: return 0;
+    }
+    return 0;
+}
+
+inline int saceConfidenceRank(SaceConfidence c) {
+    switch (c) {
+        case SaceConfidence::High: return 3;
+        case SaceConfidence::Medium: return 2;
+        case SaceConfidence::Low: return 1;
+        case SaceConfidence::Unknown: return 0;
     }
     return 0;
 }

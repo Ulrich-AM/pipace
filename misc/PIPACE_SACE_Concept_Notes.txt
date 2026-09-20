@@ -689,4 +689,16 @@ Implemented under chemistry/SaceProperties.* :
 - Any missing atomic mass leaves the property Unknown; identity still catalogs.
 - Canonical signatures remain kind + elemental + structure key only.
 - Lower-quality estimates must not silently overwrite higher-quality known data.
+- Equal source rank uses confidence; exact rank+confidence ties keep the existing value.
 - Broader property estimation and live generated matter remain later milestones.
+
+PHASE 4 LANDING (MOLECULAR GRAPH)
+=================================
+Implemented under chemistry/SaceMolecule.* :
+
+- Small-molecule graphs are supporting identity data, not world matter.
+- Canonical identity remains kind + elemental composition + structureKey.
+- Graph atom-array order is not declared chemical identity; isomorphism is deferred.
+- Debug serialization is not a catalog cache key.
+- Attached graphs must be valid and composition-consistent; first exact attach wins.
+- Carbon remains elemental/network; Honey/Wood/Stone/Glass/Metal/Air have no graphs.

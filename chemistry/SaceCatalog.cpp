@@ -125,6 +125,26 @@ SaceSubstanceRef SaceCatalog::resolve(ChemicalIdentity const &query, bool create
     return result;
 }
 
+bool SaceCatalog::attachMolecularGraph(SaceRecordId id, SaceMolecularGraph const &graph) {
+    if (id == kSaceRecordNone || id > records_.size())
+        return false;
+    SaceGeneratedRecord &rec = records_[id - 1];
+    if (rec.recordId != id) return false;
+    if (!rec.exactIdentity) return false;
+    if (rec.kind != ChemicalRepresentationKind::SmallMolecule)
+        return false;
+    if (validateMolecularGraph(graph, true) != SaceGraphValidation::Ok)
+        return false;
+    ChemicalIdentity view = identityView(rec);
+    if (!graphMatchesChemicalIdentity(graph, view))
+        return false;
+    if (rec.hasMolecularGraph)
+        return molecularGraphsStoredEqual(rec.molecularGraph, graph);
+    rec.hasMolecularGraph = true;
+    rec.molecularGraph = graph;
+    return true;
+}
+
 void runSaceCatalogDiagnostics() {
     std::ofstream out(miscFile("sace_catalog_diag.tsv"));
     int passed = 0, failed = 0;
