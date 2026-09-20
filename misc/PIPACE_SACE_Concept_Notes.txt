@@ -701,4 +701,15 @@ Implemented under chemistry/SaceMolecule.* :
 - Graph atom-array order is not declared chemical identity; isomorphism is deferred.
 - Debug serialization is not a catalog cache key.
 - Attached graphs must be valid and composition-consistent; first exact attach wins.
+- Graph-to-structureKey association is trusted provenance, not isomorphism proof.
 - Carbon remains elemental/network; Honey/Wood/Stone/Glass/Metal/Air have no graphs.
+
+PHASE 5 LANDING (DESCRIPTORS)
+=============================
+Implemented under chemistry/SaceDescriptors.* :
+
+- Structural descriptors are derived from a valid connected molecular graph.
+- They are not canonical identity and are not catalog cache keys.
+- Element-pair/bond-order histogram is order-independent and does not silently truncate.
+- Graph + binding key + descriptors commit atomically on trusted attach.
+- Property estimation from descriptors is a later milestone.

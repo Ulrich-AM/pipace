@@ -1,0 +1,24 @@
+test	invalid_graph_fails_descriptor_derivation	PASS	
+test	h2_descriptors_correct	PASS	
+test	o2_descriptors_correct	PASS	
+test	h2o_descriptors_correct	PASS	
+test	co2_descriptors_correct	PASS	
+test	water_oh_single_count_2	PASS	
+test	o2_oo_double_count_1	PASS	
+test	co2_co_double_count_2	PASS	
+test	c2h6o_a_descriptors_valid	PASS	
+test	c2h6o_b_descriptors_valid	PASS	
+test	same_elemental_composition	PASS	
+test	a_cc_single_1	PASS	
+test	a_co_single_1	PASS	
+test	a_oh_single_1	PASS	
+test	b_cc_single_0	PASS	
+test	b_co_single_2	PASS	
+test	b_oh_single_0	PASS	
+test	both_cycle_rank_0	PASS	
+test	atom_reorder_preserves_descriptors	PASS	
+test	bond_reorder_preserves_descriptors	PASS	
+test	reversing_bond_endpoints_preserves_descriptors	PASS	
+test	descriptors_not_in_canonical_signature	PASS	molecule|1:2,8:1|water
+test	descriptor_failure_resets_output	PASS	
+summary	PASS	23 passed, 0 failed

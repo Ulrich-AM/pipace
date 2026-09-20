@@ -20,6 +20,7 @@
 #include "chemistry/SaceCatalog.h"
 #include "chemistry/SaceProperties.h"
 #include "chemistry/SaceMolecule.h"
+#include "chemistry/SaceDescriptors.h"
 #include "substance/SubstanceRegistry.h"
 #include "substance/PhaseTransfer.h"
 #include "sim/SimulationQuality.h"
@@ -1677,6 +1678,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR commandLine, int show)
     if (commandLine && wcsstr(commandLine, L"--sace-catalog-diag")) { runSaceCatalogDiagnostics(); return 0; }
     if (commandLine && wcsstr(commandLine, L"--sace-property-diag")) { runSacePropertyDiagnostics(); return 0; }
     if (commandLine && wcsstr(commandLine, L"--sace-molecule-diag")) { runSaceMoleculeDiagnostics(); return 0; }
+    if (commandLine && wcsstr(commandLine, L"--sace-descriptor-diag")) { runSaceDescriptorDiagnostics(); return 0; }
     if (commandLine && wcsstr(commandLine, L"--phase-transfer-diag")) { runPhaseTransferDiagnostics(); return 0; }
     if (commandLine && wcsstr(commandLine, L"--water-phase-diag")) {
         runWaterPhaseDiagnostics(engine, rigid, gas, thermal);
