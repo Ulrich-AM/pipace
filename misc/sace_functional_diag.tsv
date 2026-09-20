@@ -1,0 +1,34 @@
+test	invalid_graph_fails_and_resets	PASS	
+test	unsupported_element_returns_unsupported	PASS	
+test	h2_supported	PASS	
+test	h2_no_hbond	PASS	
+test	o2_no_hbond	PASS	
+test	water_hydroxyl_0	PASS	
+test	water_ether_0	PASS	
+test	water_donor_1	PASS	
+test	water_acceptor_1	PASS	
+test	water_donor_and_acceptor	PASS	
+test	co2_carbonyl_2	PASS	
+test	co2_donor_0	PASS	
+test	co2_acceptor_2	PASS	
+test	c2h6o_a_hydroxyl_1	PASS	
+test	c2h6o_a_ether_0	PASS	
+test	c2h6o_a_donor_1	PASS	
+test	c2h6o_a_acceptor_1	PASS	
+test	c2h6o_a_cc_single_1	PASS	
+test	c2h6o_a_co_single_1	PASS	
+test	c2h6o_a_oh_single_1	PASS	
+test	c2h6o_b_hydroxyl_0	PASS	
+test	c2h6o_b_ether_1	PASS	
+test	c2h6o_b_donor_0	PASS	
+test	c2h6o_b_acceptor_1	PASS	
+test	c2h6o_b_cc_single_0	PASS	
+test	c2h6o_b_co_single_2	PASS	
+test	c2h6o_b_oh_single_0	PASS	
+test	same_elemental_composition	PASS	
+test	a_and_b_profiles_differ	PASS	
+test	atom_permutation_preserves_profile	PASS	
+test	bond_reorder_preserves_profile	PASS	
+test	reversing_bond_endpoints_preserves_profile	PASS	
+test	functional_profile_absent_from_canonical_signature	PASS	molecule|1:2,8:1|water
+summary	PASS	33 passed, 0 failed

@@ -54,6 +54,7 @@ PIPACE/
     SaceProperties.h/.cpp                      # Phase 3 property provenance + identity-derived molar mass
     SaceMolecule.h/.cpp                        # Phase 4 small-molecule graphs (not canonical identity)
     SaceDescriptors.h/.cpp                     # Phase 5 trusted graph binding helpers + structural descriptors
+    SaceFunctional.h/.cpp                      # Phase 6 H/C/O functional motifs (not identity, not properties)
   sim/
     SimulationQuality.h/.cpp                   # SimulationQualityProfile + tick scheduler
   docs/
@@ -88,7 +89,9 @@ SACE Phase 3 (`chemistry/SaceProperties`) adds property provenance (`SacePropert
 
 SACE Phase 4 (`chemistry/SaceMolecule`) stores optional small-molecule atom/bond graphs as supporting identity data. The molecular graph does **not** replace `structureKey` canonicalization. Graph atom order is not chemical identity.
 
-SACE Phase 5 (`chemistry/SaceDescriptors`) derives order-independent structural descriptors from a trusted graph. Descriptors are **not** canonical identity. Graph-to-`structureKey` association is trusted provenance (claimed key must equal the record key) until general molecular-graph canonicalization exists. Graph, binding key, and descriptors commit atomically. Attachment does not change catalog signatures, display IDs, or properties.
+SACE Phase 5 (`chemistry/SaceDescriptors`) derives order-independent structural descriptors from a trusted graph. Descriptors are **not** canonical identity. Graph-to-`structureKey` association is trusted provenance (claimed key must equal the record key) until general molecular-graph canonicalization exists. Graph, binding key, descriptors, and functional profile commit atomically. Attachment does not change catalog signatures, display IDs, or properties.
+
+SACE Phase 6 (`chemistry/SaceFunctional`) derives H/C/O motifs (hydroxyl C–O–H, ether C–O–C, C=O count) and hydrogen-bond donor/acceptor classification from graph connectivity. The functional profile is graph-derived metadata, not canonical identity and not a physical-property estimate. Water is not an organic hydroxyl. O=O is not an ordinary H-bond acceptor. Graphs with elements other than H/C/O store `supported = false` without invented motif counts.
 
 These mappings are **implementation, not laws**:
 
@@ -237,7 +240,9 @@ identity-derived molar mass; identity may be exact while properties remain
 unknown. **SACE Phase 4** adds optional small-molecule graphs; they do not
 replace `structureKey` canonicalization. **SACE Phase 5** adds trusted
 graph-to-structureKey binding and structural descriptors; descriptors are not
-canonical identity. Live `Liquid ⇄ Gas` and `Solid ⇄ Liquid` are generic by
+canonical identity. **SACE Phase 6** adds H/C/O functional motifs and H-bond
+feature classification from graphs; the functional profile is not identity and
+not a property estimate. Live `Liquid ⇄ Gas` and `Solid ⇄ Liquid` are generic by
 SubstanceId (`world/PhaseChangeEngine.cpp`). Honey mixtures still skip phase
 change. Runtime-generated world matter, reaction families, graph isomorphism,
 and broader property estimates are not started.

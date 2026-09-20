@@ -491,7 +491,8 @@ void runSaceMoleculeDiagnostics() {
     bool rejectBOnFreshA = cat.attachMolecularGraph(refA.generatedId, keyB, gB);
     recA = cat.record(refA.generatedId);
     emit("fresh_a_rejects_graph_b_key_b",
-        !rejectBOnFreshA && recA && !recA->hasMolecularGraph && !recA->hasMolecularDescriptors, "");
+        !rejectBOnFreshA && recA && !recA->hasMolecularGraph && !recA->hasMolecularDescriptors
+            && !recA->hasFunctionalProfile, "");
 
     bool attachA = recA && cat.attachMolecularGraph(refA.generatedId, keyA, gA);
     recA = cat.record(refA.generatedId);
@@ -500,6 +501,9 @@ void runSaceMoleculeDiagnostics() {
             && recA->molecularGraphStructureKey == recA->structureKey
             && recA->structureKey == keyA
             && recA->hasMolecularDescriptors
+            && recA->hasFunctionalProfile
+            && recA->functionalProfile.hydroxylCount == 1
+            && recA->functionalProfile.etherOxygenCount == 0
             && molecularGraphsStoredEqual(recA->molecularGraph, gA), "");
 
     recB = cat.record(refB.generatedId);
@@ -507,14 +511,18 @@ void runSaceMoleculeDiagnostics() {
         && cat.attachMolecularGraph(refB.generatedId, keyA, gA);
     recB = cat.record(refB.generatedId);
     emit("fresh_b_rejects_graph_a_key_a",
-        !rejectAOnFreshB && recB && !recB->hasMolecularGraph && !recB->hasMolecularDescriptors, "");
+        !rejectAOnFreshB && recB && !recB->hasMolecularGraph && !recB->hasMolecularDescriptors
+            && !recB->hasFunctionalProfile, "");
 
     bool attachB = recB && cat.attachMolecularGraph(refB.generatedId, keyB, gB);
     recB = cat.record(refB.generatedId);
     emit("fresh_b_accepts_graph_b_key_b",
         attachB && recB && recB->hasMolecularGraph
             && recB->molecularGraphStructureKey == recB->structureKey
-            && recB->structureKey == keyB, "");
+            && recB->structureKey == keyB
+            && recB->hasFunctionalProfile
+            && recB->functionalProfile.etherOxygenCount == 1
+            && recB->functionalProfile.hydroxylCount == 0, "");
 
     bool attachBOnA = cat.attachMolecularGraph(refA.generatedId, keyB, gB);
     bool attachAOnB = cat.attachMolecularGraph(refB.generatedId, keyA, gA);

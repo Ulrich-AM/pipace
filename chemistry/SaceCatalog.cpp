@@ -147,6 +147,9 @@ bool SaceCatalog::attachMolecularGraph(SaceRecordId id, char const *claimedStruc
     SaceMolecularDescriptors desc{};
     if (!deriveMolecularDescriptors(graph, desc))
         return false;
+    SaceFunctionalProfile func{};
+    if (!deriveFunctionalProfile(graph, func))
+        return false;
     if (rec.hasMolecularGraph) {
         if (rec.molecularGraphStructureKey != rec.structureKey)
             return false;
@@ -155,8 +158,10 @@ bool SaceCatalog::attachMolecularGraph(SaceRecordId id, char const *claimedStruc
     rec.molecularGraph = graph;
     rec.molecularGraphStructureKey = rec.structureKey;
     rec.molecularDescriptors = desc;
+    rec.functionalProfile = func;
     rec.hasMolecularGraph = true;
     rec.hasMolecularDescriptors = true;
+    rec.hasFunctionalProfile = true;
     return true;
 }
 
