@@ -47,10 +47,27 @@ bool saceDeriveMolarMass(ElementalComposition const &elemental, SaceScalarProper
 bool saceAssignScalarProperty(SaceScalarProperty &dst, SaceScalarProperty const &src) {
     if (!src.known)
         return false;
-    if (dst.known && sacePropertySourceRank(dst.source) > sacePropertySourceRank(src.source))
+    if (src.source == SacePropertySource::Unknown || src.confidence == SaceConfidence::Unknown)
         return false;
-    dst = src;
-    return true;
+    if (!dst.known) {
+        dst = src;
+        return true;
+    }
+    int dstSource = sacePropertySourceRank(dst.source);
+    int srcSource = sacePropertySourceRank(src.source);
+    if (srcSource > dstSource) {
+        dst = src;
+        return true;
+    }
+    if (srcSource < dstSource)
+        return false;
+    int dstConf = saceConfidenceRank(dst.confidence);
+    int srcConf = saceConfidenceRank(src.confidence);
+    if (srcConf > dstConf) {
+        dst = src;
+        return true;
+    }
+    return false;
 }
 
 void initializeGeneratedProperties(SaceGeneratedProperties &props, ElementalComposition const &elemental) {
@@ -161,6 +178,72 @@ void runSacePropertyDiagnostics() {
     emit("builtin_molar_mass_not_overwritten",
         nearMass(substanceDef(SUBSTANCE_WATER).chemical.molarMass, 18.015)
             && nearMass(substanceDef(SUBSTANCE_CARBON_DIOXIDE).chemical.molarMass, 44.0095), "");
+
+    auto makeKnown = [](float value, SacePropertySource source, SaceConfidence conf) {
+        SaceScalarProperty p{};
+        p.value = value;
+        p.known = true;
+        p.source = source;
+        p.confidence = conf;
+        return p;
+    };
+
+    SaceScalarProperty unknown{};
+    SaceScalarProperty fallbackLow = makeKnown(1.0f, SacePropertySource::Fallback, SaceConfidence::Low);
+    bool acceptedFallback = saceAssignScalarProperty(unknown, fallbackLow);
+    emit("unknown_dest_accepts_fallback_low",
+        acceptedFallback && unknown.known
+            && unknown.source == SacePropertySource::Fallback
+            && unknown.confidence == SaceConfidence::Low
+            && unknown.value == 1.0f, "");
+
+    SaceScalarProperty referenceHigh = makeKnown(18.015f, SacePropertySource::Reference, SaceConfidence::High);
+    SaceScalarProperty fallbackHigh = makeKnown(99.0f, SacePropertySource::Fallback, SaceConfidence::High);
+    bool rejectedFallback = !saceAssignScalarProperty(referenceHigh, fallbackHigh)
+        && referenceHigh.source == SacePropertySource::Reference
+        && referenceHigh.value == 18.015f;
+    emit("reference_high_not_overwritten_by_fallback", rejectedFallback, "");
+
+    SaceScalarProperty structuralHigh = makeKnown(10.0f, SacePropertySource::StructuralEstimate, SaceConfidence::High);
+    SaceScalarProperty structuralLow = makeKnown(11.0f, SacePropertySource::StructuralEstimate, SaceConfidence::Low);
+    emit("structural_high_not_overwritten_by_low",
+        !saceAssignScalarProperty(structuralHigh, structuralLow)
+            && structuralHigh.confidence == SaceConfidence::High
+            && structuralHigh.value == 10.0f, "");
+
+    SaceScalarProperty structuralLowDst = makeKnown(10.0f, SacePropertySource::StructuralEstimate, SaceConfidence::Low);
+    SaceScalarProperty structuralHighSrc = makeKnown(12.0f, SacePropertySource::StructuralEstimate, SaceConfidence::High);
+    emit("structural_low_replaced_by_high",
+        saceAssignScalarProperty(structuralLowDst, structuralHighSrc)
+            && structuralLowDst.confidence == SaceConfidence::High
+            && structuralLowDst.value == 12.0f, "");
+
+    SaceScalarProperty empiricalMed = makeKnown(5.0f, SacePropertySource::EmpiricalEstimate, SaceConfidence::Medium);
+    SaceScalarProperty structuralMed = makeKnown(6.0f, SacePropertySource::StructuralEstimate, SaceConfidence::Medium);
+    emit("equal_rank_medium_tie_preserves_existing",
+        !saceAssignScalarProperty(empiricalMed, structuralMed)
+            && empiricalMed.source == SacePropertySource::EmpiricalEstimate
+            && empiricalMed.value == 5.0f, "");
+
+    SaceScalarProperty dstOk = makeKnown(1.0f, SacePropertySource::Fallback, SaceConfidence::Low);
+    SaceScalarProperty srcUnknownSource = makeKnown(2.0f, SacePropertySource::Unknown, SaceConfidence::High);
+    emit("known_unknown_source_rejected",
+        !saceAssignScalarProperty(dstOk, srcUnknownSource) && dstOk.value == 1.0f, "");
+
+    SaceScalarProperty srcUnknownConf = makeKnown(3.0f, SacePropertySource::Fallback, SaceConfidence::Unknown);
+    emit("known_unknown_confidence_rejected",
+        !saceAssignScalarProperty(dstOk, srcUnknownConf) && dstOk.value == 1.0f, "");
+
+    SaceScalarProperty waterMm{};
+    bool waterDerived = saceDeriveMolarMass(saceBuiltinWaterIdentity().elemental, waterMm);
+    SaceScalarProperty waterFallback = makeKnown(1.0f, SacePropertySource::Fallback, SaceConfidence::High);
+    emit("existing_molar_mass_remains_identity_derived_high",
+        waterDerived
+            && waterMm.source == SacePropertySource::IdentityDerived
+            && waterMm.confidence == SaceConfidence::High
+            && !saceAssignScalarProperty(waterMm, waterFallback)
+            && waterMm.source == SacePropertySource::IdentityDerived
+            && waterMm.confidence == SaceConfidence::High, "");
 
     out << "summary\t" << (failed == 0 ? "PASS" : "FAIL") << '\t' << passed << " passed, "
         << failed << " failed\n";

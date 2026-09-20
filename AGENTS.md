@@ -52,6 +52,7 @@ PIPACE/
     SaceTypes.h / SaceIdentity.h/.cpp          # Phase 1 exact chemical identity + elemental composition
     SaceCatalog.h/.cpp                         # Phase 2 in-memory generated identity catalog (not live SubstanceId)
     SaceProperties.h/.cpp                      # Phase 3 property provenance + identity-derived molar mass
+    SaceMolecule.h/.cpp                        # Phase 4 small-molecule graphs (not canonical identity)
   sim/
     SimulationQuality.h/.cpp                   # SimulationQualityProfile + tick scheduler
   docs/
@@ -82,7 +83,9 @@ SACE Phase 1 (`chemistry/SaceIdentity`) authors exact identities for Water, Hydr
 
 SACE Phase 2 (`chemistry/SaceCatalog`) is an in-memory canonical cache of generated identities. Built-in exact matches always win. Generated records own their strings, are not spawnable, and are session-local (clear restarts display ordinals). Do not call the catalog from physics ticks. Catalog records live in a `std::deque` so insertion does not invalidate pointers to existing records.
 
-SACE Phase 3 (`chemistry/SaceProperties`) adds property provenance (`SacePropertySource` / `SaceConfidence`) and the first identity-derived property: molar mass from exact elemental composition and a tiny H/C/O atomic-mass table. Identity may be exact while properties remain unknown. Properties never enter the canonical signature. Lower-quality estimates must not silently overwrite higher-quality known data (`Reference` > `IdentityDerived` > structural/empirical > mixture > fallback). Do not copy Water as a default for unknown generated matter.
+SACE Phase 3 (`chemistry/SaceProperties`) adds property provenance (`SacePropertySource` / `SaceConfidence`) and the first identity-derived property: molar mass from exact elemental composition and a tiny H/C/O atomic-mass table. Identity may be exact while properties remain unknown. Properties never enter the canonical signature. Lower-quality estimates must not silently overwrite higher-quality known data (`Reference` > `IdentityDerived` > structural/empirical > mixture > fallback). Equal source rank uses confidence (`Unknown` < `Low` < `Medium` < `High`); an exact rank+confidence tie keeps the existing value. Do not copy Water as a default for unknown generated matter.
+
+SACE Phase 4 (`chemistry/SaceMolecule`) stores optional small-molecule atom/bond graphs as supporting identity data. The molecular graph does **not** replace `structureKey` canonicalization. Graph atom order is not chemical identity. Attached graphs must validate and match elemental composition; they do not change catalog signatures, display IDs, or properties.
 
 These mappings are **implementation, not laws**:
 
@@ -228,10 +231,11 @@ MatterIdentity, world query, material migration, moisture stabilization.
 in-memory generated identity catalog (`SaceRecordId`); generated records are
 not live or spawnable. **SACE Phase 3** adds property provenance and
 identity-derived molar mass; identity may be exact while properties remain
-unknown. Live `Liquid ⇄ Gas` and `Solid ⇄ Liquid` are generic by SubstanceId
-(`world/PhaseChangeEngine.cpp`). Honey mixtures still skip phase change.
-Runtime-generated world matter, reaction families, and broader property
-estimates are not started.
+unknown. **SACE Phase 4** adds optional small-molecule graphs; they do not
+replace `structureKey` canonicalization. Live `Liquid ⇄ Gas` and `Solid ⇄ Liquid`
+are generic by SubstanceId (`world/PhaseChangeEngine.cpp`). Honey mixtures still
+skip phase change. Runtime-generated world matter, reaction families, graph
+isomorphism, and broader property estimates are not started.
 
 Longer sequence (historical): liquid correctness → performance → modularization →
 honey composition → rigid coupling → temperature/gas → **phase changes** → SACE.

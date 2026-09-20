@@ -1,0 +1,30 @@
+test	empty_graph_invalid	PASS	
+test	invalid_atomic_number_rejected	PASS	
+test	self_bond_rejected	PASS	
+test	out_of_range_bond_rejected	PASS	
+test	duplicate_reversed_bond_rejected	PASS	
+test	disconnected_small_molecule_rejected	PASS	
+test	h2_graph_valid	PASS	
+test	o2_graph_valid	PASS	
+test	h2o_graph_valid	PASS	
+test	co2_graph_valid	PASS	
+test	h2_graph_matches_identity	PASS	
+test	o2_graph_matches_identity	PASS	
+test	h2o_graph_matches_identity	PASS	
+test	co2_graph_matches_identity	PASS	
+test	water_net_formal_charge_zero	PASS	0
+test	carbon_has_no_small_molecule_graph	PASS	
+test	c2h6o_graph_a_valid	PASS	
+test	c2h6o_graph_b_valid	PASS	
+test	both_derive_c2h6o	PASS	
+test	topologies_differ	PASS	
+test	graph_a_attaches_only_to_identity_a	PASS	
+test	graph_b_attaches_only_to_identity_b	PASS	
+test	mismatched_graph_identity_rejected	PASS	
+test	graph_attachment_does_not_change_signature	PASS	
+test	graph_attachment_does_not_change_record_id	PASS	
+test	graph_attachment_does_not_change_element_hex	PASS	
+test	graph_composition_molar_mass_agrees	PASS	
+test	debug_serialization_is_not_catalog_key	PASS	
+test	molecule_diag_clears_catalog	PASS	
+summary	PASS	29 passed, 0 failed

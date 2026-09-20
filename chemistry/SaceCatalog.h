@@ -2,6 +2,7 @@
 
 #include "chemistry/SaceTypes.h"
 #include "chemistry/SaceProperties.h"
+#include "chemistry/SaceMolecule.h"
 #include "substance/SubstanceTypes.h"
 
 #include <cstddef>
@@ -42,6 +43,8 @@ struct SaceGeneratedRecord {
     bool exactIdentity = false;
     bool spawnable = false;
     SaceGeneratedProperties properties{};
+    bool hasMolecularGraph = false;
+    SaceMolecularGraph molecularGraph{};
 };
 
 // Player-facing display only. Uppercase hex, never part of canonical identity.
@@ -61,6 +64,10 @@ public:
     // Pointers in the returned view remain valid until that record is destroyed
     // (clear). Inserting other records does not invalidate them.
     ChemicalIdentity identityView(SaceGeneratedRecord const &rec) const;
+
+    // First successful exact graph wins. Composition must match identity.
+    // Does not change canonical signature, record id, display ordinal, or properties.
+    bool attachMolecularGraph(SaceRecordId id, SaceMolecularGraph const &graph);
 
 private:
     bool eligibleForGeneratedIdentity(ChemicalIdentity const &id, char *signature, int cap) const;

@@ -13,4 +13,12 @@ test	identity_order_does_not_affect_mass	PASS	46.069000
 test	formula_text_does_not_affect_mass	PASS	
 test	structure_key_does_not_alter_composition_mass	PASS	
 test	builtin_molar_mass_not_overwritten	PASS	
-summary	PASS	15 passed, 0 failed
+test	unknown_dest_accepts_fallback_low	PASS	
+test	reference_high_not_overwritten_by_fallback	PASS	
+test	structural_high_not_overwritten_by_low	PASS	
+test	structural_low_replaced_by_high	PASS	
+test	equal_rank_medium_tie_preserves_existing	PASS	
+test	known_unknown_source_rejected	PASS	
+test	known_unknown_confidence_rejected	PASS	
+test	existing_molar_mass_remains_identity_derived_high	PASS	
+summary	PASS	23 passed, 0 failed
