@@ -1,0 +1,16 @@
+test	h_atomic_mass_available	PASS	1.008000
+test	c_atomic_mass_available	PASS	12.011000
+test	o_atomic_mass_available	PASS	15.999000
+test	unsupported_element_mass_unavailable	PASS	
+test	h2_matches_registry	PASS	2.016000
+test	o2_matches_registry	PASS	31.997999
+test	h2o_matches_registry	PASS	18.014999
+test	c_matches_registry	PASS	12.011000
+test	co2_matches_registry	PASS	44.008999
+test	c2h6o_approximately_46_069	PASS	46.069000
+test	unknown_element_composition_unknown_mass	PASS	
+test	identity_order_does_not_affect_mass	PASS	46.069000
+test	formula_text_does_not_affect_mass	PASS	
+test	structure_key_does_not_alter_composition_mass	PASS	
+test	builtin_molar_mass_not_overwritten	PASS	
+summary	PASS	15 passed, 0 failed

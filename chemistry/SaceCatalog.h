@@ -1,18 +1,20 @@
 #pragma once
 
 #include "chemistry/SaceTypes.h"
+#include "chemistry/SaceProperties.h"
 #include "substance/SubstanceTypes.h"
 
 #include <cstddef>
 #include <cstdint>
+#include <deque>
 #include <string>
 #include <unordered_map>
-#include <vector>
 
-// SACE Phase 2: in-memory generated identity catalog.
+// SACE Phase 2/3: in-memory generated identity catalog + identity-derived properties.
 // SaceRecordId is not a SubstanceId. Generated records are not spawnable
 // and are not live world matter. Session-local until persistence exists.
-// Do not call from physics ticks.
+// Identity-defining fields are immutable after insert. Properties may be
+// unknown even when identity is exact. Do not call from physics ticks.
 
 using SaceRecordId = uint32_t;
 constexpr SaceRecordId kSaceRecordNone = 0;
@@ -39,6 +41,7 @@ struct SaceGeneratedRecord {
     uint32_t displayOrdinal = 0;
     bool exactIdentity = false;
     bool spawnable = false;
+    SaceGeneratedProperties properties{};
 };
 
 // Player-facing display only. Uppercase hex, never part of canonical identity.
@@ -52,16 +55,18 @@ public:
     // Lookup-only when create == false. Built-in exact identities win.
     SaceSubstanceRef resolve(ChemicalIdentity const &query, bool create);
 
+    // Pointer remains valid across later insertions. Invalid after clear().
     SaceGeneratedRecord const *record(SaceRecordId id) const;
 
-    // Pointers in the returned view are valid only until the next catalog mutation.
+    // Pointers in the returned view remain valid until that record is destroyed
+    // (clear). Inserting other records does not invalidate them.
     ChemicalIdentity identityView(SaceGeneratedRecord const &rec) const;
 
 private:
     bool eligibleForGeneratedIdentity(ChemicalIdentity const &id, char *signature, int cap) const;
     SaceRecordId insertGenerated(ChemicalIdentity const &id, char const *signature);
 
-    std::vector<SaceGeneratedRecord> records_;
+    std::deque<SaceGeneratedRecord> records_;
     std::unordered_map<std::string, SaceRecordId> bySignature_;
     uint32_t nextDisplayOrdinal_ = 1;
 };

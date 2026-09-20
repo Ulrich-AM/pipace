@@ -676,6 +676,17 @@ Implemented under chemistry/SaceCatalog.* :
 - SaceRecordId is a catalog handle, not a live SubstanceId.
 - Built-in exact identities win; Water never becomes Element #1.
 - Generated records own formula/structure strings, are not spawnable, and store
-  no estimated physical properties.
+  no guessed density/boiling-point tables.
 - Display Element #HEX is presentation only (session-local ordinals; clear restarts).
 - Persistence and runtime-generated world matter remain later milestones.
+
+PHASE 3 LANDING (PROPERTY PROVENANCE)
+=====================================
+Implemented under chemistry/SaceProperties.* :
+
+- Properties carry source + categorical confidence; unknown is not value==0.
+- Identity-derived molar mass uses a tiny H/C/O reference table.
+- Any missing atomic mass leaves the property Unknown; identity still catalogs.
+- Canonical signatures remain kind + elemental + structure key only.
+- Lower-quality estimates must not silently overwrite higher-quality known data.
+- Broader property estimation and live generated matter remain later milestones.

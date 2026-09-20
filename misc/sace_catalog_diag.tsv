@@ -16,5 +16,16 @@ test	inexact_identity_rejected	PASS
 test	malformed_elemental_count_rejected	PASS	
 test	tiny_signature_buffer_fails	PASS	
 test	no_truncated_signature_in_cache	PASS	
+test	record_pointer_stable_across_insertions	PASS	
+test	c2h6o_a_molar_mass_known	PASS	
+test	c2h6o_b_molar_mass_known	PASS	
+test	c2h6o_masses_equal	PASS	
+test	c2h6o_chemically_distinct	PASS	
+test	molar_mass_source_identity_derived	PASS	
+test	molar_mass_confidence_high	PASS	
+test	generated_still_not_spawnable	PASS	
+test	unsupported_element_still_cataloged	PASS	
+test	unsupported_element_molar_mass_unknown	PASS	
+test	unknown_molar_mass_does_not_change_signature	PASS	
 test	clear_returns_empty	PASS	
-summary	PASS	19 passed, 0 failed
+summary	PASS	30 passed, 0 failed

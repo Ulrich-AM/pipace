@@ -3,6 +3,7 @@
 #include "chemistry/SaceIdentity.h"
 #include "fluid/DiagOutput.h"
 
+#include <cmath>
 #include <cstddef>
 #include <cstdio>
 #include <cstring>
@@ -81,6 +82,7 @@ SaceRecordId SaceCatalog::insertGenerated(ChemicalIdentity const &id, char const
     rec.displayOrdinal = nextDisplayOrdinal_++;
     rec.exactIdentity = true;
     rec.spawnable = false;
+    initializeGeneratedProperties(rec.properties, rec.elemental);
     records_.push_back(std::move(rec));
     SaceGeneratedRecord &stored = records_.back();
     bySignature_.emplace(stored.canonicalSignature, stored.recordId);
@@ -265,6 +267,72 @@ void runSaceCatalogDiagnostics() {
             truncatedInCache = true;
     }
     emit("no_truncated_signature_in_cache", !truncatedInCache, "");
+
+    SaceGeneratedRecord const *stableA = cat.record(aRef.generatedId);
+    SaceRecordId stableId = stableA ? stableA->recordId : kSaceRecordNone;
+    uint32_t stableOrdinal = stableA ? stableA->displayOrdinal : 0;
+    std::string stableSig = stableA ? stableA->canonicalSignature : "";
+    for (int i = 0; i < 256; ++i) {
+        char key[64];
+        std::snprintf(key, sizeof(key), "synthetic-stability-%d", i);
+        ChemicalIdentity extra = saceExactIdentity(ChemicalRepresentationKind::SmallMolecule,
+            "C2H6O", key, c2h6o, 3);
+        cat.resolve(extra, true);
+    }
+    emit("record_pointer_stable_across_insertions",
+        stableA
+            && stableA->recordId == stableId
+            && stableA->displayOrdinal == stableOrdinal
+            && stableA->canonicalSignature == stableSig
+            && cat.record(aRef.generatedId) == stableA
+            && cat.generatedCount() >= 256, "");
+
+    SaceGeneratedRecord const *massA = cat.record(aRef.generatedId);
+    SaceGeneratedRecord const *massB = cat.record(bRef.generatedId);
+    emit("c2h6o_a_molar_mass_known",
+        massA && massA->properties.molarMassGPerMol.known
+            && std::fabs(massA->properties.molarMassGPerMol.value - 46.069f) < 0.002f, "");
+    emit("c2h6o_b_molar_mass_known",
+        massB && massB->properties.molarMassGPerMol.known
+            && std::fabs(massB->properties.molarMassGPerMol.value - 46.069f) < 0.002f, "");
+    emit("c2h6o_masses_equal",
+        massA && massB
+            && massA->properties.molarMassGPerMol.known
+            && massB->properties.molarMassGPerMol.known
+            && std::fabs(massA->properties.molarMassGPerMol.value
+                - massB->properties.molarMassGPerMol.value) < 1.0e-6f, "");
+    emit("c2h6o_chemically_distinct",
+        massA && massB
+            && massA->recordId != massB->recordId
+            && massA->canonicalSignature != massB->canonicalSignature, "");
+    emit("molar_mass_source_identity_derived",
+        massA
+            && massA->properties.molarMassGPerMol.source == SacePropertySource::IdentityDerived, "");
+    emit("molar_mass_confidence_high",
+        massA
+            && massA->properties.molarMassGPerMol.confidence == SaceConfidence::High, "");
+    emit("generated_still_not_spawnable",
+        massA && massB && !massA->spawnable && !massB->spawnable, "");
+
+    ElementCount nitrogen[] = {{7, 1}};
+    ChemicalIdentity nitrogenId = saceExactIdentity(ChemicalRepresentationKind::AtomicSpecies,
+        "N", "elemental-nitrogen-synthetic", nitrogen, 1);
+    char nitrogenSig[kSaceSignatureCap]{};
+    bool nitrogenSigOk = writeChemicalSignature(nitrogenId, nitrogenSig, kSaceSignatureCap);
+    SaceSubstanceRef nRef = cat.resolve(nitrogenId, true);
+    SaceGeneratedRecord const *nRec = cat.record(nRef.generatedId);
+    emit("unsupported_element_still_cataloged",
+        nRef.kind == SaceResolutionKind::Generated
+            && nRec && nRec->exactIdentity
+            && nRec->kind == ChemicalRepresentationKind::AtomicSpecies, "");
+    emit("unsupported_element_molar_mass_unknown",
+        nRec && !nRec->properties.molarMassGPerMol.known
+            && nRec->properties.molarMassGPerMol.source == SacePropertySource::Unknown
+            && nRec->properties.molarMassGPerMol.confidence == SaceConfidence::Unknown, "");
+    emit("unknown_molar_mass_does_not_change_signature",
+        nRec && nitrogenSigOk
+            && nRec->canonicalSignature == nitrogenSig
+            && nRec->canonicalSignature.find("molar") == std::string::npos, "");
 
     cat.clear();
     emit("clear_returns_empty",
