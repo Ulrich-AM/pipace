@@ -6,13 +6,15 @@
 
 #include <cstdint>
 
-// SACE Phase 7: Joback-Reid 1987 normal boiling point, published subset only.
-// Tb[K] = 198.2 + SUM(group contributions). Coefficients are not fitted.
+// SACE Phase 7/8: Joback-Reid 1987 subset. Published coefficients only.
+// Phase 7: Tb[K] = 198.2 + SUM(Tb groups).
+// Phase 8: Tc, Pc, Vc from the same six groups and the Joback Tb (not stored Tb).
 // StructuralEstimate / Low. Unsupported chemistry stays Unknown.
 // Not canonical identity. Not live PhaseProperties. Do not call from physics ticks.
 //
 // Applicability: acyclic, net-neutral, fully single-bonded H/C/O small molecules
 // coverable by -CH3, -CH2-, >CH-, >C<, alcohol -OH, non-ring -O-.
+// Critical molar volume is not ordinary liquid molar volume.
 
 constexpr double kJobackTbInterceptK = 198.2;
 constexpr double kJobackTbCH3K = 23.58;
@@ -21,6 +23,31 @@ constexpr double kJobackTbCHK = 21.74;
 constexpr double kJobackTbCK = 18.25;
 constexpr double kJobackTbAlcoholOHK = 92.88;
 constexpr double kJobackTbEtherOK = 22.42;
+
+constexpr double kJobackTcCH3 = 0.0141;
+constexpr double kJobackTcCH2 = 0.0189;
+constexpr double kJobackTcCH = 0.0164;
+constexpr double kJobackTcC = 0.0067;
+constexpr double kJobackTcAlcoholOH = 0.0741;
+constexpr double kJobackTcEtherO = 0.0168;
+
+constexpr double kJobackPcCH3 = -0.0012;
+constexpr double kJobackPcCH2 = 0.0000;
+constexpr double kJobackPcCH = 0.0020;
+constexpr double kJobackPcC = 0.0043;
+constexpr double kJobackPcAlcoholOH = 0.0112;
+constexpr double kJobackPcEtherO = 0.0015;
+
+constexpr double kJobackVcCH3Cm3 = 65.0;
+constexpr double kJobackVcCH2Cm3 = 56.0;
+constexpr double kJobackVcCHCm3 = 41.0;
+constexpr double kJobackVcCCm3 = 27.0;
+constexpr double kJobackVcAlcoholOHCm3 = 28.0;
+constexpr double kJobackVcEtherOCm3 = 18.0;
+
+constexpr double kJobackVcInterceptCm3 = 17.5;
+constexpr double kJobackBarToPa = 100000.0;
+constexpr double kJobackCm3ToM3 = 1.0e-6;
 
 enum class SaceJobackGroup : uint8_t {
     CarbonCH3 = 0,
@@ -38,6 +65,14 @@ struct SaceJobackGroupCounts {
     int carbonC = 0;
     int hydroxylAlcohol = 0;
     int etherNonRing = 0;
+};
+
+struct SaceJobackEstimateBundle {
+    SaceJobackGroupCounts groups{};
+    SaceScalarProperty normalBoilingPointK{};
+    SaceScalarProperty criticalTemperatureK{};
+    SaceScalarProperty criticalPressurePa{};
+    SaceScalarProperty criticalMolarVolumeM3PerMol{};
 };
 
 enum class SaceJobackFragmentationResult : uint8_t {
@@ -69,10 +104,40 @@ inline char const *saceJobackFragmentationResultKey(SaceJobackFragmentationResul
     return "unknown";
 }
 
+inline double saceJobackTcContributionSum(SaceJobackGroupCounts const &g) {
+    return kJobackTcCH3 * g.carbonCH3
+        + kJobackTcCH2 * g.carbonCH2
+        + kJobackTcCH * g.carbonCH
+        + kJobackTcC * g.carbonC
+        + kJobackTcAlcoholOH * g.hydroxylAlcohol
+        + kJobackTcEtherO * g.etherNonRing;
+}
+
+inline double saceJobackPcContributionSum(SaceJobackGroupCounts const &g) {
+    return kJobackPcCH3 * g.carbonCH3
+        + kJobackPcCH2 * g.carbonCH2
+        + kJobackPcCH * g.carbonCH
+        + kJobackPcC * g.carbonC
+        + kJobackPcAlcoholOH * g.hydroxylAlcohol
+        + kJobackPcEtherO * g.etherNonRing;
+}
+
+inline double saceJobackVcContributionSumCm3PerMol(SaceJobackGroupCounts const &g) {
+    return kJobackVcCH3Cm3 * g.carbonCH3
+        + kJobackVcCH2Cm3 * g.carbonCH2
+        + kJobackVcCHCm3 * g.carbonCH
+        + kJobackVcCCm3 * g.carbonC
+        + kJobackVcAlcoholOHCm3 * g.hydroxylAlcohol
+        + kJobackVcEtherOCm3 * g.etherNonRing;
+}
+
 SaceJobackFragmentationResult saceFragmentJobackGroups(
     SaceMolecularGraph const &graph, SaceJobackGroupCounts &counts);
 
 bool saceJobackGroupCountsEqual(SaceJobackGroupCounts const &a, SaceJobackGroupCounts const &b);
+
+void saceResetJobackEstimateBundle(SaceJobackEstimateBundle &out);
+bool saceEstimateJobackBundle(SaceMolecularGraph const &graph, SaceJobackEstimateBundle &out);
 
 bool saceEstimateJobackNormalBoilingPoint(
     SaceMolecularGraph const &graph, SaceScalarProperty &out);

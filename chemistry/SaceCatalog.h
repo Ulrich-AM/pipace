@@ -13,6 +13,8 @@
 #include <string>
 #include <unordered_map>
 
+struct SaceJobackEstimateBundle;
+
 // SACE Phase 2/3: in-memory generated identity catalog + identity-derived properties.
 // SaceRecordId is not a SubstanceId. Generated records are not spawnable
 // and are not live world matter. Session-local until persistence exists.
@@ -67,6 +69,7 @@ public:
 
     // Pointer remains valid across later insertions. Invalid after clear().
     SaceGeneratedRecord const *record(SaceRecordId id) const;
+    SaceGeneratedRecord *recordMutable(SaceRecordId id);
 
     // Pointers in the returned view remain valid until that record is destroyed
     // (clear). Inserting other records does not invalidate them.
@@ -75,15 +78,17 @@ public:
     // Trusted provenance: claimedStructureKey must equal record.structureKey.
     // This is not graph-isomorphism proof. First exact attach wins.
     // Graph + binding key + descriptors + functional profile commit together.
-    // Joback boiling-point estimate is attempted after local analysis; failure
-    // does not fail attachment. Does not change canonical signature, record id,
-    // or display ordinal. Molar mass stays identity-derived.
+    // Joback estimates are attempted after local analysis; failure does not
+    // fail attachment. Same-graph reattach may backfill optional estimates
+    // through property precedence. Does not change canonical signature, record
+    // id, or display ordinal. Molar mass stays identity-derived.
     bool attachMolecularGraph(SaceRecordId id, char const *claimedStructureKey,
         SaceMolecularGraph const &graph);
 
 private:
     bool eligibleForGeneratedIdentity(ChemicalIdentity const &id, char *signature, int cap) const;
     SaceRecordId insertGenerated(ChemicalIdentity const &id, char const *signature);
+    void applyJobackEstimates(SaceGeneratedRecord &record, SaceJobackEstimateBundle const &bundle);
 
     std::deque<SaceGeneratedRecord> records_;
     std::unordered_map<std::string, SaceRecordId> bySignature_;
