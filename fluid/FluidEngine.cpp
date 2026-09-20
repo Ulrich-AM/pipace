@@ -11,6 +11,7 @@
 #include <iomanip>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 FluidEngine::FluidEngine()
@@ -75,6 +76,9 @@ FluidEngine::FluidEngine()
 {
     relocateStamp.assign(static_cast<size_t>(GW * GH), 0);
     relocateQueue.reserve(512);
+    advectOverflowIndex.reserve(64);
+    advectOverflowVol.reserve(64);
+    advectOverflowCarry.reserve(64);
     splashes.reserve(1024);
     pressureRed.reserve(GW * GH / 2);
     pressureBlack.reserve(GW * GH / 2);
@@ -1479,6 +1483,8 @@ void FluidEngine::advectLiquidVolume(float dt) {
     int possibleU = std::max(1, (y1 - y0 + 1) * std::max(0, std::min(GW - 1, x1) - std::max(1, x0 + 1) + 1));
     int possibleV = std::max(1, (x1 - x0 + 1) * std::max(0, std::min(GH - 1, y1) - std::max(1, y0 + 1) + 1));
     bool useSparseFlux = (workCounts.nonzeroFluxU + workCounts.nonzeroFluxV) * 10 <= (possibleU + possibleV) * 4;
+    if (forceSparseFlux == 0) useSparseFlux = false;
+    else if (forceSparseFlux == 1) useSparseFlux = true;
 
     // Iteratively limit the same face fluxes at donors and receivers. Receiver
     // capacity includes the cell's accepted outgoing flux, enabling A->B->C
@@ -1658,77 +1664,131 @@ void FluidEngine::advectLiquidVolume(float dt) {
             transfer(q > 0.0f ? ci(x, y - 1) : ci(x, y), q > 0.0f ? ci(x, y) : ci(x, y - 1), std::abs(q));
         }
     }
-    double regionVolumeAfter=0.0;
-    double overflowVol=0.0, overflowHeat=0.0, overflowDyeR=0.0, overflowDyeG=0.0, overflowDyeB=0.0;
-    float overflowComp[SUBSTANCE_COUNT]{};
+    lastAdvectOverflowVol = 0.0;
+    workCounts.advectOverflowCells = 0;
+    advectOverflowIndex.clear();
+    advectOverflowVol.clear();
+    advectOverflowCarry.clear();
+    auto peelNextCarry = [this](int i, float amount, float nf) {
+        LiquidCarry c{};
+        if (!(amount > 1.0e-20f) || !(nf > 1.0e-20f)) return c;
+        float frac = amount / nf;
+        c.heat = nextHeat[static_cast<size_t>(i)] * frac;
+        nextHeat[static_cast<size_t>(i)] -= c.heat;
+        c.dyeR = nextDyeR[static_cast<size_t>(i)] * frac;
+        nextDyeR[static_cast<size_t>(i)] -= c.dyeR;
+        c.dyeG = nextDyeG[static_cast<size_t>(i)] * frac;
+        nextDyeG[static_cast<size_t>(i)] -= c.dyeG;
+        c.dyeB = nextDyeB[static_cast<size_t>(i)] * frac;
+        nextDyeB[static_cast<size_t>(i)] -= c.dyeB;
+        int base = compositionSlot(i, 0);
+        int n = nextCompCount[static_cast<size_t>(i)];
+        for (int s = 0; s < n; ++s) {
+            float d = nextCompAmt[static_cast<size_t>(base + s)] * frac;
+            (void)addLiquidPayload(c.comps, c.compCount, nextCompId[static_cast<size_t>(base + s)], d);
+            nextCompAmt[static_cast<size_t>(base + s)] -= d;
+        }
+        return c;
+    };
+    auto queueOverflow = [this](int i, float vol, LiquidCarry &&carry) {
+        if (!(vol > 1.0e-12f)) return;
+        advectOverflowIndex.push_back(i);
+        advectOverflowVol.push_back(vol);
+        advectOverflowCarry.push_back(std::move(carry));
+        lastAdvectOverflowVol += vol;
+        accumAdvectOverflowVol += vol;
+        ++workCounts.advectOverflowCells;
+    };
     for(int y=y0;y<=y1;++y)for(int x=x0;x<=x1;++x){
         int i=ci(x,y);
         float old=fill[i];
-        float nf=(solid[i]||dynamicSolid[i])?0.0f:nextFill[i];
-        float nh=nextHeat[i];
-        float ndr=nextDyeR[i], ndg=nextDyeG[i], ndb=nextDyeB[i];
+        float nf=nextFill[i];
         if (solid[i]||dynamicSolid[i]) {
-            nh = 0.0f; ndr = ndg = ndb = 0.0f;
+            if (nf > 1.0e-12f)
+                queueOverflow(i, nf, peelNextCarry(i, nf, nf));
+            nf = 0.0f;
+            nextHeat[static_cast<size_t>(i)] = 0.0f;
+            nextDyeR[static_cast<size_t>(i)] = nextDyeG[static_cast<size_t>(i)] = nextDyeB[static_cast<size_t>(i)] = 0.0f;
             nextCompCount[static_cast<size_t>(i)] = 0;
-        }
-        if (nf > 1.0f) {
+        } else if (nf > 1.0f) {
             float over = nf - 1.0f;
-            float frac = (nf > 1.0e-20f) ? (over / nf) : 0.0f;
-            overflowVol += over;
-            overflowHeat += nh * frac; nh -= nh * frac;
-            overflowDyeR += ndr * frac; ndr -= ndr * frac;
-            overflowDyeG += ndg * frac; ndg -= ndg * frac;
-            overflowDyeB += ndb * frac; ndb -= ndb * frac;
-            int base = compositionSlot(i, 0);
-            int n = nextCompCount[static_cast<size_t>(i)];
-            for (int s = 0; s < n; ++s) {
-                float d = nextCompAmt[static_cast<size_t>(base + s)] * frac;
-                SubstanceId id = nextCompId[static_cast<size_t>(base + s)];
-                if (validLiquidComponentId(id)) overflowComp[id] += d;
-                nextCompAmt[static_cast<size_t>(base + s)] -= d;
-            }
+            queueOverflow(i, over, peelNextCarry(i, over, nf));
             nf = 1.0f;
         }
         if (nf < 0.0f) nf = 0.0f;
-        if (nf <= 1.0e-8f) {
-            nf = 0.0f; nh = 0.0f; ndr = ndg = ndb = 0.0f;
+        if (nf > 0.0f && nf <= 1.0e-8f) {
+            queueOverflow(i, nf, peelNextCarry(i, nf, nf));
+            nf = 0.0f;
+            nextHeat[static_cast<size_t>(i)] = 0.0f;
+            nextDyeR[static_cast<size_t>(i)] = nextDyeG[static_cast<size_t>(i)] = nextDyeB[static_cast<size_t>(i)] = 0.0f;
             nextCompCount[static_cast<size_t>(i)] = 0;
         }
+        float nh = nextHeat[static_cast<size_t>(i)];
+        float ndr = nextDyeR[static_cast<size_t>(i)];
+        float ndg = nextDyeG[static_cast<size_t>(i)];
+        float ndb = nextDyeB[static_cast<size_t>(i)];
         if (!std::isfinite(nh) || nh < 0.0f) nh = 0.0f;
         fill[i]=nf;
         liquidHeat[i]=nh;
         dyeR[i]=std::max(0.0f, ndr); dyeG[i]=std::max(0.0f, ndg); dyeB[i]=std::max(0.0f, ndb);
         commitNextComposition(i);
-        regionVolumeAfter+=fill[i];
         if(fill[i]>=MIN_RENDER_FILL&&old<MIN_RENDER_FILL)waterShade[i]=makeShade(x,y);
     }
-    // Roundoff and the final bounds clamp must not leak mass. Redistribute only
-    // the clamp discrepancy across existing liquid, proportionally to capacity.
-    // Heat, dye, and honey ride with the returned volume.
-    double correction=regionVolumeBefore-regionVolumeAfter;
-    if(std::abs(correction)>1e-9){
-        double capacity=0.0;
-        for(int y=y0;y<=y1;++y)for(int x=x0;x<=x1;++x){int i=ci(x,y);if(solid[i]||dynamicSolid[i]||fill[i]<MIN_ACTIVE_FILL)continue;capacity+=correction>0.0?1.0-fill[i]:fill[i];}
-        if(capacity>1e-12)for(int y=y0;y<=y1;++y)for(int x=x0;x<=x1;++x){
-            int i=ci(x,y);
-            if(solid[i]||dynamicSolid[i]||fill[i]<MIN_ACTIVE_FILL)continue;
-            double share=(correction>0.0?1.0-fill[i]:fill[i])/capacity;
-            float dF=float(correction*share);
-            if (dF > 0.0f) {
-                float s = (overflowVol > 1.0e-12) ? static_cast<float>(static_cast<double>(dF) / overflowVol) : 0.0f;
-                fill[i]=std::clamp(fill[i]+dF,0.0f,1.0f);
-                liquidHeat[i]+=static_cast<float>(overflowHeat * s);
-                dyeR[i]+=static_cast<float>(overflowDyeR * s);
-                dyeG[i]+=static_cast<float>(overflowDyeG * s);
-                dyeB[i]+=static_cast<float>(overflowDyeB * s);
-                for (SubstanceId id = 1; id < SUBSTANCE_COUNT; ++id) {
-                    if (overflowComp[id] > 0.0f)
-                        (void)addComponentUntracked(i, id, static_cast<float>(overflowComp[id] * s));
-                }
-            } else if (dF < 0.0f) {
-                (void)extractVolume(i, -dF);
-            }
+    for (size_t n = 0; n < advectOverflowIndex.size(); ++n)
+        returnAdvectOverflow(advectOverflowIndex[n], advectOverflowVol[n], advectOverflowCarry[n], x0, y0, x1, y1);
+    (void)regionVolumeBefore;
+}
+
+void FluidEngine::returnAdvectOverflow(int origin, float vol, LiquidCarry &carry, int x0, int y0, int x1, int y1) {
+    if (!(vol > 1.0e-12f)) return;
+    auto inSolve = [&](int x, int y) {
+        return x >= x0 && x <= x1 && y >= y0 && y <= y1 && inside(x, y);
+    };
+    auto isLiquidCell = [&](int ni) {
+        return !solid[static_cast<size_t>(ni)] && !dynamicSolid[static_cast<size_t>(ni)]
+            && fill[static_cast<size_t>(ni)] > 1.0e-7f;
+    };
+    if (++relocateEpoch == 0) {
+        std::fill(relocateStamp.begin(), relocateStamp.end(), 0);
+        relocateEpoch = 1;
+    }
+    relocateQueue.clear();
+    auto consider = [&](int nx, int ny) {
+        if (!inSolve(nx, ny) || isSolid(nx, ny)) return;
+        int ni = ci(nx, ny);
+        if (relocateStamp[static_cast<size_t>(ni)] == relocateEpoch) return;
+        if (!isLiquidCell(ni)) return;
+        relocateStamp[static_cast<size_t>(ni)] = relocateEpoch;
+        relocateQueue.push_back(ni);
+    };
+    int ox = origin % GW, oy = origin / GW;
+    if (inSolve(ox, oy) && !isSolid(ox, oy) && isLiquidCell(origin))
+        consider(ox, oy);
+    else {
+        if (openUFace(ox, oy)) consider(ox - 1, oy);
+        if (openUFace(ox + 1, oy)) consider(ox + 1, oy);
+        if (openVFace(ox, oy)) consider(ox, oy - 1);
+        if (openVFace(ox, oy + 1)) consider(ox, oy + 1);
+    }
+    for (size_t head = 0; head < relocateQueue.size() && vol > 1.0e-12f; ++head) {
+        int i = relocateQueue[head];
+        int x = i % GW, y = i / GW;
+        float room = std::max(0.0f, 1.0f - fill[static_cast<size_t>(i)]);
+        if (room > 1.0e-12f) {
+            float placed = std::min(room, vol);
+            LiquidCarry part = splitCarry(carry, placed, vol);
+            fill[static_cast<size_t>(i)] += placed;
+            applyCarry(i, part);
+            vol -= placed;
         }
+        if (openUFace(x, y)) consider(x - 1, y);
+        if (openUFace(x + 1, y)) consider(x + 1, y);
+        if (openVFace(x, y)) consider(x, y - 1);
+        if (openVFace(x, y + 1)) consider(x, y + 1);
+    }
+    if (vol > 1.0e-12f && inSolve(ox, oy) && !isSolid(ox, oy)) {
+        fill[static_cast<size_t>(origin)] += vol;
+        applyCarry(origin, carry);
     }
 }
 
@@ -2434,6 +2494,7 @@ void FluidEngine::simulationTick() {
     workCounts.activeUFaces = workCounts.activeVFaces = 0;
     workCounts.nonzeroFluxU = workCounts.nonzeroFluxV = 0;
     workCounts.limiterPasses = 0;
+    workCounts.advectOverflowCells = 0;
     if(!hasActiveSolveRegion&&splashes.empty()){
         wakeUntrackedLiquid();
         rebuildActivityAndMetrics(true);
@@ -3259,6 +3320,179 @@ void FluidEngine::runLiquidCompositionDiagnostics() {
         near(wTot, 0.75f, 2.0e-3f) && near(hTot, 0.25f, 2.0e-3f) && near(fTot, 1.0f, 2.0e-3f),
         "w=" + std::to_string(wTot) + " h=" + std::to_string(hTot) + " fill=" + std::to_string(fTot));
     config.walledBorders = walls;
+
+    auto stampWallRect = [&](int x0, int y0, int x1, int y1) {
+        for (int x = x0; x <= x1; ++x) {
+            solid[static_cast<size_t>(ci(x, y0))] = 1;
+            solid[static_cast<size_t>(ci(x, y1))] = 1;
+        }
+        for (int y = y0; y <= y1; ++y) {
+            solid[static_cast<size_t>(ci(x0, y))] = 1;
+            solid[static_cast<size_t>(ci(x1, y))] = 1;
+        }
+    };
+    auto fillBasin = [&](int x0, int y0, int x1, int y1, SubstanceId id, float heat, float dye) {
+        double vol = 0.0;
+        for (int y = y0 + 1; y <= y1 - 1; ++y) for (int x = x0 + 1; x <= x1 - 1; ++x) {
+            int idx = ci(x, y);
+            float f = (y == y0 + 1) ? 0.72f : 1.0f;
+            setLiquidComponentAmount(idx, id, f);
+            liquidHeat[static_cast<size_t>(idx)] = heat * f;
+            dyeR[static_cast<size_t>(idx)] = dye * f;
+            dyeG[static_cast<size_t>(idx)] = 0.0f;
+            dyeB[static_cast<size_t>(idx)] = 0.0f;
+            vol += f;
+        }
+        return vol;
+    };
+    auto sumRect = [&](int x0, int y0, int x1, int y1, SubstanceId id) {
+        double s = 0.0;
+        for (int y = y0; y <= y1; ++y) for (int x = x0; x <= x1; ++x)
+            s += liquidComponentAmount(ci(x, y), id);
+        return s;
+    };
+    auto sumRectHeat = [&](int x0, int y0, int x1, int y1) {
+        double s = 0.0;
+        for (int y = y0; y <= y1; ++y) for (int x = x0; x <= x1; ++x)
+            s += liquidHeat[static_cast<size_t>(ci(x, y))];
+        return s;
+    };
+    auto sumRectDyeR = [&](int x0, int y0, int x1, int y1) {
+        double s = 0.0;
+        for (int y = y0; y <= y1; ++y) for (int x = x0; x <= x1; ++x)
+            s += dyeR[static_cast<size_t>(ci(x, y))];
+        return s;
+    };
+    auto swirlBasin = [&](int x0, int y0, int x1, int y1) {
+        for (int y = y0 + 1; y <= y1 - 1; ++y) for (int x = x0 + 1; x <= x1; ++x)
+            if (openUFace(x, y)) u[ui(x, y)] = ((y % 2) == 0) ? 18.0f : -18.0f;
+        for (int y = y0 + 1; y <= y1; ++y) for (int x = x0 + 1; x <= x1 - 1; ++x)
+            if (openVFace(x, y)) v[vi(x, y)] = ((x % 2) == 0) ? 14.0f : -14.0f;
+    };
+    auto runIsolatedBasins = [&](int sparseMode, char const *name) {
+        FluidConfig saved = config;
+        bool savedResidual = residualConsolidationEnabled;
+        int savedForce = forceSparseFlux;
+        clearWorld();
+        config.walledBorders = true;
+        config.sprayEnabled = false;
+        config.surfaceTensionEnabled = false;
+        config.maxLimiterPasses = 1;
+        config.maxSubsteps = 2;
+        residualConsolidationEnabled = false;
+        forceSparseFlux = sparseMode;
+        int ax0 = 8, ay0 = 16, ax1 = 24, ay1 = 48;
+        int bx0 = 48, by0 = 16, bx1 = 64, by1 = 48;
+        stampWallRect(ax0, ay0, ax1, ay1);
+        stampWallRect(bx0, by0, bx1, by1);
+        ThermalProperties const &thW = thermalForSubstance(SUBSTANCE_WATER);
+        ThermalProperties const &thH = thermalForSubstance(SUBSTANCE_HONEY);
+        FluidProperties const &flW = fluidForSubstance(SUBSTANCE_WATER);
+        FluidProperties const &flH = fluidForSubstance(SUBSTANCE_HONEY);
+        float hot = energyFromTemp(thermalCapacity(massKg(flW.density, 1.0f, config.cellsPerMeter), thW.specificHeat), 360.0f);
+        float cold = energyFromTemp(thermalCapacity(massKg(flH.density, 1.0f, config.cellsPerMeter), thH.specificHeat), 280.0f);
+        double aVol = fillBasin(ax0, ay0, ax1, ay1, SUBSTANCE_WATER, hot, 1.0f);
+        double bVol = fillBasin(bx0, by0, bx1, by1, SUBSTANCE_HONEY, cold, 0.0f);
+        expectedVolume = aVol + bVol;
+        double heatA0 = sumRectHeat(ax0, ay0, ax1, ay1);
+        double heatB0 = sumRectHeat(bx0, by0, bx1, by1);
+        double dyeA0 = sumRectDyeR(ax0, ay0, ax1, ay1);
+        double dyeB0 = sumRectDyeR(bx0, by0, bx1, by1);
+        accumAdvectOverflowVol = 0.0;
+        wakeAllFluidChunks();
+        for (int n = 0; n < 18; ++n) {
+            swirlBasin(ax0, ay0, ax1, ay1);
+            swirlBasin(bx0, by0, bx1, by1);
+            simulationTick();
+        }
+        double honeyInA = sumRect(ax0, ay0, ax1, ay1, SUBSTANCE_HONEY);
+        double waterInB = sumRect(bx0, by0, bx1, by1, SUBSTANCE_WATER);
+        double waterInA = sumRect(ax0, ay0, ax1, ay1, SUBSTANCE_WATER);
+        double honeyInB = sumRect(bx0, by0, bx1, by1, SUBSTANCE_HONEY);
+        double heatA1 = sumRectHeat(ax0, ay0, ax1, ay1);
+        double heatB1 = sumRectHeat(bx0, by0, bx1, by1);
+        double dyeA1 = sumRectDyeR(ax0, ay0, ax1, ay1);
+        double dyeB1 = sumRectDyeR(bx0, by0, bx1, by1);
+        double wAll = 0.0, hAll = 0.0, fAll = 0.0, heatAll = 0.0, dyeAll = 0.0;
+        for (int idx = 0; idx < GW * GH; ++idx) {
+            wAll += liquidComponentAmount(idx, SUBSTANCE_WATER);
+            hAll += liquidComponentAmount(idx, SUBSTANCE_HONEY);
+            fAll += fill[static_cast<size_t>(idx)];
+            heatAll += liquidHeat[static_cast<size_t>(idx)];
+            dyeAll += dyeR[static_cast<size_t>(idx)];
+        }
+        for (SplashParticle const &p : splashes) {
+            wAll += liquidPayloadAmount(p.comps, p.compCount, SUBSTANCE_WATER);
+            hAll += liquidPayloadAmount(p.comps, p.compCount, SUBSTANCE_HONEY);
+            fAll += p.volume;
+            heatAll += p.heat;
+            dyeAll += p.dyeR;
+        }
+        const float isoTol = 2.0e-4f;
+        emit(name,
+            honeyInA <= isoTol && waterInB <= isoTol
+                && near(static_cast<float>(wAll), static_cast<float>(aVol), 2.0e-3f)
+                && near(static_cast<float>(hAll), static_cast<float>(bVol), 2.0e-3f)
+                && accumAdvectOverflowVol > 1.0e-8,
+            "honeyA=" + std::to_string(honeyInA)
+                + " waterB=" + std::to_string(waterInB)
+                + " wA=" + std::to_string(waterInA)
+                + " hB=" + std::to_string(honeyInB)
+                + " overflow=" + std::to_string(accumAdvectOverflowVol)
+                + " fill=" + std::to_string(fAll));
+        std::string heatName = std::string(name) + "_heat";
+        emit(heatName.c_str(),
+            std::abs(heatA1 - heatA0) / std::max(1.0, std::abs(heatA0)) < 2.0e-3
+                && std::abs(heatB1 - heatB0) / std::max(1.0, std::abs(heatB0)) < 2.0e-3
+                && std::abs(heatAll - (heatA0 + heatB0)) / std::max(1.0, std::abs(heatA0 + heatB0)) < 2.0e-3,
+            "dA=" + std::to_string(heatA1 - heatA0)
+                + " dB=" + std::to_string(heatB1 - heatB0));
+        std::string dyeName = std::string(name) + "_dye";
+        emit(dyeName.c_str(),
+            dyeB1 <= 1.0e-5 && std::abs(dyeA1 - dyeA0) <= 1.0e-4
+                && dyeB0 == 0.0,
+            "dyeA=" + std::to_string(dyeA1) + " dyeB=" + std::to_string(dyeB1)
+                + " dyeAll=" + std::to_string(dyeAll));
+        config = saved;
+        residualConsolidationEnabled = savedResidual;
+        forceSparseFlux = savedForce;
+    };
+    runIsolatedBasins(1, "isolated_basins_no_component_exchange_sparse");
+    runIsolatedBasins(0, "isolated_basins_no_component_exchange_dense");
+
+    {
+        FluidConfig saved = config;
+        bool savedResidual = residualConsolidationEnabled;
+        int savedForce = forceSparseFlux;
+        clearWorld();
+        config.walledBorders = true;
+        config.sprayEnabled = false;
+        config.surfaceTensionEnabled = false;
+        residualConsolidationEnabled = false;
+        forceSparseFlux = -1;
+        int x0 = 20, y0 = 30, x1 = 50, y1 = 50;
+        stampWallRect(x0, y0, x1, y1);
+        int mid = (x0 + x1) / 2;
+        for (int y = y0 + 1; y <= y1 - 1; ++y) for (int x = x0 + 1; x <= x1 - 1; ++x) {
+            SubstanceId id = (x < mid) ? SUBSTANCE_WATER : SUBSTANCE_HONEY;
+            setLiquidComponentAmount(ci(x, y), id, 1.0f);
+        }
+        expectedVolume = static_cast<double>((x1 - x0 - 1) * (y1 - y0 - 1));
+        wakeAllFluidChunks();
+        for (int n = 0; n < 24; ++n) {
+            swirlBasin(x0, y0, x1, y1);
+            simulationTick();
+        }
+        double honeyLeft = sumRect(x0, y0, mid - 1, y1, SUBSTANCE_HONEY);
+        double waterRight = sumRect(mid, y0, x1, y1, SUBSTANCE_WATER);
+        emit("connected_mixture_can_mix",
+            honeyLeft > 0.05 && waterRight > 0.05,
+            "honeyLeft=" + std::to_string(honeyLeft)
+                + " waterRight=" + std::to_string(waterRight));
+        config = saved;
+        residualConsolidationEnabled = savedResidual;
+        forceSparseFlux = savedForce;
+    }
 
     emit("no_honey_array", true, "honey[]/nextHoney[] removed; slots are authoritative");
 

@@ -228,6 +228,7 @@ struct WorkCounts {
     int residualTransfers = 0;
     int activeUFaces = 0;
     int activeVFaces = 0;
+    int advectOverflowCells = 0;
     int thermalCells = 0;
     int thermalChunks = 0;
     int thermalPairs = 0;

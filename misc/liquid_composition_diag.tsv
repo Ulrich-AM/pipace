@@ -14,6 +14,13 @@ test	water_honey_roundtrip	PASS	w=0.500000 h=0.300000
 test	transport_take_deposit	PASS	Aw=0.450000 Bw=0.300000
 test	splash_roundtrip	PASS	w=0.750000 h=0.250000
 test	transport_advection	PASS	w=0.750000 h=0.250000 fill=1.000000
+test	isolated_basins_no_component_exchange_sparse	PASS	honeyA=0.000000 waterB=0.000000 wA=460.799994 hB=460.799970 overflow=54.173087 fill=921.599966
+test	isolated_basins_no_component_exchange_sparse_heat	PASS	dA=264.000000 dB=200.500000
+test	isolated_basins_no_component_exchange_sparse_dye	PASS	dyeA=460.799994 dyeB=0.000000 dyeAll=460.799994
+test	isolated_basins_no_component_exchange_dense	PASS	honeyA=0.000000 waterB=0.000000 wA=460.799994 hB=460.799970 overflow=54.173087 fill=921.599966
+test	isolated_basins_no_component_exchange_dense_heat	PASS	dA=264.000000 dB=200.500000
+test	isolated_basins_no_component_exchange_dense_dye	PASS	dyeA=460.799994 dyeB=0.000000 dyeAll=460.799994
+test	connected_mixture_can_mix	PASS	honeyLeft=44.875591 waterRight=44.875582
 test	no_honey_array	PASS	honey[]/nextHoney[] removed; slots are authoritative
 test	water_is_liquid_capable	PASS	
 test	honey_is_liquid_capable	PASS	
@@ -27,4 +34,4 @@ test	water_component_accepted	PASS	w=1.000000
 test	honey_component_accepted	PASS	h=1.000000
 test	valid_composition_invariants	PASS	sum=1.000000 fill=1.000000
 test	invariant_check_does_not_mutate	PASS	fill=0.800000
-summary	PASS	29 passed, 0 failed
+summary	PASS	36 passed, 0 failed

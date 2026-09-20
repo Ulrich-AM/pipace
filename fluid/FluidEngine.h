@@ -114,6 +114,10 @@ struct FluidEngine {
     bool useSparsePressure = true;
     int lastResolvedWorkers = 1;
     bool lastPressureParallel = false;
+    // -1 = choose from flux density; 0 = dense limiter; 1 = sparse limiter.
+    int forceSparseFlux = -1;
+    double lastAdvectOverflowVol = 0.0;
+    double accumAdvectOverflowVol = 0.0;
 
     TimingAverages timingAccum{};
     TimingAverages timingAverage{};
@@ -125,6 +129,9 @@ struct FluidEngine {
     std::vector<uint32_t> relocateStamp;
     std::vector<int> relocateQueue;
     uint32_t relocateEpoch = 1;
+    std::vector<int> advectOverflowIndex;
+    std::vector<float> advectOverflowVol;
+    std::vector<LiquidCarry> advectOverflowCarry;
 
     FluidEngine();
 
@@ -280,4 +287,5 @@ private:
     float addComponentUntracked(int index, SubstanceId id, float amount);
     float addNextComponentUntracked(int index, SubstanceId id, float amount);
     bool cellHasDuplicateComponents(int index) const;
+    void returnAdvectOverflow(int origin, float vol, LiquidCarry &carry, int x0, int y0, int x1, int y1);
 };
