@@ -21,4 +21,7 @@ test	equal_rank_medium_tie_preserves_existing	PASS
 test	known_unknown_source_rejected	PASS	
 test	known_unknown_confidence_rejected	PASS	
 test	existing_molar_mass_remains_identity_derived_high	PASS	
-summary	PASS	23 passed, 0 failed
+test	normal_boiling_point_defaults_unknown	PASS	
+test	structural_estimate_low_does_not_overwrite_reference_high_tb	PASS	
+test	reference_high_overwrites_structural_estimate_low_tb	PASS	
+summary	PASS	26 passed, 0 failed

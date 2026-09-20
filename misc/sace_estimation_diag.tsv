@@ -1,0 +1,44 @@
+test	invalid_graph_unknown	PASS	
+test	water_unsupported	PASS	unsupported-oxygen
+test	h2_unsupported	PASS	unsupported-hydrogen
+test	o2_unsupported	PASS	unsaturated
+test	co2_unsupported	PASS	unsaturated
+test	methane_unsupported	PASS	unsupported-carbon
+test	charged_unsupported	PASS	charged
+test	ring_unsupported	PASS	cyclic
+test	nitrogen_unsupported	PASS	unsupported-element
+test	cc_double_unsupported	PASS	unsaturated
+test	cc_triple_unsupported	PASS	unsaturated
+test	c2h6o_a_fragmentation_ok	PASS	
+test	a_ch3_count_1	PASS	1
+test	a_ch2_count_1	PASS	1
+test	a_oh_count_1	PASS	1
+test	a_ether_count_0	PASS	0
+test	a_tb_337_54	PASS	337.540009
+test	a_source_structural_estimate	PASS	structural-estimate
+test	a_confidence_low	PASS	low
+test	c2h6o_b_fragmentation_ok	PASS	
+test	b_ch3_count_2	PASS	2
+test	b_oh_count_0	PASS	0
+test	b_ether_count_1	PASS	1
+test	b_tb_267_78	PASS	267.779999
+test	b_source_structural_estimate	PASS	
+test	b_confidence_low	PASS	
+test	a_b_molar_mass_equal	PASS	
+test	a_b_boiling_points_differ	PASS	
+test	a_tb_greater_than_b	PASS	
+test	tb_difference_69_76	PASS	69.760010
+test	ethanol_topology_vs_literature	PASS	joback=337.540009 ref=351.44 err=-13.899994
+test	dme_topology_vs_literature	PASS	joback=267.779999 ref=248.3 err=19.479996
+test	isobutane_exercises_ch	PASS	1
+test	neopentane_exercises_quaternary_c	PASS	1
+test	atom_permutation_preserves_groups_and_tb	PASS	
+test	bond_reorder_preserves_groups_and_tb	PASS	
+test	reversed_endpoints_preserve_groups_and_tb	PASS	
+test	failed_estimation_resets_unknown	PASS	
+test	joback_not_in_canonical_signature	PASS	molecule|1:2,8:1|water
+test	higher_quality_not_overwritten_by_joback	PASS	
+test	catalog_a_joback_tb	PASS	337.540009
+test	catalog_b_joback_tb	PASS	267.779999
+test	unsupported_joback_still_attaches_graph	PASS	
+summary	PASS	43 passed, 0 failed
