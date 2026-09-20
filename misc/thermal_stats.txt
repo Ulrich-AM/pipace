@@ -26,14 +26,14 @@ leftover_solid_cells 0 leftover_solid_J 0
 
 [closed_conservation_after_120]
 energy_J 2.58126e+10
-t_min 280.001 t_max 330 t_mean 293.928
-max_|dT_amb| 36.8496 n_away_deadband 1397
-n_gas 0 n_liquid 1287 n_wall 200 n_rigid 0 n_empty 22513
-liquid_T 280.001 .. 330 fill_at_min 1 fill_at_max 1
-wall_T 289.237 .. 308.351
+t_min 280 t_max 330.001 t_mean 293.914
+max_|dT_amb| 36.8507 n_away_deadband 1404
+n_gas 0 n_liquid 1286 n_wall 200 n_rigid 0 n_empty 22514
+liquid_T 280 .. 330.001 fill_at_min 1 fill_at_max 1
+wall_T 287.259 .. 309.73
 nan 0 inf 0 negK 0 near0K 0
 leftover_liquid_cells 0 leftover_liquid_J 0
 leftover_solid_cells 0 leftover_solid_J 0
 
-closed_rel_energy_error 3.05157e-07
+closed_rel_energy_error 3.64108e-07
 closed_energy_0 2.58126e+10 closed_energy_1 2.58126e+10

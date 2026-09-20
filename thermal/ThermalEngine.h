@@ -17,6 +17,7 @@ struct ThermalWorkCounts {
     int activeChunks = 0;
     int conductionPairs = 0;
     int activeBodies = 0;
+    int pendingCellsVisited = 0;
 };
 
 struct ThermalWorldStats {

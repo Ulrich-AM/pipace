@@ -118,6 +118,7 @@ struct FluidEngine {
     int forceSparseFlux = -1;
     double lastAdvectOverflowVol = 0.0;
     double accumAdvectOverflowVol = 0.0;
+    int pendingSolidCellCount = 0;
 
     TimingAverages timingAccum{};
     TimingAverages timingAverage{};
@@ -191,6 +192,7 @@ struct FluidEngine {
     void clearSolidifyPending(int index);
     bool addSolidifyPendingKg(int index, SubstanceId id, float kg, float heatJ = 0.0f);
     bool takeSolidifyPendingKg(int index, SubstanceId id, float kg, float *outHeatJ = nullptr);
+    bool hasPendingSolid() const { return pendingSolidCellCount > 0; }
     SubstanceId solidifyPendingSubstance(int index) const;
     float solidifyPendingMassKg(int index) const;
     float solidifyPendingSensibleJ(int index) const;

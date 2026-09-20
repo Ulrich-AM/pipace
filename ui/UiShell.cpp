@@ -876,10 +876,23 @@ void drawShell(HDC dc, ShellState &shell, View const &view) {
         }
 
         if (hasLiquid) {
-            float honeyFrac = e->liquidComponentFraction(hi, SUBSTANCE_HONEY);
+            LiquidComponentView liqComps = e->liquidComponents(hi);
+            float totAmt = 0.0f;
+            for (int n = 0; n < liqComps.count; ++n) {
+                if (liqComps.items[n].amount > kMinLiquidComponent)
+                    totAmt += liqComps.items[n].amount;
+            }
             insHead("inspector_section_composition", kInsHeadComposition);
-            insSplit(tr("ins_mat_water"), formatPercent(e->liquidComponentFraction(hi, SUBSTANCE_WATER)), kInsCompWater);
-            insSplit(tr("ins_mat_honey"), formatPercent(honeyFrac), kInsCompHoney);
+            for (int n = 0; n < liqComps.count; ++n) {
+                SubstanceId sid = liqComps.items[n].id;
+                float amt = liqComps.items[n].amount;
+                if (!(amt > kMinLiquidComponent) || !validLiquidComponentId(sid)) continue;
+                float frac = (totAmt > kMinLiquidComponent) ? std::clamp(amt / totAmt, 0.0f, 1.0f) : 0.0f;
+                COLORREF col = (sid == SUBSTANCE_WATER) ? kInsCompWater
+                    : (sid == SUBSTANCE_HONEY) ? kInsCompHoney
+                    : kInsPhaseLiquid;
+                insSplit(tr(substanceDef(sid).displayNameKey), formatPercent(frac), col);
+            }
         } else if (hasGas) {
             insHead("inspector_section_composition", kInsHeadComposition);
             float tot = g->amount[static_cast<size_t>(hi)];
