@@ -6,7 +6,7 @@
 #include <cstdint>
 
 // Engine identity for a substance. Compact, stable, compile-time for built-ins.
-// Not a player-facing Element #HEX id (that is a future SACE identifier).
+// Not a player-facing Element #HEX id (SACE catalog uses SaceRecordId).
 // Not a phase: the same SubstanceId may later exist as solid, liquid, or gas.
 using SubstanceId = uint16_t;
 

@@ -13,7 +13,13 @@ bool elementalInventoriesEqual(ElementalInventory const &a, ElementalInventory c
 
 // Deterministic signature. Does not include formula text or display names.
 // Format: kind|Z:count,Z:count|structureKey
+// true only if the complete signature was written. Truncation returns false.
+// If cap > 0, out is always NUL-terminated.
 bool writeChemicalSignature(ChemicalIdentity const &id, char *out, int cap);
+
+// Exact constructor used by built-ins. n > kMaxElementalSpecies yields unknown.
+ChemicalIdentity saceExactIdentity(ChemicalRepresentationKind kind, char const *formula,
+    char const *structureKey, ElementCount const *items, int n);
 
 bool chemicalIdentitiesEquivalent(ChemicalIdentity const &a, ChemicalIdentity const &b);
 

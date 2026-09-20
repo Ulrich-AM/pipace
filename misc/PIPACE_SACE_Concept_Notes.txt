@@ -665,5 +665,17 @@ Implemented under chemistry/SaceTypes.h and chemistry/SaceIdentity.* :
 - Honey / Air / Wood / Stone / Glass / Metal stay unknown, mixture, composite,
   or network representations rather than invented molecules.
 - Atom-balance checking is diagnostic / registration-time, not per-cell.
-- Runtime-generated SubstanceIds, reaction generation, and property estimates
+- Runtime-generated world SubstanceIds, reaction generation, and property estimates
   remain later milestones.
+
+PHASE 2 LANDING (GENERATED CATALOG)
+===================================
+Implemented under chemistry/SaceCatalog.* :
+
+- In-memory canonical cache keyed by the complete Phase-1 signature string.
+- SaceRecordId is a catalog handle, not a live SubstanceId.
+- Built-in exact identities win; Water never becomes Element #1.
+- Generated records own formula/structure strings, are not spawnable, and store
+  no estimated physical properties.
+- Display Element #HEX is presentation only (session-local ordinals; clear restarts).
+- Persistence and runtime-generated world matter remain later milestones.

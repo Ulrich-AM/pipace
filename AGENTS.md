@@ -50,6 +50,7 @@ PIPACE/
     ReactionMatterAccess.h/.cpp                # SubstanceId+phase query; liquid commit
     ReactionEngine.h/.cpp                      # local liquid/gas reactions via moles; H2+O2 combustion live
     SaceTypes.h / SaceIdentity.h/.cpp          # Phase 1 exact chemical identity + elemental composition
+    SaceCatalog.h/.cpp                         # Phase 2 in-memory generated identity catalog (not live SubstanceId)
   sim/
     SimulationQuality.h/.cpp                   # SimulationQualityProfile + tick scheduler
   docs/
@@ -71,10 +72,14 @@ duplicate property tables.
 - `SubstanceDefinition` = engine built-in record (SubstanceId + grouped properties + chemical identity)
 - `MatterPhase` = current represented phase (WHICH phase this cell/body is)
 - `SubstanceId` = compact engine identity (built-in domain; no runtime-generated IDs yet)
+- `SaceRecordId` = SACE catalog handle for generated identities. Not a `SubstanceId`. Not valid for FluidEngine / GasEngine / RigidBodyEngine / ThermalEngine / ReactionEngine.
 - player-facing name (`displayName` / `displayNameKey`) = metadata only; never canonical chemistry
+- generated `Element #HEX` = presentation only; not chemical identity
 - engine storage = numerical representation (HOW that phase is simulated today)
 
 SACE Phase 1 (`chemistry/SaceIdentity`) authors exact identities for Water, Hydrogen, Oxygen, Carbon, and CO2. Honey, Air, Wood, Stone, Glass, and Metal stay honest unknowns/mixtures/composites. Atom-balance checks are diagnostic/registration-time, not per-cell chemistry.
+
+SACE Phase 2 (`chemistry/SaceCatalog`) is an in-memory canonical cache of generated identities. Built-in exact matches always win. Generated records own their strings, are not spawnable, and are session-local (clear restarts display ordinals). Do not call the catalog from physics ticks.
 
 These mappings are **implementation, not laws**:
 
@@ -216,10 +221,12 @@ Do **not** sacrifice conservation or replace the donor/receiver limiter with sca
 Completed architecture: SubstanceId, registry, grouped properties, MatterPhase /
 MatterIdentity, world query, material migration, moisture stabilization.
 
-**SACE Phase 1 (chemical identity)** is in place. Live `Liquid ⇄ Gas` and `Solid ⇄ Liquid`
-are generic by SubstanceId (`world/PhaseChangeEngine.cpp`). Honey mixtures still
-skip phase change. Later SACE work (generated SubstanceIds, reaction families,
-property estimates) is not started.
+**SACE Phase 1 (chemical identity)** is in place. **SACE Phase 2** adds an
+in-memory generated identity catalog (`SaceRecordId`); generated records are
+not live or spawnable. Live `Liquid ⇄ Gas` and `Solid ⇄ Liquid` are generic by
+SubstanceId (`world/PhaseChangeEngine.cpp`). Honey mixtures still skip phase
+change. Runtime-generated world matter, reaction families, and property
+estimates are not started.
 
 Longer sequence (historical): liquid correctness → performance → modularization →
 honey composition → rigid coupling → temperature/gas → **phase changes** → SACE.
