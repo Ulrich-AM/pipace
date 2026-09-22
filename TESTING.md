@@ -16,6 +16,9 @@ The default grid is 200x120. Set `PIPACE_GRID_WIDTH` and
 Files whose names contain `<grid>` use the resulting dimensions, for example
 `benchmark_200x120.tsv`.
 
+Player-facing built-in Fluid / Rigid / Gas test scenes were removed from the Settings UI.
+Deterministic internal `loadTestScene` fixtures remain for benchmarks and diagnostics.
+
 ## Command catalog
 
 | Command | Output in `misc/` | Invariant or measurement | Expected pass condition |

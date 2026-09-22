@@ -56,11 +56,6 @@ enum class MenuCmd : int {
     BrushMinus,
     BrushPlus,
     Speed0, Speed1, Speed2, Speed3, Speed4, Speed5,
-    Scene1, Scene2, Scene3, Scene4, Scene5, Scene6, Scene7, Scene8, Scene9, Scene10,
-    Rigid1, Rigid2, Rigid3, Rigid4, Rigid5, Rigid6, Rigid7, Rigid8, Rigid9, Rigid10,
-    Rigid11, Rigid12, Rigid13, Rigid14, Rigid15, Rigid16, Rigid17,
-    Rigid18, Rigid19, Rigid20, Rigid21, Rigid22, Rigid23, Rigid24, Rigid25,
-    Gas1, Gas2, Gas3, Gas4, Gas5, Gas6, Gas7, Gas8,
     AdvectNone, AdvectFou, AdvectNsl, AdvectSl, AdvectMacc, AdvectBfecc,
     VorticityMinus, VorticityPlus,
     CatchUpMinus, CatchUpPlus,
@@ -79,10 +74,7 @@ enum class SettingsMouseResult : uint8_t { Miss = 0, Consume, Command, Drag };
 
 enum class SettingsFlyout : uint8_t {
     None = 0,
-    Advection,
-    FluidScenes,
-    RigidScenes,
-    GasScenes
+    Advection
 };
 
 enum class Category : int {

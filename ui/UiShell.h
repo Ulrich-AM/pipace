@@ -72,6 +72,7 @@ struct ShellState {
     int settingsScrollDragOY = 0;
     HFONT uiFont = nullptr;
     HFONT smallFont = nullptr;
+    HFONT materialFont = nullptr;
     HFONT consoleFont = nullptr;
 
     void ensureFonts();
