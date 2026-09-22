@@ -7,7 +7,7 @@ test	a_live_liquid_not_ready	PASS
 test	a_live_phase_change_not_ready	PASS	
 test	a_missing_gas_conductivity	PASS	
 test	a_missing_liquid_conductivity	PASS	
-test	a_missing_liquid_viscosity	PASS	
+test	a_liquid_viscosity_not_missing	PASS	
 test	a_missing_liquid_surface_tension	PASS	
 test	b_gas_thermo_ready	PASS	
 test	b_liquid_thermo_ready	PASS	
@@ -17,7 +17,7 @@ test	b_live_liquid_not_ready	PASS
 test	b_live_phase_change_not_ready	PASS	
 test	b_missing_gas_conductivity	PASS	
 test	b_missing_liquid_conductivity	PASS	
-test	b_missing_liquid_viscosity	PASS	
+test	b_liquid_viscosity_not_missing	PASS	
 test	b_missing_liquid_surface_tension	PASS	
 test	a_b_readiness_class_matches	PASS	
 test	a_b_numerical_properties_differ	PASS	

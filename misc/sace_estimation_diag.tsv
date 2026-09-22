@@ -221,4 +221,41 @@ test	costald_not_in_canonical_identity	PASS	molecule|1:2,8:1|water
 test	same_graph_reattach_backfills_density	PASS	
 test	same_graph_backfill_preserves_reference_high_density	PASS	
 test	generated_record_still_unspawnable_after_density	PASS	
-summary	PASS	223 passed, 0 failed
+test	a_viscosity_model_builds	PASS	
+test	b_viscosity_model_builds	PASS	
+test	a_viscosity_a_2218_35	PASS	2218.350000
+test	a_viscosity_b_-18_177	PASS	-18.177000
+test	b_viscosity_a_620_85	PASS	620.850000
+test	b_viscosity_b_-15_026	PASS	-15.026000
+test	a_viscosity_mw_46_069	PASS	46.069000
+test	b_viscosity_mw_46_069	PASS	46.069000
+test	a_mu_298_15	PASS	0.001001
+test	b_mu_298_15	PASS	0.000110
+test	a_mu_300	PASS	0.000956
+test	b_mu_300	PASS	0.000109
+test	a_mu_tb	PASS	0.000420
+test	b_mu_tb	PASS	0.000140
+test	a_sampled_viscosity_decreases_with_t	PASS	
+test	b_sampled_viscosity_decreases_with_t	PASS	
+test	isobutane_viscosity_a_724_90	PASS	724.900000
+test	isobutane_viscosity_b_-15_172	PASS	-15.172000
+test	neopentane_viscosity_a_1021_78	PASS	1021.780000
+test	neopentane_viscosity_b_-15_771	PASS	-15.771000
+test	viscosity_rejects_nonpositive_t	PASS	
+test	viscosity_rejects_nan_inf	PASS	
+test	viscosity_rejects_invalid_model	PASS	
+test	viscosity_rejects_invalid_mw	PASS	
+test	catalog_a_viscosity_matches_direct	PASS	
+test	catalog_b_viscosity_matches_direct	PASS	
+test	viscosity_structural_estimate_low	PASS	
+test	atom_permutation_preserves_viscosity	PASS	
+test	bond_reorder_preserves_viscosity	PASS	
+test	reversed_endpoints_preserve_viscosity	PASS	
+test	water_no_generated_joback_viscosity	PASS	
+test	methane_no_generated_joback_viscosity	PASS	
+test	viscosity_not_in_canonical_identity	PASS	molecule|1:2,8:1|water
+test	viscosity_model_not_in_canonical_identity	PASS	molecule|1:2,8:1|water
+test	same_graph_reattach_backfills_viscosity	PASS	
+test	same_graph_backfill_preserves_reference_high_viscosity	PASS	
+test	generated_record_still_unspawnable_after_viscosity	PASS	
+summary	PASS	260 passed, 0 failed

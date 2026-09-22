@@ -6,13 +6,15 @@
 
 #include <cstdint>
 
-// SACE Phase 7–12: Joback-Reid 1987 subset + Lee-Kesler Psat + Watson Hvap + Cp + COSTALD.
+// SACE Phase 7–14: Joback-Reid 1987 subset + Lee-Kesler Psat + Watson Hvap + Cp + COSTALD + viscosity.
 // Phase 7: Tb[K] = 198.2 + SUM(Tb groups).
 // Phase 8: Tc, Pc, Vc from the same six groups and the Joback Tb (not stored Tb).
 // Phase 9: Lee-Kesler omega and Psat(T) from the same Joback Tb/Tc/Pc tuple.
 // Phase 10: Joback ΔHvap(Tb) [J/mol] + Watson Hvap(T). Not live phase physics.
 // Phase 11: Joback ideal-gas Cp(T) + Rowlinson-Poling liquid Cp(T). 298–1000 K.
 // Phase 12: COSTALD saturated-liquid Vs(T)/rho(T). Joback Vc as V* fallback.
+// Phase 14: Joback liquid dynamic viscosity mu = MW[g/mol] * exp(A/T + B) in Pa*s.
+// No published universal Joback viscosity temperature interval is claimed.
 // StructuralEstimate / Low. Unsupported chemistry stays Unknown.
 // Not canonical identity. Not live PhaseProperties. Do not call from physics ticks.
 //
@@ -68,6 +70,21 @@ constexpr double kSaceHeatCapacityReferenceK = 298.15;
 constexpr double kSaceLiquidCpTrReject = 0.98;
 constexpr double kSaceCostaldTrMinExclusive = 0.25;
 constexpr double kSaceCostaldTrMaxExclusive = 0.95;
+
+constexpr double kJobackViscAOffset = 597.82;
+constexpr double kJobackViscBOffset = 11.202;
+constexpr double kJobackViscMuACH3 = 548.29;
+constexpr double kJobackViscMuBCH3 = -1.719;
+constexpr double kJobackViscMuACH2 = 94.16;
+constexpr double kJobackViscMuBCH2 = -0.199;
+constexpr double kJobackViscMuACH = -322.15;
+constexpr double kJobackViscMuBCH = 1.187;
+constexpr double kJobackViscMuAC = -573.56;
+constexpr double kJobackViscMuBC = 2.307;
+constexpr double kJobackViscMuAAlcoholOH = 2173.72;
+constexpr double kJobackViscMuBAlcoholOH = -5.057;
+constexpr double kJobackViscMuAEtherO = 122.09;
+constexpr double kJobackViscMuBEtherO = -0.386;
 
 constexpr double kJobackCpAIntercept = -37.93;
 constexpr double kJobackCpBIntercept = 0.210;
@@ -133,6 +150,7 @@ struct SaceJobackEstimateBundle {
     SaceScalarProperty idealGasHeatCapacityAt298KJPerMolK{};
     SaceScalarProperty saturatedLiquidHeatCapacityAt298KJPerMolK{};
     SaceScalarProperty saturatedLiquidDensityAt298KKgPerM3{};
+    SaceScalarProperty liquidDynamicViscosityAt298KPaS{};
 };
 
 // Lee-Kesler 1975 corresponding-states vapor-pressure model.
@@ -194,6 +212,18 @@ struct SaceCostaldLiquidDensityModel {
     bool valid = false;
 };
 
+// Joback liquid dynamic viscosity. MW is the published numerical g/mol
+// convention in mu = MW * exp(A/T + B). Output is physical Pa*s, not
+// FluidProperties::viscosity sandbox units. No invented T interval.
+// Liquid-domain validity is assessed separately (COSTALD gate for the
+// stored 298.15 K scalar). Not live FluidEngine.
+struct SaceJobackLiquidViscosityModel {
+    double aKelvin = 0.0;
+    double bDimensionless = 0.0;
+    double molarMassGPerMol = 0.0;
+    bool valid = false;
+};
+
 enum class SaceJobackFragmentationResult : uint8_t {
     Ok = 0,
     InvalidGraph,
@@ -248,6 +278,24 @@ inline double saceJobackVcContributionSumCm3PerMol(SaceJobackGroupCounts const &
         + kJobackVcCCm3 * g.carbonC
         + kJobackVcAlcoholOHCm3 * g.hydroxylAlcohol
         + kJobackVcEtherOCm3 * g.etherNonRing;
+}
+
+inline double saceJobackViscosityMuASum(SaceJobackGroupCounts const &g) {
+    return kJobackViscMuACH3 * g.carbonCH3
+        + kJobackViscMuACH2 * g.carbonCH2
+        + kJobackViscMuACH * g.carbonCH
+        + kJobackViscMuAC * g.carbonC
+        + kJobackViscMuAAlcoholOH * g.hydroxylAlcohol
+        + kJobackViscMuAEtherO * g.etherNonRing;
+}
+
+inline double saceJobackViscosityMuBSum(SaceJobackGroupCounts const &g) {
+    return kJobackViscMuBCH3 * g.carbonCH3
+        + kJobackViscMuBCH2 * g.carbonCH2
+        + kJobackViscMuBCH * g.carbonCH
+        + kJobackViscMuBC * g.carbonC
+        + kJobackViscMuBAlcoholOH * g.hydroxylAlcohol
+        + kJobackViscMuBEtherO * g.etherNonRing;
 }
 
 inline double saceJobackHvapContributionSumKJPerMol(SaceJobackGroupCounts const &g) {
@@ -332,5 +380,14 @@ bool saceCostaldSaturatedLiquidDensityKgPerM3(
     SaceCostaldLiquidDensityModel const &model,
     double temperatureK,
     double &outKgPerM3);
+
+bool saceBuildJobackLiquidViscosityModel(
+    SaceMolecularGraph const &graph,
+    SaceJobackEstimateBundle const &bundle,
+    SaceJobackLiquidViscosityModel &out);
+bool saceJobackLiquidViscosityPaS(
+    SaceJobackLiquidViscosityModel const &model,
+    double temperatureK,
+    double &outPaS);
 
 void runSaceEstimationDiagnostics();
