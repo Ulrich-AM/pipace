@@ -311,6 +311,24 @@ void runSacePropertyDiagnostics() {
             && jobackOmegaDst.source == SacePropertySource::Reference
             && nearMass(jobackOmegaDst.value, 0.644), "");
 
+    SaceGeneratedProperties blankHvap{};
+    emit("hvap_tb_defaults_unknown",
+        !blankHvap.enthalpyVaporizationAtNormalBoilingJPerMol.known
+            && blankHvap.enthalpyVaporizationAtNormalBoilingJPerMol.source
+                == SacePropertySource::Unknown, "");
+    SaceScalarProperty refHvap = makeKnown(38600.0f, SacePropertySource::Reference, SaceConfidence::High);
+    SaceScalarProperty jobackHvap = makeKnown(36725.0f, SacePropertySource::StructuralEstimate, SaceConfidence::Low);
+    emit("structural_estimate_low_does_not_overwrite_reference_high_hvap",
+        !saceAssignScalarProperty(refHvap, jobackHvap)
+            && refHvap.source == SacePropertySource::Reference
+            && nearMass(refHvap.value, 38600.0), "");
+    SaceScalarProperty jobackHvapDst = makeKnown(36725.0f, SacePropertySource::StructuralEstimate, SaceConfidence::Low);
+    SaceScalarProperty refHvapSrc = makeKnown(38600.0f, SacePropertySource::Reference, SaceConfidence::High);
+    emit("reference_high_overwrites_structural_estimate_low_hvap",
+        saceAssignScalarProperty(jobackHvapDst, refHvapSrc)
+            && jobackHvapDst.source == SacePropertySource::Reference
+            && nearMass(jobackHvapDst.value, 38600.0), "");
+
     out << "summary\t" << (failed == 0 ? "PASS" : "FAIL") << '\t' << passed << " passed, "
         << failed << " failed\n";
 }

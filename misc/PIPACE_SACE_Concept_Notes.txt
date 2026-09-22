@@ -774,5 +774,19 @@ Implemented under chemistry/SaceEstimation.* :
 - Mixed independently replaced generated properties are not a coherent model.
 - Public catalog API exposes only const record(); diagnostics may friend-access.
 
+PHASE 10 LANDING (JOBACK HVAP + WATSON)
+=======================================
+Implemented under chemistry/SaceEstimation.* :
+
+- ΔHvap(Tb) [kJ/mol] = 15.30 + SUM of six published Joback Hvap groups.
+- Stored as J/mol (StructuralEstimate / Low). Not kJ/mol. Not J/kg.
+- Watson: Hvap(T) = Hvap_ref * [(1-T/Tc)/(1-Tref/Tc)]^0.38. Exponent 0.38.
+- Model is graph -> one Joback bundle -> Watson, plus identity-derived kg/mol.
+- Hvap(Tref) reproduces Joback; Hvap(Tc) = 0. T > Tc is rejected.
+- Values below Tb are mathematical extrapolations; melting/triple point unknown.
+- J/kg helper = J/mol / (g/mol * 1e-3). Not a stored generated scalar.
+- Separate from Lee-Kesler Psat. Not live PhaseChangeEngine latent heat.
+
+
 
 

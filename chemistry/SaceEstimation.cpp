@@ -449,6 +449,99 @@ bool saceBuildLeeKeslerVaporModelFromJoback(
     return true;
 }
 
+bool saceBuildWatsonVaporizationModelFromJoback(
+    SaceMolecularGraph const &graph,
+    SaceJobackEstimateBundle const &bundle,
+    SaceWatsonVaporizationModel &out)
+{
+    out = {};
+    if (!bundle.normalBoilingPointK.known || !bundle.criticalTemperatureK.known
+        || !bundle.enthalpyVaporizationAtNormalBoilingJPerMol.known)
+        return false;
+    if (bundle.normalBoilingPointK.source == SacePropertySource::Unknown
+        || bundle.criticalTemperatureK.source == SacePropertySource::Unknown
+        || bundle.enthalpyVaporizationAtNormalBoilingJPerMol.source == SacePropertySource::Unknown)
+        return false;
+    ElementalComposition elemental{};
+    if (!elementalCompositionFromGraph(graph, elemental))
+        return false;
+    SaceScalarProperty mm{};
+    if (!saceDeriveMolarMass(elemental, mm) || !mm.known || !(mm.value > 0.0f))
+        return false;
+    out.referenceTemperatureK = bundle.normalBoilingPointK.value;
+    out.criticalTemperatureK = bundle.criticalTemperatureK.value;
+    out.referenceEnthalpyJPerMol = bundle.enthalpyVaporizationAtNormalBoilingJPerMol.value;
+    out.molarMassKgPerMol = static_cast<double>(mm.value) * 1.0e-3;
+    if (!(out.referenceTemperatureK > 0.0) || !(out.criticalTemperatureK > 0.0)
+        || !(out.referenceEnthalpyJPerMol > 0.0) || !(out.molarMassKgPerMol > 0.0)
+        || !std::isfinite(out.referenceTemperatureK)
+        || !std::isfinite(out.criticalTemperatureK)
+        || !std::isfinite(out.referenceEnthalpyJPerMol)
+        || !std::isfinite(out.molarMassKgPerMol))
+        return false;
+    if (!(out.referenceTemperatureK < out.criticalTemperatureK))
+        return false;
+    out.valid = true;
+    return true;
+}
+
+bool saceWatsonEnthalpyVaporizationJPerMol(
+    SaceWatsonVaporizationModel const &model,
+    double temperatureK,
+    double &outJPerMol)
+{
+    outJPerMol = 0.0;
+    if (!model.valid)
+        return false;
+    if (!std::isfinite(temperatureK) || !std::isfinite(model.criticalTemperatureK)
+        || !std::isfinite(model.referenceTemperatureK)
+        || !std::isfinite(model.referenceEnthalpyJPerMol))
+        return false;
+    if (!(temperatureK > 0.0) || !(model.criticalTemperatureK > 0.0)
+        || !(model.referenceTemperatureK > 0.0)
+        || !(model.referenceEnthalpyJPerMol > 0.0))
+        return false;
+    if (!(model.referenceTemperatureK < model.criticalTemperatureK))
+        return false;
+    if (temperatureK > model.criticalTemperatureK)
+        return false;
+    if (temperatureK == model.criticalTemperatureK) {
+        outJPerMol = 0.0;
+        return true;
+    }
+    double oneMinusTr = 1.0 - temperatureK / model.criticalTemperatureK;
+    double oneMinusTbr = 1.0 - model.referenceTemperatureK / model.criticalTemperatureK;
+    if (!(oneMinusTr > 0.0) || !(oneMinusTbr > 0.0) || !std::isfinite(oneMinusTr)
+        || !std::isfinite(oneMinusTbr))
+        return false;
+    double ratio = oneMinusTr / oneMinusTbr;
+    if (!(ratio >= 0.0) || !std::isfinite(ratio))
+        return false;
+    double hvap = model.referenceEnthalpyJPerMol * std::pow(ratio, kWatsonHvapExponent);
+    if (!std::isfinite(hvap) || hvap < 0.0)
+        return false;
+    outJPerMol = hvap;
+    return true;
+}
+
+bool saceWatsonLatentHeatVaporizationJPerKg(
+    SaceWatsonVaporizationModel const &model,
+    double temperatureK,
+    double &outJPerKg)
+{
+    outJPerKg = 0.0;
+    if (!(model.molarMassKgPerMol > 0.0) || !std::isfinite(model.molarMassKgPerMol))
+        return false;
+    double jPerMol = 0.0;
+    if (!saceWatsonEnthalpyVaporizationJPerMol(model, temperatureK, jPerMol))
+        return false;
+    double jPerKg = jPerMol / model.molarMassKgPerMol;
+    if (!std::isfinite(jPerKg) || jPerKg < 0.0)
+        return false;
+    outJPerKg = jPerKg;
+    return true;
+}
+
 bool saceEstimateJobackBundle(SaceMolecularGraph const &graph, SaceJobackEstimateBundle &out) {
     saceResetJobackEstimateBundle(out);
     SaceJobackFragmentationResult r = saceFragmentJobackGroups(graph, out.groups);
@@ -501,6 +594,11 @@ bool saceEstimateJobackBundle(SaceMolecularGraph const &graph, SaceJobackEstimat
         if (pc > 0.0 && estimateLeeKeslerOmega(tb, tc, pc, omega))
             out.acentricFactor = jobackLowFiniteScalar(omega);
     }
+
+    double sHvapKJ = saceJobackHvapContributionSumKJPerMol(out.groups);
+    double hvapKJ = kJobackHvapInterceptKJPerMol + sHvapKJ;
+    if (hvapKJ > 0.0 && std::isfinite(hvapKJ))
+        out.enthalpyVaporizationAtNormalBoilingJPerMol = jobackLowScalar(hvapKJ * kJobackKJToJ);
 
     return true;
 }
@@ -710,7 +808,8 @@ void runSaceEstimationDiagnostics() {
             && !recE->properties.criticalTemperatureK.known
             && !recE->properties.criticalPressurePa.known
             && !recE->properties.criticalMolarVolumeM3PerMol.known
-            && !recE->properties.acentricFactor.known, "");
+            && !recE->properties.acentricFactor.known
+            && !recE->properties.enthalpyVaporizationAtNormalBoilingJPerMol.known, "");
 
     SaceJobackEstimateBundle bunA{}, bunB{};
     emit("c2h6o_a_bundle_ok", saceEstimateJobackBundle(gA, bunA), "");
@@ -775,11 +874,15 @@ void runSaceEstimationDiagnostics() {
             && x.criticalPressurePa.known && y.criticalPressurePa.known
             && x.criticalMolarVolumeM3PerMol.known && y.criticalMolarVolumeM3PerMol.known
             && x.acentricFactor.known && y.acentricFactor.known
+            && x.enthalpyVaporizationAtNormalBoilingJPerMol.known
+            && y.enthalpyVaporizationAtNormalBoilingJPerMol.known
             && nearK(x.normalBoilingPointK.value, y.normalBoilingPointK.value)
             && nearK(x.criticalTemperatureK.value, y.criticalTemperatureK.value, 0.05)
             && nearK(x.criticalPressurePa.value, y.criticalPressurePa.value, 80.0)
             && nearK(x.criticalMolarVolumeM3PerMol.value, y.criticalMolarVolumeM3PerMol.value, 1e-7)
-            && nearK(x.acentricFactor.value, y.acentricFactor.value, 1e-5);
+            && nearK(x.acentricFactor.value, y.acentricFactor.value, 1e-5)
+            && nearK(x.enthalpyVaporizationAtNormalBoilingJPerMol.value,
+                y.enthalpyVaporizationAtNormalBoilingJPerMol.value, 1.0);
     };
     SaceJobackEstimateBundle permB{}, bondB{}, endB{};
     emit("atom_permutation_preserves_joback_bundle",
@@ -792,7 +895,8 @@ void runSaceEstimationDiagnostics() {
     auto allJobackUnknown = [](SaceJobackEstimateBundle const &b) {
         return !b.normalBoilingPointK.known && !b.criticalTemperatureK.known
             && !b.criticalPressurePa.known && !b.criticalMolarVolumeM3PerMol.known
-            && !b.acentricFactor.known;
+            && !b.acentricFactor.known
+            && !b.enthalpyVaporizationAtNormalBoilingJPerMol.known;
     };
     SaceJobackEstimateBundle waterB{}, methaneB{}, unsB{};
     emit("water_all_joback_unknown",
@@ -821,6 +925,11 @@ void runSaceEstimationDiagnostics() {
             && recA->properties.acentricFactor.known
             && recA->properties.acentricFactor.source == SacePropertySource::StructuralEstimate
             && recA->properties.acentricFactor.confidence == SaceConfidence::Low
+            && recA->properties.enthalpyVaporizationAtNormalBoilingJPerMol.known
+            && recA->properties.enthalpyVaporizationAtNormalBoilingJPerMol.source
+                == SacePropertySource::StructuralEstimate
+            && recA->properties.enthalpyVaporizationAtNormalBoilingJPerMol.confidence
+                == SaceConfidence::Low
             && nearK(recA->properties.criticalTemperatureK.value, 499.407, 0.05), "");
 
     SaceGeneratedRecord *mutA = cat.recordMutable(refA.generatedId);
@@ -829,6 +938,7 @@ void runSaceEstimationDiagnostics() {
         mutA->properties.criticalPressurePa = saceUnknownScalarProperty();
         mutA->properties.criticalMolarVolumeM3PerMol = saceUnknownScalarProperty();
         mutA->properties.acentricFactor = saceUnknownScalarProperty();
+        mutA->properties.enthalpyVaporizationAtNormalBoilingJPerMol = saceUnknownScalarProperty();
     }
     bool reattachFill = cat.attachMolecularGraph(refA.generatedId, "synthetic-structure-a", gA);
     recA = cat.record(refA.generatedId);
@@ -986,6 +1096,134 @@ void runSaceEstimationDiagnostics() {
             && recA->properties.acentricFactor.confidence == SaceConfidence::High
             && nearK(recA->properties.acentricFactor.value, 0.644, 1e-4), "");
     emit("generated_record_still_unspawnable", recA && !recA->spawnable, "");
+
+    double aHvapSum = saceJobackHvapContributionSumKJPerMol(bunA.groups);
+    double bHvapSum = saceJobackHvapContributionSumKJPerMol(bunB.groups);
+    emit("a_hvap_contribution_sum_21_425", nearK(aHvapSum, 21.425, 1e-6), std::to_string(aHvapSum));
+    emit("a_hvap_tb_36725", bunA.enthalpyVaporizationAtNormalBoilingJPerMol.known
+        && nearK(bunA.enthalpyVaporizationAtNormalBoilingJPerMol.value, 36725.0, 1.0),
+        std::to_string(bunA.enthalpyVaporizationAtNormalBoilingJPerMol.value));
+    emit("b_hvap_contribution_sum_7_156", nearK(bHvapSum, 7.156, 1e-6), std::to_string(bHvapSum));
+    emit("b_hvap_tb_22456", bunB.enthalpyVaporizationAtNormalBoilingJPerMol.known
+        && nearK(bunB.enthalpyVaporizationAtNormalBoilingJPerMol.value, 22456.0, 1.0),
+        std::to_string(bunB.enthalpyVaporizationAtNormalBoilingJPerMol.value));
+    emit("a_b_hvap_differ", bunA.enthalpyVaporizationAtNormalBoilingJPerMol.known
+        && bunB.enthalpyVaporizationAtNormalBoilingJPerMol.known
+        && bunA.enthalpyVaporizationAtNormalBoilingJPerMol.value
+            > bunB.enthalpyVaporizationAtNormalBoilingJPerMol.value, "");
+    emit("a_b_hvap_structural_estimate_low",
+        bunA.enthalpyVaporizationAtNormalBoilingJPerMol.source == SacePropertySource::StructuralEstimate
+            && bunA.enthalpyVaporizationAtNormalBoilingJPerMol.confidence == SaceConfidence::Low
+            && bunB.enthalpyVaporizationAtNormalBoilingJPerMol.source == SacePropertySource::StructuralEstimate
+            && bunB.enthalpyVaporizationAtNormalBoilingJPerMol.confidence == SaceConfidence::Low, "");
+
+    SaceWatsonVaporizationModel watA{}, watB{};
+    emit("a_watson_model_builds",
+        saceBuildWatsonVaporizationModelFromJoback(gA, bunA, watA) && watA.valid, "");
+    emit("b_watson_model_builds",
+        saceBuildWatsonVaporizationModelFromJoback(gB, bunB, watB) && watB.valid, "");
+    emit("a_watson_molar_mass_0_046069",
+        watA.valid && nearK(watA.molarMassKgPerMol, 0.046069, 1e-6),
+        std::to_string(watA.molarMassKgPerMol));
+    emit("b_watson_molar_mass_0_046069",
+        watB.valid && nearK(watB.molarMassKgPerMol, 0.046069, 1e-6),
+        std::to_string(watB.molarMassKgPerMol));
+
+    auto watsonAt = [](SaceWatsonVaporizationModel const &m, double t, double &h) {
+        return saceWatsonEnthalpyVaporizationJPerMol(m, t, h);
+    };
+    double aHref = 0, bHref = 0, aHtc = 0, bHtc = 0;
+    bool aHrefOk = watsonAt(watA, watA.referenceTemperatureK, aHref) && nearK(aHref, 36725.0, 1.0);
+    emit("a_hvap_at_tref_36725", aHrefOk, std::to_string(aHref));
+    bool bHrefOk = watsonAt(watB, watB.referenceTemperatureK, bHref) && nearK(bHref, 22456.0, 1.0);
+    emit("b_hvap_at_tref_22456", bHrefOk, std::to_string(bHref));
+    bool aHtcOk = watsonAt(watA, watA.criticalTemperatureK, aHtc) && aHtc == 0.0;
+    emit("a_hvap_at_tc_zero", aHtcOk, std::to_string(aHtc));
+    bool bHtcOk = watsonAt(watB, watB.criticalTemperatureK, bHtc) && bHtc == 0.0;
+    emit("b_hvap_at_tc_zero", bHtcOk, std::to_string(bHtc));
+
+    auto checkWatsonTr = [&](char const *name, SaceWatsonVaporizationModel const &m,
+        double tr, double expect, double tol)
+    {
+        double h = 0.0;
+        bool ok = watsonAt(m, tr * m.criticalTemperatureK, h) && nearK(h, expect, tol);
+        emit(name, ok, std::to_string(h));
+        return h;
+    };
+    double aW06 = checkWatsonTr("a_watson_tr_0_6", watA, 0.6, 39781.1, 2.0);
+    double aW07 = checkWatsonTr("a_watson_tr_0_7", watA, 0.7, 35661.6, 2.0);
+    double aW08 = checkWatsonTr("a_watson_tr_0_8", watA, 0.8, 30569.3, 2.0);
+    double aW09 = checkWatsonTr("a_watson_tr_0_9", watA, 0.9, 23490.6, 2.0);
+    double bW06 = checkWatsonTr("b_watson_tr_0_6", watB, 0.6, 23022.9, 2.0);
+    double bW07 = checkWatsonTr("b_watson_tr_0_7", watB, 0.7, 20638.7, 2.0);
+    double bW08 = checkWatsonTr("b_watson_tr_0_8", watB, 0.8, 17691.6, 2.0);
+    double bW09 = checkWatsonTr("b_watson_tr_0_9", watB, 0.9, 13594.9, 2.0);
+    (void)aW06;
+    (void)bW06;
+
+    double aKg = 0, bKg = 0;
+    bool aKgOk = saceWatsonLatentHeatVaporizationJPerKg(watA, watA.referenceTemperatureK, aKg)
+        && nearK(aKg, 797174.0, 50.0);
+    emit("a_specific_latent_tb_797174", aKgOk, std::to_string(aKg));
+    bool bKgOk = saceWatsonLatentHeatVaporizationJPerKg(watB, watB.referenceTemperatureK, bKg)
+        && nearK(bKg, 487443.0, 50.0);
+    emit("b_specific_latent_tb_487443", bKgOk, std::to_string(bKg));
+
+    double rejectedH = 0.0;
+    emit("watson_rejects_t_above_tc",
+        !saceWatsonEnthalpyVaporizationJPerMol(watA, watA.criticalTemperatureK + 1.0, rejectedH), "");
+    emit("watson_rejects_nonpositive_t",
+        !saceWatsonEnthalpyVaporizationJPerMol(watA, 0.0, rejectedH)
+            && !saceWatsonEnthalpyVaporizationJPerMol(watA, -1.0, rejectedH), "");
+    double nanH = std::numeric_limits<double>::quiet_NaN();
+    double infH = std::numeric_limits<double>::infinity();
+    emit("watson_rejects_nan_inf",
+        !saceWatsonEnthalpyVaporizationJPerMol(watA, nanH, rejectedH)
+            && !saceWatsonEnthalpyVaporizationJPerMol(watA, infH, rejectedH), "");
+    SaceWatsonVaporizationModel invalidW{};
+    emit("watson_rejects_invalid_model",
+        !saceWatsonEnthalpyVaporizationJPerMol(invalidW, 300.0, rejectedH), "");
+    emit("sampled_hvap_decreases_toward_tc",
+        aW07 > aW08 && aW08 > aW09 && aW09 > 0.0
+            && bW07 > bW08 && bW08 > bW09 && bW09 > 0.0, "");
+    emit("water_no_joback_hvap", !waterB.enthalpyVaporizationAtNormalBoilingJPerMol.known, "");
+    emit("methane_no_joback_hvap", !methaneB.enthalpyVaporizationAtNormalBoilingJPerMol.known, "");
+    emit("hvap_not_in_canonical_signature",
+        std::strstr(sig, "36725") == nullptr && std::strstr(sig, "Hvap") == nullptr
+            && std::strstr(sig, "Watson") == nullptr, sig);
+    emit("watson_model_not_in_canonical_identity",
+        std::strstr(sig, "watson") == nullptr && std::strstr(sig, "latent") == nullptr, sig);
+
+    SaceGeneratedRecord *mutHvap = cat.recordMutable(refA.generatedId);
+    if (mutHvap)
+        mutHvap->properties.enthalpyVaporizationAtNormalBoilingJPerMol = saceUnknownScalarProperty();
+    bool reattachHvap = cat.attachMolecularGraph(refA.generatedId, "synthetic-structure-a", gA);
+    recA = cat.record(refA.generatedId);
+    emit("same_graph_reattach_backfills_hvap",
+        reattachHvap && recA && recA->properties.enthalpyVaporizationAtNormalBoilingJPerMol.known
+            && recA->properties.enthalpyVaporizationAtNormalBoilingJPerMol.source
+                == SacePropertySource::StructuralEstimate
+            && nearK(recA->properties.enthalpyVaporizationAtNormalBoilingJPerMol.value, 36725.0, 1.0), "");
+
+    SaceGeneratedRecord *mutHvapRef = cat.recordMutable(refA.generatedId);
+    if (mutHvapRef) {
+        mutHvapRef->properties.enthalpyVaporizationAtNormalBoilingJPerMol.known = true;
+        mutHvapRef->properties.enthalpyVaporizationAtNormalBoilingJPerMol.value = 38600.0f;
+        mutHvapRef->properties.enthalpyVaporizationAtNormalBoilingJPerMol.source
+            = SacePropertySource::Reference;
+        mutHvapRef->properties.enthalpyVaporizationAtNormalBoilingJPerMol.confidence
+            = SaceConfidence::High;
+    }
+    bool reattachHvapKeep = cat.attachMolecularGraph(refA.generatedId, "synthetic-structure-a", gA);
+    recA = cat.record(refA.generatedId);
+    emit("same_graph_backfill_preserves_reference_high_hvap",
+        reattachHvapKeep && recA
+            && recA->properties.enthalpyVaporizationAtNormalBoilingJPerMol.source
+                == SacePropertySource::Reference
+            && recA->properties.enthalpyVaporizationAtNormalBoilingJPerMol.confidence
+                == SaceConfidence::High
+            && nearK(recA->properties.enthalpyVaporizationAtNormalBoilingJPerMol.value, 38600.0, 1.0), "");
+    emit("generated_record_still_unspawnable_after_hvap", recA && !recA->spawnable, "");
 
     cat.clear();
     out << "summary\t" << (failed == 0 ? "PASS" : "FAIL") << '\t' << passed << " passed, "

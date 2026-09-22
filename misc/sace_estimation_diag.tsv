@@ -103,4 +103,40 @@ test	vapor_model_not_in_canonical_identity	PASS	molecule|1:2,8:1|water
 test	same_graph_reattach_backfills_omega	PASS	
 test	same_graph_backfill_preserves_reference_high_omega	PASS	
 test	generated_record_still_unspawnable	PASS	
-summary	PASS	105 passed, 0 failed
+test	a_hvap_contribution_sum_21_425	PASS	21.425000
+test	a_hvap_tb_36725	PASS	36725.000000
+test	b_hvap_contribution_sum_7_156	PASS	7.156000
+test	b_hvap_tb_22456	PASS	22456.000000
+test	a_b_hvap_differ	PASS	
+test	a_b_hvap_structural_estimate_low	PASS	
+test	a_watson_model_builds	PASS	
+test	b_watson_model_builds	PASS	
+test	a_watson_molar_mass_0_046069	PASS	0.046069
+test	b_watson_molar_mass_0_046069	PASS	0.046069
+test	a_hvap_at_tref_36725	PASS	36725.000000
+test	b_hvap_at_tref_22456	PASS	22456.000000
+test	a_hvap_at_tc_zero	PASS	0.000000
+test	b_hvap_at_tc_zero	PASS	0.000000
+test	a_watson_tr_0_6	PASS	39781.114451
+test	a_watson_tr_0_7	PASS	35661.550831
+test	a_watson_tr_0_8	PASS	30569.303742
+test	a_watson_tr_0_9	PASS	23490.602115
+test	b_watson_tr_0_6	PASS	23022.868533
+test	b_watson_tr_0_7	PASS	20638.717839
+test	b_watson_tr_0_8	PASS	17691.637625
+test	b_watson_tr_0_9	PASS	13594.919391
+test	a_specific_latent_tb_797174	PASS	797173.800286
+test	b_specific_latent_tb_487443	PASS	487442.746337
+test	watson_rejects_t_above_tc	PASS	
+test	watson_rejects_nonpositive_t	PASS	
+test	watson_rejects_nan_inf	PASS	
+test	watson_rejects_invalid_model	PASS	
+test	sampled_hvap_decreases_toward_tc	PASS	
+test	water_no_joback_hvap	PASS	
+test	methane_no_joback_hvap	PASS	
+test	hvap_not_in_canonical_signature	PASS	molecule|1:2,8:1|water
+test	watson_model_not_in_canonical_identity	PASS	molecule|1:2,8:1|water
+test	same_graph_reattach_backfills_hvap	PASS	
+test	same_graph_backfill_preserves_reference_high_hvap	PASS	
+test	generated_record_still_unspawnable_after_hvap	PASS	
+summary	PASS	141 passed, 0 failed
