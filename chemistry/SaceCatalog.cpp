@@ -45,7 +45,7 @@ SaceGeneratedRecord *SaceCatalog::recordMutable(SaceRecordId id) {
     return &rec;
 }
 
-void SaceCatalog::applyJobackEstimates(SaceGeneratedRecord &record,
+void SaceCatalog::applyStructuralThermoEstimates(SaceGeneratedRecord &record,
     SaceJobackEstimateBundle const &bundle)
 {
     saceAssignScalarProperty(record.properties.normalBoilingPointK, bundle.normalBoilingPointK);
@@ -56,6 +56,10 @@ void SaceCatalog::applyJobackEstimates(SaceGeneratedRecord &record,
     saceAssignScalarProperty(record.properties.acentricFactor, bundle.acentricFactor);
     saceAssignScalarProperty(record.properties.enthalpyVaporizationAtNormalBoilingJPerMol,
         bundle.enthalpyVaporizationAtNormalBoilingJPerMol);
+    saceAssignScalarProperty(record.properties.idealGasHeatCapacityAt298KJPerMolK,
+        bundle.idealGasHeatCapacityAt298KJPerMolK);
+    saceAssignScalarProperty(record.properties.saturatedLiquidHeatCapacityAt298KJPerMolK,
+        bundle.saturatedLiquidHeatCapacityAt298KJPerMolK);
 }
 
 ChemicalIdentity SaceCatalog::identityView(SaceGeneratedRecord const &rec) const {
@@ -179,7 +183,7 @@ bool SaceCatalog::attachMolecularGraph(SaceRecordId id, char const *claimedStruc
             return false;
         if (!molecularGraphsStoredEqual(rec.molecularGraph, graph))
             return false;
-        applyJobackEstimates(rec, joback);
+        applyStructuralThermoEstimates(rec, joback);
         return true;
     }
     rec.molecularGraph = graph;
@@ -189,7 +193,7 @@ bool SaceCatalog::attachMolecularGraph(SaceRecordId id, char const *claimedStruc
     rec.hasMolecularGraph = true;
     rec.hasMolecularDescriptors = true;
     rec.hasFunctionalProfile = true;
-    applyJobackEstimates(rec, joback);
+    applyStructuralThermoEstimates(rec, joback);
     return true;
 }
 

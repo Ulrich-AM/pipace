@@ -88,7 +88,7 @@ private:
     friend void runSaceEstimationDiagnostics();
     bool eligibleForGeneratedIdentity(ChemicalIdentity const &id, char *signature, int cap) const;
     SaceRecordId insertGenerated(ChemicalIdentity const &id, char const *signature);
-    void applyJobackEstimates(SaceGeneratedRecord &record, SaceJobackEstimateBundle const &bundle);
+    void applyStructuralThermoEstimates(SaceGeneratedRecord &record, SaceJobackEstimateBundle const &bundle);
     SaceGeneratedRecord *recordMutable(SaceRecordId id);
 
     std::deque<SaceGeneratedRecord> records_;
