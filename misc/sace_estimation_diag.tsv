@@ -139,4 +139,43 @@ test	watson_model_not_in_canonical_identity	PASS	molecule|1:2,8:1|water
 test	same_graph_reattach_backfills_hvap	PASS	
 test	same_graph_backfill_preserves_reference_high_hvap	PASS	
 test	generated_record_still_unspawnable_after_hvap	PASS	
-summary	PASS	141 passed, 0 failed
+test	a_cp_polynomial_builds	PASS	
+test	a_cp_coefficients	PASS	6.361000,0.227820,-0.000115,0.000000
+test	b_cp_polynomial_builds	PASS	
+test	b_cp_coefficients	PASS	26.570000,0.130640,0.000026,-0.000000
+test	a_cpig_298_15	PASS	64.620912
+test	b_cpig_298_15	PASS	66.713094
+test	a_cpig_300	PASS	64.925800
+test	b_cpig_300	PASS	66.962600
+test	a_cpig_1000	PASS	141.181000
+test	b_cpig_1000	PASS	141.010000
+test	cpig_rejects_below_298	PASS	
+test	cpig_rejects_above_1000	PASS	
+test	cpig_rejects_nan_inf	PASS	
+test	a_rowlinson_poling_model_builds	PASS	
+test	b_rowlinson_poling_model_builds	PASS	
+test	a_cpl_298_15	PASS	148.729170
+test	b_cpl_298_15	PASS	112.314827
+test	a_cpl_tr_0_8	PASS	165.084002
+test	b_cpl_tr_0_8	PASS	124.049778
+test	a_cpl_tr_0_9	PASS	196.341716
+test	b_cpl_tr_0_9	PASS	151.428493
+test	liquid_cp_rejects_tr_ge_0_98	PASS	
+test	liquid_cp_rejects_t_ge_tc	PASS	
+test	liquid_cp_rejects_invalid_model	PASS	
+test	a_gas_specific_cp_298_15	PASS	1402.698389
+test	b_gas_specific_cp_298_15	PASS	1448.112487
+test	a_liquid_specific_cp_298_15	PASS	3228.400233
+test	b_liquid_specific_cp_298_15	PASS	2437.969721
+test	cp_reference_structural_estimate_low	PASS	
+test	atom_permutation_preserves_cp	PASS	
+test	bond_reorder_preserves_cp	PASS	
+test	reversed_endpoints_preserve_cp	PASS	
+test	water_no_joback_cp	PASS	
+test	methane_no_joback_cp	PASS	
+test	cp_not_in_canonical_identity	PASS	molecule|1:2,8:1|water
+test	catalog_cp_matches_direct_evaluation	PASS	
+test	same_graph_reattach_backfills_cp	PASS	
+test	same_graph_backfill_preserves_reference_high_cp	PASS	
+test	generated_record_still_unspawnable_after_cp	PASS	
+summary	PASS	180 passed, 0 failed

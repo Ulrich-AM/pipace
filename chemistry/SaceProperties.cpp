@@ -329,6 +329,44 @@ void runSacePropertyDiagnostics() {
             && jobackHvapDst.source == SacePropertySource::Reference
             && nearMass(jobackHvapDst.value, 38600.0), "");
 
+    SaceGeneratedProperties blankCp{};
+    emit("ideal_gas_cp_298_defaults_unknown",
+        !blankCp.idealGasHeatCapacityAt298KJPerMolK.known
+            && blankCp.idealGasHeatCapacityAt298KJPerMolK.source == SacePropertySource::Unknown, "");
+    emit("liquid_cp_298_defaults_unknown",
+        !blankCp.saturatedLiquidHeatCapacityAt298KJPerMolK.known
+            && blankCp.saturatedLiquidHeatCapacityAt298KJPerMolK.source == SacePropertySource::Unknown, "");
+
+    SaceScalarProperty refGasCp = makeKnown(65.0f, SacePropertySource::Reference, SaceConfidence::High);
+    SaceScalarProperty jobackGasCp = makeKnown(64.6209f, SacePropertySource::StructuralEstimate, SaceConfidence::Low);
+    emit("structural_estimate_low_does_not_overwrite_reference_high_gas_cp",
+        !saceAssignScalarProperty(refGasCp, jobackGasCp)
+            && refGasCp.source == SacePropertySource::Reference
+            && refGasCp.confidence == SaceConfidence::High
+            && nearMass(refGasCp.value, 65.0), "");
+    SaceScalarProperty jobackGasCpDst = makeKnown(64.6209f, SacePropertySource::StructuralEstimate, SaceConfidence::Low);
+    SaceScalarProperty refGasCpSrc = makeKnown(65.0f, SacePropertySource::Reference, SaceConfidence::High);
+    emit("reference_high_overwrites_structural_estimate_low_gas_cp",
+        saceAssignScalarProperty(jobackGasCpDst, refGasCpSrc)
+            && jobackGasCpDst.source == SacePropertySource::Reference
+            && jobackGasCpDst.confidence == SaceConfidence::High
+            && nearMass(jobackGasCpDst.value, 65.0), "");
+
+    SaceScalarProperty refLiqCp = makeKnown(112.0f, SacePropertySource::Reference, SaceConfidence::High);
+    SaceScalarProperty jobackLiqCp = makeKnown(148.729f, SacePropertySource::StructuralEstimate, SaceConfidence::Low);
+    emit("structural_estimate_low_does_not_overwrite_reference_high_liquid_cp",
+        !saceAssignScalarProperty(refLiqCp, jobackLiqCp)
+            && refLiqCp.source == SacePropertySource::Reference
+            && refLiqCp.confidence == SaceConfidence::High
+            && nearMass(refLiqCp.value, 112.0), "");
+    SaceScalarProperty jobackLiqCpDst = makeKnown(148.729f, SacePropertySource::StructuralEstimate, SaceConfidence::Low);
+    SaceScalarProperty refLiqCpSrc = makeKnown(112.0f, SacePropertySource::Reference, SaceConfidence::High);
+    emit("reference_high_overwrites_structural_estimate_low_liquid_cp",
+        saceAssignScalarProperty(jobackLiqCpDst, refLiqCpSrc)
+            && jobackLiqCpDst.source == SacePropertySource::Reference
+            && jobackLiqCpDst.confidence == SaceConfidence::High
+            && nearMass(jobackLiqCpDst.value, 112.0), "");
+
     out << "summary\t" << (failed == 0 ? "PASS" : "FAIL") << '\t' << passed << " passed, "
         << failed << " failed\n";
 }

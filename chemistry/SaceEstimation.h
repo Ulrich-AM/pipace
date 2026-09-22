@@ -6,11 +6,12 @@
 
 #include <cstdint>
 
-// SACE Phase 7–10: Joback-Reid 1987 subset + Lee-Kesler Psat + Watson Hvap.
+// SACE Phase 7–11: Joback-Reid 1987 subset + Lee-Kesler Psat + Watson Hvap + Cp.
 // Phase 7: Tb[K] = 198.2 + SUM(Tb groups).
 // Phase 8: Tc, Pc, Vc from the same six groups and the Joback Tb (not stored Tb).
 // Phase 9: Lee-Kesler omega and Psat(T) from the same Joback Tb/Tc/Pc tuple.
 // Phase 10: Joback ΔHvap(Tb) [J/mol] + Watson Hvap(T). Not live phase physics.
+// Phase 11: Joback ideal-gas Cp(T) + Rowlinson-Poling liquid Cp(T). 298–1000 K.
 // StructuralEstimate / Low. Unsupported chemistry stays Unknown.
 // Not canonical identity. Not live PhaseProperties. Do not call from physics ticks.
 //
@@ -60,6 +61,45 @@ constexpr double kJobackHvapAlcoholOHKJPerMol = 16.826;
 constexpr double kJobackHvapEtherOKJPerMol = 2.410;
 constexpr double kJobackKJToJ = 1000.0;
 constexpr double kWatsonHvapExponent = 0.38;
+constexpr double kSaceHeatCapacityTMinK = 298.0;
+constexpr double kSaceHeatCapacityTMaxK = 1000.0;
+constexpr double kSaceHeatCapacityReferenceK = 298.15;
+constexpr double kSaceLiquidCpTrReject = 0.98;
+
+constexpr double kJobackCpAIntercept = -37.93;
+constexpr double kJobackCpBIntercept = 0.210;
+constexpr double kJobackCpCIntercept = -3.91e-4;
+constexpr double kJobackCpDIntercept = 2.06e-7;
+
+constexpr double kJobackCpACH3 = 19.5;
+constexpr double kJobackCpBCH3 = -8.08e-3;
+constexpr double kJobackCpCCH3 = 1.53e-4;
+constexpr double kJobackCpDCH3 = -9.67e-8;
+
+constexpr double kJobackCpACH2 = -0.909;
+constexpr double kJobackCpBCH2 = 9.50e-2;
+constexpr double kJobackCpCCH2 = -5.44e-5;
+constexpr double kJobackCpDCH2 = 1.19e-8;
+
+constexpr double kJobackCpACH = -23.0;
+constexpr double kJobackCpBCH = 0.204;
+constexpr double kJobackCpCCH = -2.65e-4;
+constexpr double kJobackCpDCH = 1.20e-7;
+
+constexpr double kJobackCpAC = -66.2;
+constexpr double kJobackCpBC = 0.427;
+constexpr double kJobackCpCC = -6.41e-4;
+constexpr double kJobackCpDC = 3.01e-7;
+
+constexpr double kJobackCpAAlcoholOH = 25.7;
+constexpr double kJobackCpBAlcoholOH = -6.91e-2;
+constexpr double kJobackCpCAlcoholOH = 1.77e-4;
+constexpr double kJobackCpDAlcoholOH = -9.88e-8;
+
+constexpr double kJobackCpAEtherO = 25.5;
+constexpr double kJobackCpBEtherO = -6.32e-2;
+constexpr double kJobackCpCEtherO = 1.11e-4;
+constexpr double kJobackCpDEtherO = -5.48e-8;
 
 enum class SaceJobackGroup : uint8_t {
     CarbonCH3 = 0,
@@ -87,6 +127,8 @@ struct SaceJobackEstimateBundle {
     SaceScalarProperty criticalMolarVolumeM3PerMol{};
     SaceScalarProperty acentricFactor{};
     SaceScalarProperty enthalpyVaporizationAtNormalBoilingJPerMol{};
+    SaceScalarProperty idealGasHeatCapacityAt298KJPerMolK{};
+    SaceScalarProperty saturatedLiquidHeatCapacityAt298KJPerMolK{};
 };
 
 // Lee-Kesler 1975 corresponding-states vapor-pressure model.
@@ -112,6 +154,25 @@ struct SaceWatsonVaporizationModel {
     double referenceTemperatureK = 0.0;
     double criticalTemperatureK = 0.0;
     double referenceEnthalpyJPerMol = 0.0;
+    double molarMassKgPerMol = 0.0;
+    bool valid = false;
+};
+
+struct SaceJobackIdealGasCpModel {
+    double A = 0.0;
+    double B = 0.0;
+    double C = 0.0;
+    double D = 0.0;
+    bool valid = false;
+};
+
+// Rowlinson-Poling liquid Cp from coherent Joback Cp + Joback Tc + Lee-Kesler omega.
+// Alcohols (Graph A) are a difficult associating case; no empirical correction.
+// Fail closed for Tr >= 0.98. Not live ThermalEngine. Not mixed stored properties.
+struct SaceRowlinsonPolingLiquidCpModel {
+    SaceJobackIdealGasCpModel idealGasCp{};
+    double criticalTemperatureK = 0.0;
+    double acentricFactor = 0.0;
     double molarMassKgPerMol = 0.0;
     bool valid = false;
 };
@@ -219,5 +280,27 @@ bool saceWatsonLatentHeatVaporizationJPerKg(
     SaceWatsonVaporizationModel const &model,
     double temperatureK,
     double &outJPerKg);
+
+bool saceBuildJobackIdealGasCpModel(
+    SaceJobackGroupCounts const &groups,
+    SaceJobackIdealGasCpModel &out);
+bool saceJobackIdealGasHeatCapacityJPerMolK(
+    SaceJobackIdealGasCpModel const &model,
+    double temperatureK,
+    double &outJPerMolK);
+
+bool saceBuildRowlinsonPolingLiquidCpModelFromJoback(
+    SaceMolecularGraph const &graph,
+    SaceJobackEstimateBundle const &bundle,
+    SaceRowlinsonPolingLiquidCpModel &out);
+bool saceRowlinsonPolingLiquidHeatCapacityJPerMolK(
+    SaceRowlinsonPolingLiquidCpModel const &model,
+    double temperatureK,
+    double &outJPerMolK);
+
+bool saceMolarHeatCapacityToSpecificJPerKgK(
+    double cpJPerMolK,
+    double molarMassKgPerMol,
+    double &outJPerKgK);
 
 void runSaceEstimationDiagnostics();

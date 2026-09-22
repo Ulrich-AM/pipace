@@ -3,6 +3,7 @@
 #include "chemistry/SaceCatalog.h"
 #include "chemistry/SaceIdentity.h"
 #include "fluid/DiagOutput.h"
+#include "substance/SubstanceProperties.h"
 
 #include <algorithm>
 #include <cmath>
@@ -542,6 +543,151 @@ bool saceWatsonLatentHeatVaporizationJPerKg(
     return true;
 }
 
+bool saceBuildJobackIdealGasCpModel(
+    SaceJobackGroupCounts const &groups,
+    SaceJobackIdealGasCpModel &out)
+{
+    out = {};
+    double a = kJobackCpACH3 * groups.carbonCH3
+        + kJobackCpACH2 * groups.carbonCH2
+        + kJobackCpACH * groups.carbonCH
+        + kJobackCpAC * groups.carbonC
+        + kJobackCpAAlcoholOH * groups.hydroxylAlcohol
+        + kJobackCpAEtherO * groups.etherNonRing;
+    double b = kJobackCpBCH3 * groups.carbonCH3
+        + kJobackCpBCH2 * groups.carbonCH2
+        + kJobackCpBCH * groups.carbonCH
+        + kJobackCpBC * groups.carbonC
+        + kJobackCpBAlcoholOH * groups.hydroxylAlcohol
+        + kJobackCpBEtherO * groups.etherNonRing;
+    double c = kJobackCpCCH3 * groups.carbonCH3
+        + kJobackCpCCH2 * groups.carbonCH2
+        + kJobackCpCCH * groups.carbonCH
+        + kJobackCpCC * groups.carbonC
+        + kJobackCpCAlcoholOH * groups.hydroxylAlcohol
+        + kJobackCpCEtherO * groups.etherNonRing;
+    double d = kJobackCpDCH3 * groups.carbonCH3
+        + kJobackCpDCH2 * groups.carbonCH2
+        + kJobackCpDCH * groups.carbonCH
+        + kJobackCpDC * groups.carbonC
+        + kJobackCpDAlcoholOH * groups.hydroxylAlcohol
+        + kJobackCpDEtherO * groups.etherNonRing;
+    out.A = a + kJobackCpAIntercept;
+    out.B = b + kJobackCpBIntercept;
+    out.C = c + kJobackCpCIntercept;
+    out.D = d + kJobackCpDIntercept;
+    if (!std::isfinite(out.A) || !std::isfinite(out.B)
+        || !std::isfinite(out.C) || !std::isfinite(out.D)) {
+        out = {};
+        return false;
+    }
+    out.valid = true;
+    return true;
+}
+
+bool saceJobackIdealGasHeatCapacityJPerMolK(
+    SaceJobackIdealGasCpModel const &model,
+    double temperatureK,
+    double &outJPerMolK)
+{
+    outJPerMolK = 0.0;
+    if (!model.valid)
+        return false;
+    if (!std::isfinite(temperatureK) || !std::isfinite(model.A) || !std::isfinite(model.B)
+        || !std::isfinite(model.C) || !std::isfinite(model.D))
+        return false;
+    if (temperatureK < kSaceHeatCapacityTMinK || temperatureK > kSaceHeatCapacityTMaxK)
+        return false;
+    double t = temperatureK;
+    double t2 = t * t;
+    double t3 = t2 * t;
+    double cp = model.A + model.B * t + model.C * t2 + model.D * t3;
+    if (!std::isfinite(cp) || !(cp > 0.0))
+        return false;
+    outJPerMolK = cp;
+    return true;
+}
+
+bool saceMolarHeatCapacityToSpecificJPerKgK(
+    double cpJPerMolK,
+    double molarMassKgPerMol,
+    double &outJPerKgK)
+{
+    outJPerKgK = 0.0;
+    if (!std::isfinite(cpJPerMolK) || !std::isfinite(molarMassKgPerMol))
+        return false;
+    if (!(cpJPerMolK > 0.0) || !(molarMassKgPerMol > 0.0))
+        return false;
+    double spec = cpJPerMolK / molarMassKgPerMol;
+    if (!std::isfinite(spec) || !(spec > 0.0))
+        return false;
+    outJPerKgK = spec;
+    return true;
+}
+
+bool saceBuildRowlinsonPolingLiquidCpModelFromJoback(
+    SaceMolecularGraph const &graph,
+    SaceJobackEstimateBundle const &bundle,
+    SaceRowlinsonPolingLiquidCpModel &out)
+{
+    out = {};
+    if (!bundle.criticalTemperatureK.known || !bundle.acentricFactor.known)
+        return false;
+    if (!saceBuildJobackIdealGasCpModel(bundle.groups, out.idealGasCp))
+        return false;
+    ElementalComposition elemental{};
+    if (!elementalCompositionFromGraph(graph, elemental))
+        return false;
+    SaceScalarProperty mm{};
+    if (!saceDeriveMolarMass(elemental, mm) || !mm.known || !(mm.value > 0.0f))
+        return false;
+    out.criticalTemperatureK = bundle.criticalTemperatureK.value;
+    out.acentricFactor = bundle.acentricFactor.value;
+    out.molarMassKgPerMol = static_cast<double>(mm.value) * 1.0e-3;
+    if (!(out.criticalTemperatureK > 0.0) || !std::isfinite(out.criticalTemperatureK)
+        || !std::isfinite(out.acentricFactor) || !(out.molarMassKgPerMol > 0.0)
+        || !std::isfinite(out.molarMassKgPerMol)) {
+        out = {};
+        return false;
+    }
+    out.valid = true;
+    return true;
+}
+
+bool saceRowlinsonPolingLiquidHeatCapacityJPerMolK(
+    SaceRowlinsonPolingLiquidCpModel const &model,
+    double temperatureK,
+    double &outJPerMolK)
+{
+    outJPerMolK = 0.0;
+    if (!model.valid)
+        return false;
+    if (!std::isfinite(temperatureK) || !std::isfinite(model.criticalTemperatureK)
+        || !std::isfinite(model.acentricFactor))
+        return false;
+    if (temperatureK < kSaceHeatCapacityTMinK || temperatureK > kSaceHeatCapacityTMaxK)
+        return false;
+    if (!(temperatureK < model.criticalTemperatureK) || !(model.criticalTemperatureK > 0.0))
+        return false;
+    double tr = temperatureK / model.criticalTemperatureK;
+    if (!(tr > 0.0) || !std::isfinite(tr) || tr >= kSaceLiquidCpTrReject)
+        return false;
+    double x = 1.0 - tr;
+    if (!(x > 0.0) || !std::isfinite(x))
+        return false;
+    double cpig = 0.0;
+    if (!saceJobackIdealGasHeatCapacityJPerMolK(model.idealGasCp, temperatureK, cpig))
+        return false;
+    double r = static_cast<double>(UNIVERSAL_GAS_R_J_MOL_K);
+    double term = 1.586 + 0.49 / x
+        + model.acentricFactor * (4.2775 + 6.3 * std::cbrt(x) / tr + 0.4355 / x);
+    double cpl = cpig + r * term;
+    if (!std::isfinite(cpl) || !(cpl > 0.0))
+        return false;
+    outJPerMolK = cpl;
+    return true;
+}
+
 bool saceEstimateJobackBundle(SaceMolecularGraph const &graph, SaceJobackEstimateBundle &out) {
     saceResetJobackEstimateBundle(out);
     SaceJobackFragmentationResult r = saceFragmentJobackGroups(graph, out.groups);
@@ -599,6 +745,19 @@ bool saceEstimateJobackBundle(SaceMolecularGraph const &graph, SaceJobackEstimat
     double hvapKJ = kJobackHvapInterceptKJPerMol + sHvapKJ;
     if (hvapKJ > 0.0 && std::isfinite(hvapKJ))
         out.enthalpyVaporizationAtNormalBoilingJPerMol = jobackLowScalar(hvapKJ * kJobackKJToJ);
+
+    SaceJobackIdealGasCpModel igCp{};
+    if (saceBuildJobackIdealGasCpModel(out.groups, igCp)) {
+        double cpig = 0.0;
+        if (saceJobackIdealGasHeatCapacityJPerMolK(igCp, kSaceHeatCapacityReferenceK, cpig))
+            out.idealGasHeatCapacityAt298KJPerMolK = jobackLowScalar(cpig);
+    }
+    SaceRowlinsonPolingLiquidCpModel liqCp{};
+    if (saceBuildRowlinsonPolingLiquidCpModelFromJoback(graph, out, liqCp)) {
+        double cpl = 0.0;
+        if (saceRowlinsonPolingLiquidHeatCapacityJPerMolK(liqCp, kSaceHeatCapacityReferenceK, cpl))
+            out.saturatedLiquidHeatCapacityAt298KJPerMolK = jobackLowScalar(cpl);
+    }
 
     return true;
 }
@@ -809,7 +968,9 @@ void runSaceEstimationDiagnostics() {
             && !recE->properties.criticalPressurePa.known
             && !recE->properties.criticalMolarVolumeM3PerMol.known
             && !recE->properties.acentricFactor.known
-            && !recE->properties.enthalpyVaporizationAtNormalBoilingJPerMol.known, "");
+            && !recE->properties.enthalpyVaporizationAtNormalBoilingJPerMol.known
+            && !recE->properties.idealGasHeatCapacityAt298KJPerMolK.known
+            && !recE->properties.saturatedLiquidHeatCapacityAt298KJPerMolK.known, "");
 
     SaceJobackEstimateBundle bunA{}, bunB{};
     emit("c2h6o_a_bundle_ok", saceEstimateJobackBundle(gA, bunA), "");
@@ -882,7 +1043,15 @@ void runSaceEstimationDiagnostics() {
             && nearK(x.criticalMolarVolumeM3PerMol.value, y.criticalMolarVolumeM3PerMol.value, 1e-7)
             && nearK(x.acentricFactor.value, y.acentricFactor.value, 1e-5)
             && nearK(x.enthalpyVaporizationAtNormalBoilingJPerMol.value,
-                y.enthalpyVaporizationAtNormalBoilingJPerMol.value, 1.0);
+                y.enthalpyVaporizationAtNormalBoilingJPerMol.value, 1.0)
+            && x.idealGasHeatCapacityAt298KJPerMolK.known
+            && y.idealGasHeatCapacityAt298KJPerMolK.known
+            && x.saturatedLiquidHeatCapacityAt298KJPerMolK.known
+            && y.saturatedLiquidHeatCapacityAt298KJPerMolK.known
+            && nearK(x.idealGasHeatCapacityAt298KJPerMolK.value,
+                y.idealGasHeatCapacityAt298KJPerMolK.value, 0.02)
+            && nearK(x.saturatedLiquidHeatCapacityAt298KJPerMolK.value,
+                y.saturatedLiquidHeatCapacityAt298KJPerMolK.value, 0.05);
     };
     SaceJobackEstimateBundle permB{}, bondB{}, endB{};
     emit("atom_permutation_preserves_joback_bundle",
@@ -896,7 +1065,9 @@ void runSaceEstimationDiagnostics() {
         return !b.normalBoilingPointK.known && !b.criticalTemperatureK.known
             && !b.criticalPressurePa.known && !b.criticalMolarVolumeM3PerMol.known
             && !b.acentricFactor.known
-            && !b.enthalpyVaporizationAtNormalBoilingJPerMol.known;
+            && !b.enthalpyVaporizationAtNormalBoilingJPerMol.known
+            && !b.idealGasHeatCapacityAt298KJPerMolK.known
+            && !b.saturatedLiquidHeatCapacityAt298KJPerMolK.known;
     };
     SaceJobackEstimateBundle waterB{}, methaneB{}, unsB{};
     emit("water_all_joback_unknown",
@@ -1224,6 +1395,207 @@ void runSaceEstimationDiagnostics() {
                 == SaceConfidence::High
             && nearK(recA->properties.enthalpyVaporizationAtNormalBoilingJPerMol.value, 38600.0, 1.0), "");
     emit("generated_record_still_unspawnable_after_hvap", recA && !recA->spawnable, "");
+
+    SaceJobackIdealGasCpModel cpA{}, cpB{};
+    emit("a_cp_polynomial_builds", saceBuildJobackIdealGasCpModel(bunA.groups, cpA) && cpA.valid, "");
+    emit("a_cp_coefficients",
+        cpA.valid
+            && nearK(cpA.A, 6.361, 1e-6)
+            && nearK(cpA.B, 0.22782, 1e-7)
+            && nearK(cpA.C, -1.154e-4, 1e-9)
+            && nearK(cpA.D, 2.24e-8, 1e-11),
+        std::to_string(cpA.A) + "," + std::to_string(cpA.B) + ","
+            + std::to_string(cpA.C) + "," + std::to_string(cpA.D));
+    emit("b_cp_polynomial_builds", saceBuildJobackIdealGasCpModel(bunB.groups, cpB) && cpB.valid, "");
+    emit("b_cp_coefficients",
+        cpB.valid
+            && nearK(cpB.A, 26.57, 1e-6)
+            && nearK(cpB.B, 0.13064, 1e-7)
+            && nearK(cpB.C, 2.60e-5, 1e-9)
+            && nearK(cpB.D, -4.22e-8, 1e-11),
+        std::to_string(cpB.A) + "," + std::to_string(cpB.B) + ","
+            + std::to_string(cpB.C) + "," + std::to_string(cpB.D));
+
+    double aIg298 = 0, bIg298 = 0, aIg300 = 0, bIg300 = 0, aIg1000 = 0, bIg1000 = 0;
+    bool aIg298Ok = saceJobackIdealGasHeatCapacityJPerMolK(cpA, 298.15, aIg298);
+    bool bIg298Ok = saceJobackIdealGasHeatCapacityJPerMolK(cpB, 298.15, bIg298);
+    bool aIg300Ok = saceJobackIdealGasHeatCapacityJPerMolK(cpA, 300.0, aIg300);
+    bool bIg300Ok = saceJobackIdealGasHeatCapacityJPerMolK(cpB, 300.0, bIg300);
+    bool aIg1000Ok = saceJobackIdealGasHeatCapacityJPerMolK(cpA, 1000.0, aIg1000);
+    bool bIg1000Ok = saceJobackIdealGasHeatCapacityJPerMolK(cpB, 1000.0, bIg1000);
+    emit("a_cpig_298_15", aIg298Ok && nearK(aIg298, 64.6209, 0.005), std::to_string(aIg298));
+    emit("b_cpig_298_15", bIg298Ok && nearK(bIg298, 66.7131, 0.005), std::to_string(bIg298));
+    emit("a_cpig_300", aIg300Ok && nearK(aIg300, 64.9258, 0.005), std::to_string(aIg300));
+    emit("b_cpig_300", bIg300Ok && nearK(bIg300, 66.9626, 0.005), std::to_string(bIg300));
+    emit("a_cpig_1000", aIg1000Ok && nearK(aIg1000, 141.181, 0.02), std::to_string(aIg1000));
+    emit("b_cpig_1000", bIg1000Ok && nearK(bIg1000, 141.010, 0.02), std::to_string(bIg1000));
+
+    double rejectedCp = 0.0;
+    emit("cpig_rejects_below_298",
+        !saceJobackIdealGasHeatCapacityJPerMolK(cpA, 297.0, rejectedCp) && rejectedCp == 0.0, "");
+    emit("cpig_rejects_above_1000",
+        !saceJobackIdealGasHeatCapacityJPerMolK(cpA, 1000.01, rejectedCp) && rejectedCp == 0.0, "");
+    emit("cpig_rejects_nan_inf",
+        !saceJobackIdealGasHeatCapacityJPerMolK(cpA, nanH, rejectedCp)
+            && !saceJobackIdealGasHeatCapacityJPerMolK(cpA, infH, rejectedCp), "");
+
+    SaceRowlinsonPolingLiquidCpModel liqA{}, liqB{};
+    emit("a_rowlinson_poling_model_builds",
+        saceBuildRowlinsonPolingLiquidCpModelFromJoback(gA, bunA, liqA) && liqA.valid, "");
+    emit("b_rowlinson_poling_model_builds",
+        saceBuildRowlinsonPolingLiquidCpModelFromJoback(gB, bunB, liqB) && liqB.valid, "");
+
+    double aL298 = 0, bL298 = 0;
+    bool aL298Ok = saceRowlinsonPolingLiquidHeatCapacityJPerMolK(liqA, 298.15, aL298);
+    bool bL298Ok = saceRowlinsonPolingLiquidHeatCapacityJPerMolK(liqB, 298.15, bL298);
+    emit("a_cpl_298_15", aL298Ok && nearK(aL298, 148.729, 0.02), std::to_string(aL298));
+    emit("b_cpl_298_15", bL298Ok && nearK(bL298, 112.315, 0.02), std::to_string(bL298));
+
+    double aT08 = 0.8 * liqA.criticalTemperatureK;
+    double bT08 = 0.8 * liqB.criticalTemperatureK;
+    double aL08 = 0, bL08 = 0, aL09 = 0, bL09 = 0;
+    bool aL08Ok = saceRowlinsonPolingLiquidHeatCapacityJPerMolK(liqA, aT08, aL08);
+    bool bL08Ok = saceRowlinsonPolingLiquidHeatCapacityJPerMolK(liqB, bT08, bL08);
+    bool aL09Ok = saceRowlinsonPolingLiquidHeatCapacityJPerMolK(liqA, 0.9 * liqA.criticalTemperatureK, aL09);
+    bool bL09Ok = saceRowlinsonPolingLiquidHeatCapacityJPerMolK(liqB, 0.9 * liqB.criticalTemperatureK, bL09);
+    emit("a_cpl_tr_0_8",
+        nearK(aT08, 399.526, 0.05) && aL08Ok && nearK(aL08, 165.084, 0.05),
+        std::to_string(aL08));
+    emit("b_cpl_tr_0_8",
+        nearK(bT08, 342.539, 0.05) && bL08Ok && nearK(bL08, 124.050, 0.05),
+        std::to_string(bL08));
+    emit("a_cpl_tr_0_9", aL09Ok && nearK(aL09, 196.342, 0.05), std::to_string(aL09));
+    emit("b_cpl_tr_0_9", bL09Ok && nearK(bL09, 151.428, 0.05), std::to_string(bL09));
+
+    emit("liquid_cp_rejects_tr_ge_0_98",
+        !saceRowlinsonPolingLiquidHeatCapacityJPerMolK(liqA,
+            kSaceLiquidCpTrReject * liqA.criticalTemperatureK, rejectedCp), "");
+    emit("liquid_cp_rejects_t_ge_tc",
+        !saceRowlinsonPolingLiquidHeatCapacityJPerMolK(liqA, liqA.criticalTemperatureK, rejectedCp)
+            && !saceRowlinsonPolingLiquidHeatCapacityJPerMolK(liqA,
+                liqA.criticalTemperatureK + 1.0, rejectedCp), "");
+    SaceRowlinsonPolingLiquidCpModel invalidLiq{};
+    emit("liquid_cp_rejects_invalid_model",
+        !saceRowlinsonPolingLiquidHeatCapacityJPerMolK(invalidLiq, 298.15, rejectedCp), "");
+
+    double aGasSpec = 0, bGasSpec = 0, aLiqSpec = 0, bLiqSpec = 0;
+    bool aGasSpecOk = saceMolarHeatCapacityToSpecificJPerKgK(aIg298, 0.046069, aGasSpec);
+    bool bGasSpecOk = saceMolarHeatCapacityToSpecificJPerKgK(bIg298, 0.046069, bGasSpec);
+    bool aLiqSpecOk = saceMolarHeatCapacityToSpecificJPerKgK(aL298, 0.046069, aLiqSpec);
+    bool bLiqSpecOk = saceMolarHeatCapacityToSpecificJPerKgK(bL298, 0.046069, bLiqSpec);
+    emit("a_gas_specific_cp_298_15",
+        aGasSpecOk && nearK(aGasSpec, 1402.70, 0.5), std::to_string(aGasSpec));
+    emit("b_gas_specific_cp_298_15",
+        bGasSpecOk && nearK(bGasSpec, 1448.11, 0.5), std::to_string(bGasSpec));
+    emit("a_liquid_specific_cp_298_15",
+        aLiqSpecOk && nearK(aLiqSpec, 3228.40, 1.0), std::to_string(aLiqSpec));
+    emit("b_liquid_specific_cp_298_15",
+        bLiqSpecOk && nearK(bLiqSpec, 2437.97, 1.0), std::to_string(bLiqSpec));
+
+    emit("cp_reference_structural_estimate_low",
+        bunA.idealGasHeatCapacityAt298KJPerMolK.source == SacePropertySource::StructuralEstimate
+            && bunA.idealGasHeatCapacityAt298KJPerMolK.confidence == SaceConfidence::Low
+            && bunA.saturatedLiquidHeatCapacityAt298KJPerMolK.source == SacePropertySource::StructuralEstimate
+            && bunA.saturatedLiquidHeatCapacityAt298KJPerMolK.confidence == SaceConfidence::Low
+            && bunB.idealGasHeatCapacityAt298KJPerMolK.source == SacePropertySource::StructuralEstimate
+            && bunB.saturatedLiquidHeatCapacityAt298KJPerMolK.source == SacePropertySource::StructuralEstimate
+            && recA && recA->properties.idealGasHeatCapacityAt298KJPerMolK.source
+                == SacePropertySource::StructuralEstimate
+            && recA->properties.idealGasHeatCapacityAt298KJPerMolK.confidence == SaceConfidence::Low
+            && recB && recB->properties.saturatedLiquidHeatCapacityAt298KJPerMolK.source
+                == SacePropertySource::StructuralEstimate, "");
+
+    auto cpModelMatches = [&](SaceJobackIdealGasCpModel const &x, SaceJobackIdealGasCpModel const &y) {
+        return x.valid && y.valid
+            && nearK(x.A, y.A, 1e-9) && nearK(x.B, y.B, 1e-9)
+            && nearK(x.C, y.C, 1e-12) && nearK(x.D, y.D, 1e-14);
+    };
+    SaceJobackIdealGasCpModel permCp{}, bondCp{}, endCp{};
+    SaceRowlinsonPolingLiquidCpModel permLiq{}, bondLiq{}, endLiq{};
+    double permIg = 0, permL = 0, bondIg = 0, bondL = 0, endIg = 0, endL = 0;
+    emit("atom_permutation_preserves_cp",
+        saceBuildJobackIdealGasCpModel(permB.groups, permCp)
+            && cpModelMatches(cpA, permCp)
+            && saceBuildRowlinsonPolingLiquidCpModelFromJoback(permuteGraph(gA), permB, permLiq)
+            && saceJobackIdealGasHeatCapacityJPerMolK(permCp, 298.15, permIg)
+            && saceRowlinsonPolingLiquidHeatCapacityJPerMolK(permLiq, 298.15, permL)
+            && nearK(permIg, aIg298, 1e-9) && nearK(permL, aL298, 1e-6), "");
+    emit("bond_reorder_preserves_cp",
+        saceBuildJobackIdealGasCpModel(bondB.groups, bondCp)
+            && cpModelMatches(cpA, bondCp)
+            && saceBuildRowlinsonPolingLiquidCpModelFromJoback(reorderBonds(gA), bondB, bondLiq)
+            && saceJobackIdealGasHeatCapacityJPerMolK(bondCp, 298.15, bondIg)
+            && saceRowlinsonPolingLiquidHeatCapacityJPerMolK(bondLiq, 298.15, bondL)
+            && nearK(bondIg, aIg298, 1e-9) && nearK(bondL, aL298, 1e-6), "");
+    emit("reversed_endpoints_preserve_cp",
+        saceBuildJobackIdealGasCpModel(endB.groups, endCp)
+            && cpModelMatches(cpA, endCp)
+            && saceBuildRowlinsonPolingLiquidCpModelFromJoback(reverseEnds(gA), endB, endLiq)
+            && saceJobackIdealGasHeatCapacityJPerMolK(endCp, 298.15, endIg)
+            && saceRowlinsonPolingLiquidHeatCapacityJPerMolK(endLiq, 298.15, endL)
+            && nearK(endIg, aIg298, 1e-9) && nearK(endL, aL298, 1e-6), "");
+
+    emit("water_no_joback_cp",
+        !waterB.idealGasHeatCapacityAt298KJPerMolK.known
+            && !waterB.saturatedLiquidHeatCapacityAt298KJPerMolK.known, "");
+    emit("methane_no_joback_cp",
+        !methaneB.idealGasHeatCapacityAt298KJPerMolK.known
+            && !methaneB.saturatedLiquidHeatCapacityAt298KJPerMolK.known, "");
+    emit("cp_not_in_canonical_identity",
+        std::strstr(sig, "64.62") == nullptr && std::strstr(sig, "Cp") == nullptr
+            && std::strstr(sig, "Rowlinson") == nullptr && std::strstr(sig, "heat") == nullptr, sig);
+
+    emit("catalog_cp_matches_direct_evaluation",
+        recA && recB
+            && nearK(recA->properties.idealGasHeatCapacityAt298KJPerMolK.value, aIg298, 0.05)
+            && nearK(recA->properties.saturatedLiquidHeatCapacityAt298KJPerMolK.value, aL298, 0.05)
+            && nearK(recB->properties.idealGasHeatCapacityAt298KJPerMolK.value, bIg298, 0.05)
+            && nearK(recB->properties.saturatedLiquidHeatCapacityAt298KJPerMolK.value, bL298, 0.05)
+            && nearK(bunA.idealGasHeatCapacityAt298KJPerMolK.value, aIg298, 0.05)
+            && nearK(bunA.saturatedLiquidHeatCapacityAt298KJPerMolK.value, aL298, 0.05), "");
+
+    SaceGeneratedRecord *mutCp = cat.recordMutable(refA.generatedId);
+    if (mutCp) {
+        mutCp->properties.idealGasHeatCapacityAt298KJPerMolK = saceUnknownScalarProperty();
+        mutCp->properties.saturatedLiquidHeatCapacityAt298KJPerMolK = saceUnknownScalarProperty();
+    }
+    bool reattachCp = cat.attachMolecularGraph(refA.generatedId, "synthetic-structure-a", gA);
+    recA = cat.record(refA.generatedId);
+    emit("same_graph_reattach_backfills_cp",
+        reattachCp && recA
+            && recA->properties.idealGasHeatCapacityAt298KJPerMolK.known
+            && recA->properties.saturatedLiquidHeatCapacityAt298KJPerMolK.known
+            && recA->properties.idealGasHeatCapacityAt298KJPerMolK.source
+                == SacePropertySource::StructuralEstimate
+            && recA->properties.saturatedLiquidHeatCapacityAt298KJPerMolK.source
+                == SacePropertySource::StructuralEstimate
+            && nearK(recA->properties.idealGasHeatCapacityAt298KJPerMolK.value, aIg298, 0.05)
+            && nearK(recA->properties.saturatedLiquidHeatCapacityAt298KJPerMolK.value, aL298, 0.05), "");
+
+    SaceGeneratedRecord *mutCpRef = cat.recordMutable(refA.generatedId);
+    if (mutCpRef) {
+        mutCpRef->properties.idealGasHeatCapacityAt298KJPerMolK.known = true;
+        mutCpRef->properties.idealGasHeatCapacityAt298KJPerMolK.value = 65.0f;
+        mutCpRef->properties.idealGasHeatCapacityAt298KJPerMolK.source = SacePropertySource::Reference;
+        mutCpRef->properties.idealGasHeatCapacityAt298KJPerMolK.confidence = SaceConfidence::High;
+        mutCpRef->properties.saturatedLiquidHeatCapacityAt298KJPerMolK.known = true;
+        mutCpRef->properties.saturatedLiquidHeatCapacityAt298KJPerMolK.value = 112.0f;
+        mutCpRef->properties.saturatedLiquidHeatCapacityAt298KJPerMolK.source = SacePropertySource::Reference;
+        mutCpRef->properties.saturatedLiquidHeatCapacityAt298KJPerMolK.confidence = SaceConfidence::High;
+    }
+    bool reattachCpKeep = cat.attachMolecularGraph(refA.generatedId, "synthetic-structure-a", gA);
+    recA = cat.record(refA.generatedId);
+    emit("same_graph_backfill_preserves_reference_high_cp",
+        reattachCpKeep && recA
+            && recA->properties.idealGasHeatCapacityAt298KJPerMolK.source == SacePropertySource::Reference
+            && recA->properties.idealGasHeatCapacityAt298KJPerMolK.confidence == SaceConfidence::High
+            && recA->properties.saturatedLiquidHeatCapacityAt298KJPerMolK.source
+                == SacePropertySource::Reference
+            && recA->properties.saturatedLiquidHeatCapacityAt298KJPerMolK.confidence
+                == SaceConfidence::High
+            && nearK(recA->properties.idealGasHeatCapacityAt298KJPerMolK.value, 65.0, 0.02)
+            && nearK(recA->properties.saturatedLiquidHeatCapacityAt298KJPerMolK.value, 112.0, 0.02), "");
+    emit("generated_record_still_unspawnable_after_cp", recA && !recA->spawnable, "");
 
     cat.clear();
     out << "summary\t" << (failed == 0 ? "PASS" : "FAIL") << '\t' << passed << " passed, "
