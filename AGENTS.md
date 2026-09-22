@@ -55,7 +55,7 @@ PIPACE/
     SaceMolecule.h/.cpp                        # Phase 4 small-molecule graphs (not canonical identity)
     SaceDescriptors.h/.cpp                     # Phase 5 trusted graph binding helpers + structural descriptors
     SaceFunctional.h/.cpp                      # Phase 6 H/C/O functional motifs (not identity, not properties)
-    SaceEstimation.h/.cpp                      # Phase 7–11 Joback Tb/Tc/Pc/Vc/Hvap/Cp + Lee-Kesler/Watson/Rowlinson-Poling (StructuralEstimate/Low)
+    SaceEstimation.h/.cpp                      # Phase 7–12 Joback Tb/Tc/Pc/Vc/Hvap/Cp + Lee-Kesler/Watson/Rowlinson-Poling/COSTALD (StructuralEstimate/Low)
   sim/
     SimulationQuality.h/.cpp                   # SimulationQualityProfile + tick scheduler
   docs/
@@ -103,6 +103,8 @@ SACE Phase 9 (`chemistry/SaceEstimation`) adds a Lee–Kesler (1975) acentric fa
 SACE Phase 10 extends the same Joback subset with enthalpy of vaporization at Tb (`ΔHvap [kJ/mol] = 15.30 + SUM(groups)`, stored as J/mol) and Watson temperature scaling with exponent 0.38. The Watson model is built from one Joback bundle plus identity-derived molar mass, not mixed stored properties. Hvap(Tc) = 0. Values below Tb are extrapolations; generated melting/triple-point stability is unknown. J/kg conversion is a helper, not a stored scalar. Not live `PhaseChangeEngine` latent heat.
 
 SACE Phase 11 adds Joback–Reid ideal-gas Cp(T) = A+BT+CT²+DT³ (298–1000 K, no extrapolation) and Rowlinson–Poling saturated-liquid Cp from the same coherent Joback Cp + Joback Tc + Lee–Kesler omega. Liquid Cp fails closed at Tr ≥ 0.98. Alcohols (C2H6O Graph A) are a difficult associating case; no empirical correction. 298.15 K molar reference scalars are `StructuralEstimate` / `Low`. Mass-specific Cp is J/mol/K divided by kg/mol, not a stored scalar. Not live `ThermalEngine` / `specificHeat` / `gasSpecificHeat`. Unsupported chemistry stays Unknown.
+
+SACE Phase 12 adds COSTALD saturated-liquid molar volume Vs(T) and density rho(T) = M / Vs (`StructuralEstimate` / `Low`). Inputs are one coherent Joback path: Joback Tc, Joback Vc used as characteristic-volume V* fallback (not fitted COSTALD V*), SACE Lee–Kesler omega (not fitted omega_SRK), and identity-derived kg/mol. Strict domain `0.25 < Tr < 0.95`; no clamp or extrapolation. Result is saturation density at Psat(T), not compressed-liquid rho(T,P) and not `FluidProperties::density` (sandbox-relative water=1). Joback Vc is not ambient liquid molar volume. Store only 298.15 K kg/m³ when that T is in range. No alcohol correction. Not live FluidEngine.
 
 These mappings are **implementation, not laws**:
 
@@ -263,7 +265,9 @@ omega and Psat(T) from the same Joback Tb/Tc/Pc tuple; it is not live phase
 integration. **SACE Phase 10** adds Joback ΔHvap(Tb) (stored J/mol) and Watson
 Hvap(T) with exponent 0.38; it is not live latent-heat physics. **SACE Phase 11**
 adds Joback ideal-gas Cp(T) (298–1000 K) and Rowlinson–Poling liquid Cp; it is
-not live ThermalEngine data. Live `Liquid ⇄ Gas` and `Solid ⇄ Liquid` are generic by
+not live ThermalEngine data. **SACE Phase 12** adds COSTALD saturated-liquid
+Vs(T)/rho(T) with Joback Vc as V* fallback; it is not live FluidEngine density.
+Live `Liquid ⇄ Gas` and `Solid ⇄ Liquid` are generic by
 SubstanceId (`world/PhaseChangeEngine.cpp`). Honey mixtures still skip phase
 change. Runtime-generated world matter, reaction families, graph isomorphism,
 and broader property estimates are not started.

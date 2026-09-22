@@ -178,4 +178,47 @@ test	catalog_cp_matches_direct_evaluation	PASS
 test	same_graph_reattach_backfills_cp	PASS	
 test	same_graph_backfill_preserves_reference_high_cp	PASS	
 test	generated_record_still_unspawnable_after_cp	PASS	
-summary	PASS	180 passed, 0 failed
+test	a_costald_model_builds	PASS	
+test	b_costald_model_builds	PASS	
+test	a_costald_tc	PASS	499.407379
+test	a_costald_vstar	PASS	0.000167
+test	a_costald_omega	PASS	0.556081
+test	a_costald_molar_mass	PASS	0.046069
+test	b_costald_inputs	PASS	428.173981
+test	a_costald_tr_298_15	PASS	0.597008
+test	b_costald_tr_298_15	PASS	0.696329
+test	a_vs_298_15	PASS	0.000056
+test	a_rho_298_15	PASS	821.661603
+test	b_vs_298_15	PASS	0.000066
+test	b_rho_298_15	PASS	699.912284
+test	a_density_gt_b_at_298_15	PASS	
+test	a_costald_tr_0_6	PASS	819.755869
+test	a_costald_tr_0_7	PASS	752.926455
+test	a_costald_tr_0_8	PASS	676.840392
+test	a_costald_tr_0_9	PASS	580.556543
+test	b_costald_tr_0_6	PASS	754.629010
+test	b_costald_tr_0_7	PASS	697.692883
+test	b_costald_tr_0_8	PASS	631.540111
+test	b_costald_tr_0_9	PASS	545.628477
+test	a_sampled_density_decreases_with_t	PASS	
+test	b_sampled_density_decreases_with_t	PASS	
+test	costald_rejects_tr_le_0_25	PASS	
+test	costald_rejects_tr_ge_0_95	PASS	
+test	costald_rejects_nonpositive_t	PASS	
+test	costald_rejects_nan_inf	PASS	
+test	costald_rejects_invalid_model	PASS	
+test	costald_density_rejects_invalid_molar_mass	PASS	
+test	atom_permutation_preserves_costald	PASS	
+test	bond_reorder_preserves_costald	PASS	
+test	reversed_endpoints_preserve_costald	PASS	
+test	catalog_a_density_matches_direct	PASS	
+test	catalog_b_density_matches_direct	PASS	
+test	density_structural_estimate_low	PASS	
+test	water_no_costald_density	PASS	
+test	methane_no_costald_density	PASS	
+test	density_not_in_canonical_identity	PASS	molecule|1:2,8:1|water
+test	costald_not_in_canonical_identity	PASS	molecule|1:2,8:1|water
+test	same_graph_reattach_backfills_density	PASS	
+test	same_graph_backfill_preserves_reference_high_density	PASS	
+test	generated_record_still_unspawnable_after_density	PASS	
+summary	PASS	223 passed, 0 failed

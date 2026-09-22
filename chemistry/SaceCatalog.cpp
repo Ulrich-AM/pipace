@@ -60,6 +60,8 @@ void SaceCatalog::applyStructuralThermoEstimates(SaceGeneratedRecord &record,
         bundle.idealGasHeatCapacityAt298KJPerMolK);
     saceAssignScalarProperty(record.properties.saturatedLiquidHeatCapacityAt298KJPerMolK,
         bundle.saturatedLiquidHeatCapacityAt298KJPerMolK);
+    saceAssignScalarProperty(record.properties.saturatedLiquidDensityAt298KKgPerM3,
+        bundle.saturatedLiquidDensityAt298KKgPerM3);
 }
 
 ChemicalIdentity SaceCatalog::identityView(SaceGeneratedRecord const &rec) const {

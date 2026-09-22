@@ -41,4 +41,7 @@ test	structural_estimate_low_does_not_overwrite_reference_high_gas_cp	PASS
 test	reference_high_overwrites_structural_estimate_low_gas_cp	PASS	
 test	structural_estimate_low_does_not_overwrite_reference_high_liquid_cp	PASS	
 test	reference_high_overwrites_structural_estimate_low_liquid_cp	PASS	
-summary	PASS	43 passed, 0 failed
+test	saturated_liquid_density_298_defaults_unknown	PASS	
+test	structural_estimate_low_does_not_overwrite_reference_high_density	PASS	
+test	reference_high_overwrites_structural_estimate_low_density	PASS	
+summary	PASS	46 passed, 0 failed
