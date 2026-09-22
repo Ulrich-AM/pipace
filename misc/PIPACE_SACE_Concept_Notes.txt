@@ -820,6 +820,21 @@ Implemented under chemistry/SaceEstimation.* :
 - Not FluidProperties::density (sandbox-relative water=1). Not live FluidEngine.
 - Alcohols (Graph A) have no associating correction.
 
+PHASE 13 LANDING (GENERATED SIMULATION READINESS)
+=================================================
+Implemented under chemistry/SaceSimulationReadiness.* :
+
+- Computed preflight for generated SACE records. Not identity. Not stored on the record.
+- Distinguishes gas/liquid thermo-ready and liquid-gas equilibrium from live engine-ready.
+- Graph A/B: thermo-ready (mass, Psat, Hvap, Cp_g, Cp_L, rho_L). Not live-ready.
+- Live blockers: liquid viscosity, liquid surface tension, liquid k, gas k.
+- Do not invent Water/Honey/Air transport or conductivity fallbacks.
+- Built-in ThermalProperties has one general conductivity; readiness still names
+  liquid vs gas k separately for a later compiler. Do not add those fields yet.
+- Physical SACE kg/m3 is not FluidProperties sandbox-relative density.
+- Not for physics ticks. Generated records remain unspawnable. No SubstanceId.
+
+
 
 
 

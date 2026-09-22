@@ -1,0 +1,33 @@
+test	a_assessment_succeeds	PASS	
+test	a_gas_thermo_ready	PASS	
+test	a_liquid_thermo_ready	PASS	
+test	a_liquid_gas_equilibrium_ready	PASS	
+test	a_live_gas_not_ready	PASS	
+test	a_live_liquid_not_ready	PASS	
+test	a_live_phase_change_not_ready	PASS	
+test	a_missing_gas_conductivity	PASS	
+test	a_missing_liquid_conductivity	PASS	
+test	a_missing_liquid_viscosity	PASS	
+test	a_missing_liquid_surface_tension	PASS	
+test	b_gas_thermo_ready	PASS	
+test	b_liquid_thermo_ready	PASS	
+test	b_liquid_gas_equilibrium_ready	PASS	
+test	b_live_gas_not_ready	PASS	
+test	b_live_liquid_not_ready	PASS	
+test	b_live_phase_change_not_ready	PASS	
+test	b_missing_gas_conductivity	PASS	
+test	b_missing_liquid_conductivity	PASS	
+test	b_missing_liquid_viscosity	PASS	
+test	b_missing_liquid_surface_tension	PASS	
+test	a_b_readiness_class_matches	PASS	
+test	a_b_numerical_properties_differ	PASS	
+test	unsupported_not_thermo_ready	PASS	
+test	unsupported_not_live_ready	PASS	
+test	missing_mask_helper_works	PASS	
+test	requirement_keys_stable	PASS	
+test	readiness_does_not_alter_signature	PASS	molecule|1:6,6:2,8:1|synthetic-structure-a
+test	readiness_does_not_alter_record_id	PASS	
+test	readiness_does_not_alter_display_ordinal	PASS	
+test	generated_record_unspawnable	PASS	
+test	substance_count_remains_12	PASS	12
+summary	PASS	32 passed, 0 failed
