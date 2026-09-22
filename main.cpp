@@ -389,39 +389,6 @@ void handleMenuCommand(ui::MenuCmd cmd) {
         case MenuCmd::Speed3: case MenuCmd::Speed4: case MenuCmd::Speed5:
             speedScaleIndex = static_cast<size_t>(static_cast<int>(cmd) - static_cast<int>(MenuCmd::Speed0));
             break;
-        case MenuCmd::Scene1: case MenuCmd::Scene2: case MenuCmd::Scene3: case MenuCmd::Scene4: case MenuCmd::Scene5:
-        case MenuCmd::Scene6: case MenuCmd::Scene7: case MenuCmd::Scene8: case MenuCmd::Scene9: case MenuCmd::Scene10:
-            rigid.clear();
-            engine.loadTestScene(static_cast<int>(cmd) - static_cast<int>(MenuCmd::Scene1) + 1);
-            gas.resetAmbient(engine);
-            thermal.seedAmbient(engine, rigid, gas);
-            reactions.clearActivity();
-            simSchedule.reset();
-            shell.log(ui::tr("log_fluid_scene"));
-            break;
-        case MenuCmd::Rigid1: case MenuCmd::Rigid2: case MenuCmd::Rigid3: case MenuCmd::Rigid4: case MenuCmd::Rigid5:
-        case MenuCmd::Rigid6: case MenuCmd::Rigid7: case MenuCmd::Rigid8: case MenuCmd::Rigid9: case MenuCmd::Rigid10:
-        case MenuCmd::Rigid11: case MenuCmd::Rigid12: case MenuCmd::Rigid13: case MenuCmd::Rigid14: case MenuCmd::Rigid15:
-        case MenuCmd::Rigid16: case MenuCmd::Rigid17: case MenuCmd::Rigid18: case MenuCmd::Rigid19: case MenuCmd::Rigid20:
-        case MenuCmd::Rigid21: case MenuCmd::Rigid22: case MenuCmd::Rigid23: case MenuCmd::Rigid24:
-        case MenuCmd::Rigid25:
-            rigid.gravityScale = (static_cast<int>(cmd) - static_cast<int>(MenuCmd::Rigid1) + 1 == 24) ? 0.0f : 1.0f;
-            rigid.loadTestScene(engine, static_cast<int>(cmd) - static_cast<int>(MenuCmd::Rigid1) + 1);
-            gas.resetAmbient(engine);
-            thermal.seedAmbient(engine, rigid, gas);
-            reactions.clearActivity();
-            simSchedule.reset();
-            shell.log(ui::tr("log_rigid_scene"));
-            break;
-        case MenuCmd::Gas1: case MenuCmd::Gas2: case MenuCmd::Gas3: case MenuCmd::Gas4:
-        case MenuCmd::Gas5: case MenuCmd::Gas6: case MenuCmd::Gas7: case MenuCmd::Gas8:
-            if (gas.config.simMode == GasSimMode::Off) gas.config.simMode = GasSimMode::Full;
-            gas.loadTestScene(engine, rigid, static_cast<int>(cmd) - static_cast<int>(MenuCmd::Gas1) + 1);
-            thermal.seedAmbient(engine, rigid, gas);
-            reactions.clearActivity();
-            simSchedule.reset();
-            shell.log(ui::tr("log_gas_scene"));
-            break;
     }
 }
 

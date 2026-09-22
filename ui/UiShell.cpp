@@ -8,7 +8,6 @@
 
 #include <algorithm>
 #include <cmath>
-#include <cstdio>
 #include <cwchar>
 
 namespace ui {
@@ -147,6 +146,9 @@ void ShellState::ensureFonts() {
     if (!smallFont)
         smallFont = CreateFontW(13, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
             OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, NONANTIALIASED_QUALITY, DEFAULT_PITCH, L"Tahoma");
+    if (!materialFont)
+        materialFont = CreateFontW(11, 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
+            OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, NONANTIALIASED_QUALITY, DEFAULT_PITCH, L"Tahoma");
     if (!consoleFont)
         consoleFont = CreateFontW(14, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
             OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, NONANTIALIASED_QUALITY, FIXED_PITCH, L"Consolas");
@@ -155,6 +157,7 @@ void ShellState::ensureFonts() {
 void ShellState::releaseFonts() {
     if (uiFont) { DeleteObject(uiFont); uiFont = nullptr; }
     if (smallFont) { DeleteObject(smallFont); smallFont = nullptr; }
+    if (materialFont) { DeleteObject(materialFont); materialFont = nullptr; }
     if (consoleFont) { DeleteObject(consoleFont); consoleFont = nullptr; }
     shutdownAssets();
 }
@@ -600,6 +603,7 @@ void drawShell(HDC dc, ShellState &shell, View const &view) {
     if (shell.layout.palCount == 0) {
         drawLabel(dc, insetLike(L.catCol, 6), tr("none_yet"), kDimText, DT_CENTER | DT_TOP | DT_WORDBREAK);
     }
+    SelectObject(dc, shell.materialFont ? shell.materialFont : shell.smallFont);
     for (int i = 0; i < shell.layout.palCount; ++i) {
         PaletteId pid = shell.elementAt(i);
         HitId hid = static_cast<HitId>(static_cast<int>(HitId::Pal0) + i);
@@ -624,8 +628,10 @@ void drawShell(HDC dc, ShellState &shell, View const &view) {
         if (pid == PaletteId::Brush) fill = RGB(70, 110, 150);
         if (pid == PaletteId::Touch) fill = RGB(90, 80, 120);
         drawButton(dc, shell.layout.palSlot[i], shell.paletteName(pid),
-            btnState(shell, hid, shell.paletteSlotSelected(pid)), fill, fill);
+            btnState(shell, hid, shell.paletteSlotSelected(pid)), fill, fill,
+            DT_CENTER | DT_VCENTER | DT_SINGLELINE);
     }
+    SelectObject(dc, shell.uiFont);
 
     fillRect(dc, L.propsCol, kPanel);
     frameRect(dc, L.propsCol, kBorder);
@@ -1445,13 +1451,6 @@ void drawSettingsPanel(HDC dc, ShellState &shell, View const &view, RECT const &
     for (int i = 0; i < 6; ++i)
         button(right0, right1, x, yR, 44, speedNames[i], speedCmds[i], view.speedIndex == static_cast<size_t>(i));
     yR += rowH + 8;
-    x = right0;
-
-    section(right0, right1, yR, tr("sec_scenes"));
-    x = right0;
-    RECT fluidTrigger = button(right0, right1, x, yR, 108, tr("menu_fluid_scenes"), MenuCmd::None, shell.settingsFlyout == SettingsFlyout::FluidScenes);
-    RECT rigidTrigger = button(right0, right1, x, yR, 108, tr("menu_rigid_scenes"), MenuCmd::None, shell.settingsFlyout == SettingsFlyout::RigidScenes);
-    RECT gasTrigger = button(right0, right1, x, yR, 100, tr("menu_gas_scenes"), MenuCmd::None, shell.settingsFlyout == SettingsFlyout::GasScenes);
 
     shell.settingsContentH = std::max(yL, yR) + rowH + 8 - originY;
     RestoreDC(dc, saved);
@@ -1478,24 +1477,12 @@ void drawSettingsPanel(HDC dc, ShellState &shell, View const &view, RECT const &
     }
 
     RECT advBox = flyoutRectFor(advTrigger, 1, 6, 168, 22, client);
-    RECT fluidBox = flyoutRectFor(fluidTrigger, 1, 10, 168, 22, client);
-    RECT rigidBox = flyoutRectFor(rigidTrigger, 2, 13, 148, 22, client);
-    RECT gasBox = flyoutRectFor(gasTrigger, 1, 8, 168, 22, client);
 
     SettingsFlyout want = SettingsFlyout::None;
     if (!shell.settingsDragging && !shell.settingsScrollDragging) {
         bool advVis = visible(advTrigger);
-        bool fluidVis = visible(fluidTrigger);
-        bool rigidVis = visible(rigidTrigger);
-        bool gasVis = visible(gasTrigger);
         if ((advVis && ptIn(advTrigger, shell.mouseX, shell.mouseY)) || (shell.settingsFlyout == SettingsFlyout::Advection && ptIn(advBox, shell.mouseX, shell.mouseY)))
             want = SettingsFlyout::Advection;
-        else if ((fluidVis && ptIn(fluidTrigger, shell.mouseX, shell.mouseY)) || (shell.settingsFlyout == SettingsFlyout::FluidScenes && ptIn(fluidBox, shell.mouseX, shell.mouseY)))
-            want = SettingsFlyout::FluidScenes;
-        else if ((rigidVis && ptIn(rigidTrigger, shell.mouseX, shell.mouseY)) || (shell.settingsFlyout == SettingsFlyout::RigidScenes && ptIn(rigidBox, shell.mouseX, shell.mouseY)))
-            want = SettingsFlyout::RigidScenes;
-        else if ((gasVis && ptIn(gasTrigger, shell.mouseX, shell.mouseY)) || (shell.settingsFlyout == SettingsFlyout::GasScenes && ptIn(gasBox, shell.mouseX, shell.mouseY)))
-            want = SettingsFlyout::GasScenes;
     }
     shell.settingsFlyout = want;
 
@@ -1511,57 +1498,12 @@ void drawSettingsPanel(HDC dc, ShellState &shell, View const &view, RECT const &
         };
         shell.settingsFlyoutRc = advBox;
         drawFlyoutList(dc, shell, advBox, items, 6, 1, 168, 22);
-    } else if (want == SettingsFlyout::FluidScenes) {
-        FlyItem items[10];
-        MenuCmd cmds[10] = {
-            MenuCmd::Scene1, MenuCmd::Scene2, MenuCmd::Scene3, MenuCmd::Scene4, MenuCmd::Scene5,
-            MenuCmd::Scene6, MenuCmd::Scene7, MenuCmd::Scene8, MenuCmd::Scene9, MenuCmd::Scene10
-        };
-        char key[24];
-        for (int i = 0; i < 10; ++i) {
-            std::snprintf(key, sizeof(key), "fluid_scene_%d", i + 1);
-            items[i] = {tr(key), cmds[i], false};
-        }
-        shell.settingsFlyoutRc = fluidBox;
-        drawFlyoutList(dc, shell, fluidBox, items, 10, 1, 168, 22);
-    } else if (want == SettingsFlyout::RigidScenes) {
-        FlyItem items[25];
-        MenuCmd cmds[25] = {
-            MenuCmd::Rigid1, MenuCmd::Rigid2, MenuCmd::Rigid3, MenuCmd::Rigid4, MenuCmd::Rigid5,
-            MenuCmd::Rigid6, MenuCmd::Rigid7, MenuCmd::Rigid8, MenuCmd::Rigid9, MenuCmd::Rigid10,
-            MenuCmd::Rigid11, MenuCmd::Rigid12, MenuCmd::Rigid13, MenuCmd::Rigid14, MenuCmd::Rigid15,
-            MenuCmd::Rigid16, MenuCmd::Rigid17, MenuCmd::Rigid18, MenuCmd::Rigid19, MenuCmd::Rigid20,
-            MenuCmd::Rigid21, MenuCmd::Rigid22, MenuCmd::Rigid23, MenuCmd::Rigid24, MenuCmd::Rigid25
-        };
-        char key[24];
-        for (int i = 0; i < 25; ++i) {
-            std::snprintf(key, sizeof(key), "rigid_scene_%d", i + 1);
-            items[i] = {tr(key), cmds[i], false};
-        }
-        shell.settingsFlyoutRc = rigidBox;
-        drawFlyoutList(dc, shell, rigidBox, items, 25, 2, 148, 22);
-    } else if (want == SettingsFlyout::GasScenes) {
-        FlyItem items[8];
-        MenuCmd cmds[8] = {
-            MenuCmd::Gas1, MenuCmd::Gas2, MenuCmd::Gas3, MenuCmd::Gas4,
-            MenuCmd::Gas5, MenuCmd::Gas6, MenuCmd::Gas7, MenuCmd::Gas8
-        };
-        char key[24];
-        for (int i = 0; i < 8; ++i) {
-            std::snprintf(key, sizeof(key), "gas_scene_%d", i + 1);
-            items[i] = {tr(key), cmds[i], false};
-        }
-        shell.settingsFlyoutRc = gasBox;
-        drawFlyoutList(dc, shell, gasBox, items, 8, 1, 168, 22);
     }
 
     SelectObject(dc, old);
 }
 
 char const *tipKeyForCmd(MenuCmd cmd) {
-    if (cmd >= MenuCmd::Scene1 && cmd <= MenuCmd::Scene10) return "tip_fluid_scene";
-    if (cmd >= MenuCmd::Rigid1 && cmd <= MenuCmd::Rigid25) return "tip_rigid_scene";
-    if (cmd >= MenuCmd::Gas1 && cmd <= MenuCmd::Gas8) return "tip_gas_scene";
     if (cmd >= MenuCmd::Speed0 && cmd <= MenuCmd::Speed5) return "tip_speed";
     if (cmd >= MenuCmd::Threads1 && cmd <= MenuCmd::Threads8) return "tip_threads";
     switch (cmd) {

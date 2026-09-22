@@ -78,7 +78,8 @@ constexpr COLORREF kViewGas = RGB(132, 136, 142);
 constexpr COLORREF kViewGasSel = RGB(168, 172, 178);
 
 inline void drawButton(HDC dc, RECT const &rc, wchar_t const *label, BtnState state,
-    COLORREF fill = kBtn, COLORREF selFill = kBtnSel) {
+    COLORREF fill = kBtn, COLORREF selFill = kBtnSel,
+    UINT textFmt = DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS) {
     COLORREF bg = fill;
     if (state == BtnState::Hover) {
         int r = GetRValue(fill), g = GetGValue(fill), b = GetBValue(fill);
@@ -90,7 +91,7 @@ inline void drawButton(HDC dc, RECT const &rc, wchar_t const *label, BtnState st
     frameRect(dc, rc, state == BtnState::Selected ? kBorder : kBorderDim);
     COLORREF old = SetTextColor(dc, state == BtnState::Disabled ? kDimText : kText);
     int oldBk = SetBkMode(dc, TRANSPARENT);
-    DrawTextW(dc, label, -1, const_cast<RECT *>(&rc), DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+    DrawTextW(dc, label, -1, const_cast<RECT *>(&rc), textFmt);
     SetTextColor(dc, old);
     SetBkMode(dc, oldBk);
 }

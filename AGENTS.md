@@ -187,7 +187,7 @@ Hybrid free-surface solver:
 - Surface field (smoothed fill, normals, curvature), surface tension, ballistic splash particles
 - Optional vorticity confinement (`O`)
 - 16×16 chunk wake/sleep; active solve region + halo
-- Volume / momentum / KE diagnostics; F1–F10 test scenes; stage timings
+- Volume / momentum / KE diagnostics; internal F1–F10 diagnostic fixtures (not player-facing); stage timings
 - `FluidConfig.walledBorders` also gates thermal exchange with an infinite ambient
   reservoir at `AMBIENT_TEMPERATURE_K` (no separate thermal-border toggle). Gas
   mass-carried heat stays on `GasEngine::escapedHeat`.
