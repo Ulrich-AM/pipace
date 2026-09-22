@@ -6,10 +6,11 @@
 
 #include <cstdint>
 
-// SACE Phase 7/8/9: Joback-Reid 1987 subset + Lee-Kesler vapor metadata.
+// SACE Phase 7–10: Joback-Reid 1987 subset + Lee-Kesler Psat + Watson Hvap.
 // Phase 7: Tb[K] = 198.2 + SUM(Tb groups).
 // Phase 8: Tc, Pc, Vc from the same six groups and the Joback Tb (not stored Tb).
 // Phase 9: Lee-Kesler omega and Psat(T) from the same Joback Tb/Tc/Pc tuple.
+// Phase 10: Joback ΔHvap(Tb) [J/mol] + Watson Hvap(T). Not live phase physics.
 // StructuralEstimate / Low. Unsupported chemistry stays Unknown.
 // Not canonical identity. Not live PhaseProperties. Do not call from physics ticks.
 //
@@ -50,6 +51,16 @@ constexpr double kJobackVcInterceptCm3 = 17.5;
 constexpr double kJobackBarToPa = 100000.0;
 constexpr double kJobackCm3ToM3 = 1.0e-6;
 
+constexpr double kJobackHvapInterceptKJPerMol = 15.30;
+constexpr double kJobackHvapCH3KJPerMol = 2.373;
+constexpr double kJobackHvapCH2KJPerMol = 2.226;
+constexpr double kJobackHvapCHKJPerMol = 1.691;
+constexpr double kJobackHvapCKJPerMol = 0.636;
+constexpr double kJobackHvapAlcoholOHKJPerMol = 16.826;
+constexpr double kJobackHvapEtherOKJPerMol = 2.410;
+constexpr double kJobackKJToJ = 1000.0;
+constexpr double kWatsonHvapExponent = 0.38;
+
 enum class SaceJobackGroup : uint8_t {
     CarbonCH3 = 0,
     CarbonCH2,
@@ -75,6 +86,7 @@ struct SaceJobackEstimateBundle {
     SaceScalarProperty criticalPressurePa{};
     SaceScalarProperty criticalMolarVolumeM3PerMol{};
     SaceScalarProperty acentricFactor{};
+    SaceScalarProperty enthalpyVaporizationAtNormalBoilingJPerMol{};
 };
 
 // Lee-Kesler 1975 corresponding-states vapor-pressure model.
@@ -91,6 +103,18 @@ struct SaceLeeKeslerVaporModel {
 };
 
 constexpr double kLeeKeslerAtmPa = 101325.0;
+
+// Watson temperature scaling of Joback ΔHvap(Tb). Coherent structural set only:
+// graph -> one Joback bundle -> Watson model. Not mixed stored properties.
+// Not canonical identity. Not live PhaseChangeEngine. Exponent is 0.38.
+// Values below Tb are mathematical extrapolations, not proof of liquid stability.
+struct SaceWatsonVaporizationModel {
+    double referenceTemperatureK = 0.0;
+    double criticalTemperatureK = 0.0;
+    double referenceEnthalpyJPerMol = 0.0;
+    double molarMassKgPerMol = 0.0;
+    bool valid = false;
+};
 
 enum class SaceJobackFragmentationResult : uint8_t {
     Ok = 0,
@@ -148,6 +172,15 @@ inline double saceJobackVcContributionSumCm3PerMol(SaceJobackGroupCounts const &
         + kJobackVcEtherOCm3 * g.etherNonRing;
 }
 
+inline double saceJobackHvapContributionSumKJPerMol(SaceJobackGroupCounts const &g) {
+    return kJobackHvapCH3KJPerMol * g.carbonCH3
+        + kJobackHvapCH2KJPerMol * g.carbonCH2
+        + kJobackHvapCHKJPerMol * g.carbonCH
+        + kJobackHvapCKJPerMol * g.carbonC
+        + kJobackHvapAlcoholOHKJPerMol * g.hydroxylAlcohol
+        + kJobackHvapEtherOKJPerMol * g.etherNonRing;
+}
+
 SaceJobackFragmentationResult saceFragmentJobackGroups(
     SaceMolecularGraph const &graph, SaceJobackGroupCounts &counts);
 
@@ -171,5 +204,20 @@ bool saceLeeKeslerSaturationPressurePa(
 bool saceBuildLeeKeslerVaporModelFromJoback(
     SaceJobackEstimateBundle const &bundle,
     SaceLeeKeslerVaporModel &out);
+
+bool saceBuildWatsonVaporizationModelFromJoback(
+    SaceMolecularGraph const &graph,
+    SaceJobackEstimateBundle const &bundle,
+    SaceWatsonVaporizationModel &out);
+
+bool saceWatsonEnthalpyVaporizationJPerMol(
+    SaceWatsonVaporizationModel const &model,
+    double temperatureK,
+    double &outJPerMol);
+
+bool saceWatsonLatentHeatVaporizationJPerKg(
+    SaceWatsonVaporizationModel const &model,
+    double temperatureK,
+    double &outJPerKg);
 
 void runSaceEstimationDiagnostics();
