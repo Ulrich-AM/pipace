@@ -77,7 +77,7 @@ void seedEnglish() {
     set("el_hydrogen", L"HYDROGEN");
     set("el_oxygen", L"OXYGEN");
     set("el_carbon", L"CARBON");
-    set("el_carbon_dioxide", L"CARBON DIOXIDE");
+    set("el_carbon_dioxide", L"CO2");
 
     set("hint_water", L"Free-surface liquid. Paint into the world. Shift+drag previews a straight line; release to place.");
     set("hint_honey", L"Thicker, denser liquid. Mixes with water. Dye it from Properties. Shift+drag previews a straight line; release to place.");
@@ -194,7 +194,7 @@ void seedEnglish() {
     set("prop_substance_honey", L"Substance: honey");
     set("prop_substance_hydrogen", L"Substance: hydrogen");
     set("prop_substance_oxygen", L"Substance: oxygen");
-    set("prop_substance_carbon_dioxide", L"Substance: carbon dioxide");
+    set("prop_substance_carbon_dioxide", L"CO2");
     set("prop_gases_note", L"Injects into existing air. Ambient air is not oxygen. Mix hydrogen with oxygen, or carbon with oxygen, then heat past ignition.");
     set("prop_fill_paint", L"Fill: paint to 100%");
     set("prop_dye_mode", L"Paint: dye only (no new fill)");
@@ -306,7 +306,7 @@ void seedEnglish() {
     set("ins_mat_hydrogen", L"Hydrogen");
     set("ins_mat_oxygen", L"Oxygen");
     set("ins_mat_carbon", L"Carbon");
-    set("ins_mat_carbon_dioxide", L"Carbon Dioxide");
+    set("ins_mat_carbon_dioxide", L"CO2");
     set("ins_mat_none", L"(none)");
     set("ins_substance", L"Substance: {0}");
     set("ins_substance_dominant", L"Substance: {0} (dominant)");
