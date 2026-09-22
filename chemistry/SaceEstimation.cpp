@@ -785,6 +785,64 @@ bool saceCostaldSaturatedLiquidDensityKgPerM3(
     return true;
 }
 
+bool saceBuildJobackLiquidViscosityModel(
+    SaceMolecularGraph const &graph,
+    SaceJobackEstimateBundle const &bundle,
+    SaceJobackLiquidViscosityModel &out)
+{
+    out = {};
+    SaceJobackGroupCounts const &g = bundle.groups;
+    int nGroups = g.carbonCH3 + g.carbonCH2 + g.carbonCH + g.carbonC
+        + g.hydroxylAlcohol + g.etherNonRing;
+    if (nGroups <= 0)
+        return false;
+    ElementalComposition elemental{};
+    if (!elementalCompositionFromGraph(graph, elemental))
+        return false;
+    SaceScalarProperty mm{};
+    if (!saceDeriveMolarMass(elemental, mm) || !mm.known || !(mm.value > 0.0f))
+        return false;
+    double aKelvin = saceJobackViscosityMuASum(g) - kJobackViscAOffset;
+    double bDimensionless = saceJobackViscosityMuBSum(g) - kJobackViscBOffset;
+    double molarMassGPerMol = static_cast<double>(mm.value);
+    if (!std::isfinite(aKelvin) || !std::isfinite(bDimensionless)
+        || !std::isfinite(molarMassGPerMol) || !(molarMassGPerMol > 0.0)) {
+        out = {};
+        return false;
+    }
+    out.aKelvin = aKelvin;
+    out.bDimensionless = bDimensionless;
+    out.molarMassGPerMol = molarMassGPerMol;
+    out.valid = true;
+    return true;
+}
+
+bool saceJobackLiquidViscosityPaS(
+    SaceJobackLiquidViscosityModel const &model,
+    double temperatureK,
+    double &outPaS)
+{
+    outPaS = 0.0;
+    if (!model.valid)
+        return false;
+    if (!std::isfinite(temperatureK) || !(temperatureK > 0.0))
+        return false;
+    if (!std::isfinite(model.aKelvin) || !std::isfinite(model.bDimensionless)
+        || !std::isfinite(model.molarMassGPerMol) || !(model.molarMassGPerMol > 0.0))
+        return false;
+    double exponent = model.aKelvin / temperatureK + model.bDimensionless;
+    if (!std::isfinite(exponent))
+        return false;
+    double e = std::exp(exponent);
+    if (!std::isfinite(e))
+        return false;
+    double mu = model.molarMassGPerMol * e;
+    if (!std::isfinite(mu) || !(mu > 0.0))
+        return false;
+    outPaS = mu;
+    return true;
+}
+
 bool saceEstimateJobackBundle(SaceMolecularGraph const &graph, SaceJobackEstimateBundle &out) {
     saceResetJobackEstimateBundle(out);
     SaceJobackFragmentationResult r = saceFragmentJobackGroups(graph, out.groups);
@@ -856,10 +914,20 @@ bool saceEstimateJobackBundle(SaceMolecularGraph const &graph, SaceJobackEstimat
             out.saturatedLiquidHeatCapacityAt298KJPerMolK = jobackLowScalar(cpl);
     }
     SaceCostaldLiquidDensityModel dens{};
-    if (saceBuildCostaldLiquidDensityModelFromJoback(graph, out, dens)) {
+    bool densOk = saceBuildCostaldLiquidDensityModelFromJoback(graph, out, dens);
+    if (densOk) {
         double rho = 0.0;
         if (saceCostaldSaturatedLiquidDensityKgPerM3(dens, kSaceHeatCapacityReferenceK, rho))
             out.saturatedLiquidDensityAt298KKgPerM3 = jobackLowScalar(rho);
+    }
+    SaceJobackLiquidViscosityModel visc{};
+    if (saceBuildJobackLiquidViscosityModel(graph, out, visc)) {
+        double mu = 0.0;
+        double rhoGate = 0.0;
+        if (saceJobackLiquidViscosityPaS(visc, kSaceHeatCapacityReferenceK, mu)
+            && densOk
+            && saceCostaldSaturatedLiquidDensityKgPerM3(dens, kSaceHeatCapacityReferenceK, rhoGate))
+            out.liquidDynamicViscosityAt298KPaS = jobackLowScalar(mu);
     }
 
     return true;
@@ -1074,7 +1142,8 @@ void runSaceEstimationDiagnostics() {
             && !recE->properties.enthalpyVaporizationAtNormalBoilingJPerMol.known
             && !recE->properties.idealGasHeatCapacityAt298KJPerMolK.known
             && !recE->properties.saturatedLiquidHeatCapacityAt298KJPerMolK.known
-            && !recE->properties.saturatedLiquidDensityAt298KKgPerM3.known, "");
+            && !recE->properties.saturatedLiquidDensityAt298KKgPerM3.known
+            && !recE->properties.liquidDynamicViscosityAt298KPaS.known, "");
 
     SaceJobackEstimateBundle bunA{}, bunB{};
     emit("c2h6o_a_bundle_ok", saceEstimateJobackBundle(gA, bunA), "");
@@ -1159,7 +1228,11 @@ void runSaceEstimationDiagnostics() {
             && x.saturatedLiquidDensityAt298KKgPerM3.known
             && y.saturatedLiquidDensityAt298KKgPerM3.known
             && nearK(x.saturatedLiquidDensityAt298KKgPerM3.value,
-                y.saturatedLiquidDensityAt298KKgPerM3.value, 0.05);
+                y.saturatedLiquidDensityAt298KKgPerM3.value, 0.05)
+            && x.liquidDynamicViscosityAt298KPaS.known
+            && y.liquidDynamicViscosityAt298KPaS.known
+            && nearK(x.liquidDynamicViscosityAt298KPaS.value,
+                y.liquidDynamicViscosityAt298KPaS.value, 1e-8);
     };
     SaceJobackEstimateBundle permB{}, bondB{}, endB{};
     emit("atom_permutation_preserves_joback_bundle",
@@ -1176,7 +1249,8 @@ void runSaceEstimationDiagnostics() {
             && !b.enthalpyVaporizationAtNormalBoilingJPerMol.known
             && !b.idealGasHeatCapacityAt298KJPerMolK.known
             && !b.saturatedLiquidHeatCapacityAt298KJPerMolK.known
-            && !b.saturatedLiquidDensityAt298KKgPerM3.known;
+            && !b.saturatedLiquidDensityAt298KKgPerM3.known
+            && !b.liquidDynamicViscosityAt298KPaS.known;
     };
     SaceJobackEstimateBundle waterB{}, methaneB{}, unsB{};
     emit("water_all_joback_unknown",
@@ -1877,6 +1951,149 @@ void runSaceEstimationDiagnostics() {
             && recA->properties.saturatedLiquidDensityAt298KKgPerM3.confidence == SaceConfidence::High
             && nearK(recA->properties.saturatedLiquidDensityAt298KKgPerM3.value, 789.0, 0.05), "");
     emit("generated_record_still_unspawnable_after_density", recA && !recA->spawnable, "");
+
+    SaceJobackLiquidViscosityModel visA{}, visB{};
+    emit("a_viscosity_model_builds",
+        saceBuildJobackLiquidViscosityModel(gA, bunA, visA) && visA.valid, "");
+    emit("b_viscosity_model_builds",
+        saceBuildJobackLiquidViscosityModel(gB, bunB, visB) && visB.valid, "");
+    emit("a_viscosity_a_2218_35", nearK(visA.aKelvin, 2218.35, 1e-4), std::to_string(visA.aKelvin));
+    emit("a_viscosity_b_-18_177", nearK(visA.bDimensionless, -18.177, 1e-4),
+        std::to_string(visA.bDimensionless));
+    emit("b_viscosity_a_620_85", nearK(visB.aKelvin, 620.85, 1e-4), std::to_string(visB.aKelvin));
+    emit("b_viscosity_b_-15_026", nearK(visB.bDimensionless, -15.026, 1e-4),
+        std::to_string(visB.bDimensionless));
+    emit("a_viscosity_mw_46_069", nearK(visA.molarMassGPerMol, 46.069, 1e-4),
+        std::to_string(visA.molarMassGPerMol));
+    emit("b_viscosity_mw_46_069", nearK(visB.molarMassGPerMol, 46.069, 1e-4),
+        std::to_string(visB.molarMassGPerMol));
+
+    double aMu298 = 0.0, bMu298 = 0.0, aMu300 = 0.0, bMu300 = 0.0;
+    double aMuTb = 0.0, bMuTb = 0.0, aMu350 = 0.0, aMu400 = 0.0;
+    double bMu350 = 0.0, bMu400 = 0.0;
+    bool a298Ok = saceJobackLiquidViscosityPaS(visA, 298.15, aMu298);
+    bool b298Ok = saceJobackLiquidViscosityPaS(visB, 298.15, bMu298);
+    bool a300Ok = saceJobackLiquidViscosityPaS(visA, 300.0, aMu300);
+    bool b300Ok = saceJobackLiquidViscosityPaS(visB, 300.0, bMu300);
+    bool aMuTbOk = bunA.normalBoilingPointK.known
+        && saceJobackLiquidViscosityPaS(visA, bunA.normalBoilingPointK.value, aMuTb);
+    bool bMuTbOk = bunB.normalBoilingPointK.known
+        && saceJobackLiquidViscosityPaS(visB, bunB.normalBoilingPointK.value, bMuTb);
+    bool a350Ok = saceJobackLiquidViscosityPaS(visA, 350.0, aMu350);
+    bool a400Ok = saceJobackLiquidViscosityPaS(visA, 400.0, aMu400);
+    bool b350Ok = saceJobackLiquidViscosityPaS(visB, 350.0, bMu350);
+    bool b400Ok = saceJobackLiquidViscosityPaS(visB, 400.0, bMu400);
+    emit("a_mu_298_15", a298Ok && nearK(aMu298, 0.001001279, 2e-9), std::to_string(aMu298));
+    emit("b_mu_298_15", b298Ok && nearK(bMu298, 0.0001101664, 2e-9), std::to_string(bMu298));
+    emit("a_mu_300", a300Ok && nearK(aMu300, 0.000956376, 2e-9), std::to_string(aMu300));
+    emit("b_mu_300", b300Ok && nearK(bMu300, 0.000108761, 2e-9), std::to_string(bMu300));
+    emit("a_mu_tb", aMuTbOk && nearK(aMuTb, 0.000420213, 2e-9), std::to_string(aMuTb));
+    emit("b_mu_tb", bMuTbOk && nearK(bMuTb, 0.000139513, 2e-9), std::to_string(bMuTb));
+    emit("a_sampled_viscosity_decreases_with_t",
+        a298Ok && a350Ok && a400Ok
+            && aMu298 > aMu350 && aMu350 > aMu400
+            && nearK(aMu350, 3.32551e-4, 2e-9) && nearK(aMu400, 1.50585e-4, 2e-9), "");
+    emit("b_sampled_viscosity_decreases_with_t",
+        b298Ok && b350Ok && b400Ok
+            && bMu298 > bMu350 && bMu350 > bMu400
+            && nearK(bMu350, 8.09238e-5, 2e-9) && nearK(bMu400, 6.48305e-5, 2e-9), "");
+
+    SaceJobackEstimateBundle isoBun{}, neoBun{};
+    SaceJobackLiquidViscosityModel isoVis{}, neoVis{};
+    bool isoVisOk = saceEstimateJobackBundle(isobutaneGraph(), isoBun)
+        && saceBuildJobackLiquidViscosityModel(isobutaneGraph(), isoBun, isoVis);
+    bool neoVisOk = saceEstimateJobackBundle(neopentaneGraph(), neoBun)
+        && saceBuildJobackLiquidViscosityModel(neopentaneGraph(), neoBun, neoVis);
+    emit("isobutane_viscosity_a_724_90",
+        isoVisOk && nearK(isoVis.aKelvin, 724.90, 1e-2), std::to_string(isoVis.aKelvin));
+    emit("isobutane_viscosity_b_-15_172",
+        isoVisOk && nearK(isoVis.bDimensionless, -15.172, 1e-3),
+        std::to_string(isoVis.bDimensionless));
+    emit("neopentane_viscosity_a_1021_78",
+        neoVisOk && nearK(neoVis.aKelvin, 1021.78, 1e-2), std::to_string(neoVis.aKelvin));
+    emit("neopentane_viscosity_b_-15_771",
+        neoVisOk && nearK(neoVis.bDimensionless, -15.771, 1e-3),
+        std::to_string(neoVis.bDimensionless));
+
+    double rejectedMu = 0.0;
+    emit("viscosity_rejects_nonpositive_t",
+        !saceJobackLiquidViscosityPaS(visA, 0.0, rejectedMu)
+            && !saceJobackLiquidViscosityPaS(visA, -1.0, rejectedMu)
+            && rejectedMu == 0.0, "");
+    emit("viscosity_rejects_nan_inf",
+        !saceJobackLiquidViscosityPaS(visA, nanH, rejectedMu)
+            && !saceJobackLiquidViscosityPaS(visA, infH, rejectedMu), "");
+    SaceJobackLiquidViscosityModel invalidVis{};
+    emit("viscosity_rejects_invalid_model",
+        !saceJobackLiquidViscosityPaS(invalidVis, 298.15, rejectedMu), "");
+    SaceJobackLiquidViscosityModel badMw = visA;
+    badMw.molarMassGPerMol = 0.0;
+    emit("viscosity_rejects_invalid_mw",
+        !saceJobackLiquidViscosityPaS(badMw, 298.15, rejectedMu) && rejectedMu == 0.0, "");
+
+    emit("catalog_a_viscosity_matches_direct",
+        recA && recA->properties.liquidDynamicViscosityAt298KPaS.known
+            && nearK(recA->properties.liquidDynamicViscosityAt298KPaS.value, aMu298, 2e-8)
+            && nearK(bunA.liquidDynamicViscosityAt298KPaS.value, aMu298, 2e-8), "");
+    emit("catalog_b_viscosity_matches_direct",
+        recB && recB->properties.liquidDynamicViscosityAt298KPaS.known
+            && nearK(recB->properties.liquidDynamicViscosityAt298KPaS.value, bMu298, 2e-8)
+            && nearK(bunB.liquidDynamicViscosityAt298KPaS.value, bMu298, 2e-8), "");
+    emit("viscosity_structural_estimate_low",
+        bunA.liquidDynamicViscosityAt298KPaS.source == SacePropertySource::StructuralEstimate
+            && bunA.liquidDynamicViscosityAt298KPaS.confidence == SaceConfidence::Low
+            && recA && recA->properties.liquidDynamicViscosityAt298KPaS.source
+                == SacePropertySource::StructuralEstimate
+            && recA->properties.liquidDynamicViscosityAt298KPaS.confidence == SaceConfidence::Low, "");
+
+    SaceJobackLiquidViscosityModel permVis{}, bondVis{}, endVis{};
+    double permMu = 0, bondMu = 0, endMu = 0;
+    emit("atom_permutation_preserves_viscosity",
+        saceBuildJobackLiquidViscosityModel(permuteGraph(gA), permB, permVis)
+            && saceJobackLiquidViscosityPaS(permVis, 298.15, permMu)
+            && nearK(permMu, aMu298, 1e-12), "");
+    emit("bond_reorder_preserves_viscosity",
+        saceBuildJobackLiquidViscosityModel(reorderBonds(gA), bondB, bondVis)
+            && saceJobackLiquidViscosityPaS(bondVis, 298.15, bondMu)
+            && nearK(bondMu, aMu298, 1e-12), "");
+    emit("reversed_endpoints_preserve_viscosity",
+        saceBuildJobackLiquidViscosityModel(reverseEnds(gA), endB, endVis)
+            && saceJobackLiquidViscosityPaS(endVis, 298.15, endMu)
+            && nearK(endMu, aMu298, 1e-12), "");
+
+    emit("water_no_generated_joback_viscosity", !waterB.liquidDynamicViscosityAt298KPaS.known, "");
+    emit("methane_no_generated_joback_viscosity", !methaneB.liquidDynamicViscosityAt298KPaS.known, "");
+    emit("viscosity_not_in_canonical_identity",
+        std::strstr(sig, "viscosity") == nullptr && std::strstr(sig, "0.00100") == nullptr, sig);
+    emit("viscosity_model_not_in_canonical_identity",
+        std::strstr(sig, "JobackVisc") == nullptr && std::strstr(sig, "mu_liq") == nullptr, sig);
+
+    SaceGeneratedRecord *mutVisc = cat.recordMutable(refA.generatedId);
+    if (mutVisc)
+        mutVisc->properties.liquidDynamicViscosityAt298KPaS = saceUnknownScalarProperty();
+    bool reattachVisc = cat.attachMolecularGraph(refA.generatedId, "synthetic-structure-a", gA);
+    recA = cat.record(refA.generatedId);
+    emit("same_graph_reattach_backfills_viscosity",
+        reattachVisc && recA && recA->properties.liquidDynamicViscosityAt298KPaS.known
+            && recA->properties.liquidDynamicViscosityAt298KPaS.source
+                == SacePropertySource::StructuralEstimate
+            && nearK(recA->properties.liquidDynamicViscosityAt298KPaS.value, aMu298, 2e-8), "");
+
+    SaceGeneratedRecord *mutViscRef = cat.recordMutable(refA.generatedId);
+    if (mutViscRef) {
+        mutViscRef->properties.liquidDynamicViscosityAt298KPaS.known = true;
+        mutViscRef->properties.liquidDynamicViscosityAt298KPaS.value = 0.0012f;
+        mutViscRef->properties.liquidDynamicViscosityAt298KPaS.source = SacePropertySource::Reference;
+        mutViscRef->properties.liquidDynamicViscosityAt298KPaS.confidence = SaceConfidence::High;
+    }
+    bool reattachViscKeep = cat.attachMolecularGraph(refA.generatedId, "synthetic-structure-a", gA);
+    recA = cat.record(refA.generatedId);
+    emit("same_graph_backfill_preserves_reference_high_viscosity",
+        reattachViscKeep && recA
+            && recA->properties.liquidDynamicViscosityAt298KPaS.source == SacePropertySource::Reference
+            && recA->properties.liquidDynamicViscosityAt298KPaS.confidence == SaceConfidence::High
+            && nearK(recA->properties.liquidDynamicViscosityAt298KPaS.value, 0.0012, 1e-8), "");
+    emit("generated_record_still_unspawnable_after_viscosity", recA && !recA->spawnable, "");
 
     cat.clear();
     out << "summary\t" << (failed == 0 ? "PASS" : "FAIL") << '\t' << passed << " passed, "

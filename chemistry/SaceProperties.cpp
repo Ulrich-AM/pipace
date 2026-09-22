@@ -386,6 +386,25 @@ void runSacePropertyDiagnostics() {
             && jobackRhoDst.confidence == SaceConfidence::High
             && nearMass(jobackRhoDst.value, 789.0), "");
 
+    SaceGeneratedProperties blankVisc{};
+    emit("liquid_dynamic_viscosity_298_defaults_unknown",
+        !blankVisc.liquidDynamicViscosityAt298KPaS.known
+            && blankVisc.liquidDynamicViscosityAt298KPaS.source == SacePropertySource::Unknown, "");
+    SaceScalarProperty refVisc = makeKnown(0.0012f, SacePropertySource::Reference, SaceConfidence::High);
+    SaceScalarProperty jobackVisc = makeKnown(0.001001279f, SacePropertySource::StructuralEstimate, SaceConfidence::Low);
+    emit("structural_estimate_low_does_not_overwrite_reference_high_viscosity",
+        !saceAssignScalarProperty(refVisc, jobackVisc)
+            && refVisc.source == SacePropertySource::Reference
+            && refVisc.confidence == SaceConfidence::High
+            && nearMass(refVisc.value, 0.0012, 1e-8), "");
+    SaceScalarProperty jobackViscDst = makeKnown(0.001001279f, SacePropertySource::StructuralEstimate, SaceConfidence::Low);
+    SaceScalarProperty refViscSrc = makeKnown(0.0012f, SacePropertySource::Reference, SaceConfidence::High);
+    emit("reference_high_overwrites_structural_estimate_low_viscosity",
+        saceAssignScalarProperty(jobackViscDst, refViscSrc)
+            && jobackViscDst.source == SacePropertySource::Reference
+            && jobackViscDst.confidence == SaceConfidence::High
+            && nearMass(jobackViscDst.value, 0.0012, 1e-8), "");
+
     out << "summary\t" << (failed == 0 ? "PASS" : "FAIL") << '\t' << passed << " passed, "
         << failed << " failed\n";
 }

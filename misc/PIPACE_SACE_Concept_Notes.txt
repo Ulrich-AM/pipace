@@ -827,12 +827,37 @@ Implemented under chemistry/SaceSimulationReadiness.* :
 - Computed preflight for generated SACE records. Not identity. Not stored on the record.
 - Distinguishes gas/liquid thermo-ready and liquid-gas equilibrium from live engine-ready.
 - Graph A/B: thermo-ready (mass, Psat, Hvap, Cp_g, Cp_L, rho_L). Not live-ready.
-- Live blockers: liquid viscosity, liquid surface tension, liquid k, gas k.
+- Live blockers (Phase 13): liquid viscosity, liquid surface tension, liquid k, gas k.
 - Do not invent Water/Honey/Air transport or conductivity fallbacks.
 - Built-in ThermalProperties has one general conductivity; readiness still names
   liquid vs gas k separately for a later compiler. Do not add those fields yet.
 - Physical SACE kg/m3 is not FluidProperties sandbox-relative density.
 - Not for physics ticks. Generated records remain unspawnable. No SubstanceId.
+
+PHASE 14 LANDING (JOBACK LIQUID DYNAMIC VISCOSITY)
+==================================================
+Implemented under chemistry/SaceEstimation.* :
+
+- mu_liq(T) = MW[g/mol] * exp(A/T + B), output Pa*s.
+- A = SUM(mu_a) - 597.82; B = SUM(mu_b) - 11.202.
+- Same six Joback groups only. Published mu_a/mu_b pairs, not tuned.
+- MW convention is numerical g/mol in the Joback equation (not kg/mol).
+- Provenance StructuralEstimate / Low. Not canonical identity.
+- Physical Pa*s is not FluidProperties::viscosity sandbox units. No FluidEngine map.
+- Source described multi-temperature liquid-viscosity data per compound; it did
+  not publish a broad overall accuracy figure or a universal T interval.
+  Phase 14 does not invent 250-600 K or similar as a published range.
+  Liquid-domain validity is separate from numerical evaluation.
+- Stored 298.15 K scalar requires a successful COSTALD rho(298.15) gate;
+  COSTALD density does not enter the viscosity equation. Graph B Tb < 298.15
+  is not by itself a rejection (pressurized/saturated liquid below Tc).
+- Alcohols (Graph A) may have larger associating error; no ethanol correction.
+- Readiness: Graph A/B LiquidViscosity missing = false. Still missing
+  LiquidSurfaceTension, LiquidThermalConductivity, GasThermalConductivity.
+  thermo-ready remains true; live-ready remains false.
+- Assess viscosity readiness from trusted graph -> coherent Joback bundle ->
+  viscosity model, not from a single stored scalar.
+- Unsupported chemistry stays Unknown. Built-in Water viscosity is unchanged.
 
 
 

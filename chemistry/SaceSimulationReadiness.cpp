@@ -152,8 +152,14 @@ SaceSimulationReadiness saceAssessSimulationReadiness(SaceGeneratedRecord const 
     if (!densOk)
         markMissing(r, SaceSimulationRequirement::LiquidDensityModel);
 
-    // Generated SACE has no transport estimates yet. Never invent Water/Air fallbacks.
-    markMissing(r, SaceSimulationRequirement::LiquidViscosity);
+    SaceJobackLiquidViscosityModel visc{};
+    bool viscOk = bundleOk
+        && saceBuildJobackLiquidViscosityModel(record.molecularGraph, bundle, visc)
+        && visc.valid;
+    if (!viscOk)
+        markMissing(r, SaceSimulationRequirement::LiquidViscosity);
+
+    // Remaining transport estimates are not implemented. Never invent Water/Air fallbacks.
     markMissing(r, SaceSimulationRequirement::LiquidSurfaceTension);
     markMissing(r, SaceSimulationRequirement::LiquidThermalConductivity);
     markMissing(r, SaceSimulationRequirement::GasThermalConductivity);
@@ -220,8 +226,8 @@ void runSaceReadinessDiagnostics() {
         saceReadinessMissing(a, SaceSimulationRequirement::GasThermalConductivity), "");
     emit("a_missing_liquid_conductivity",
         saceReadinessMissing(a, SaceSimulationRequirement::LiquidThermalConductivity), "");
-    emit("a_missing_liquid_viscosity",
-        saceReadinessMissing(a, SaceSimulationRequirement::LiquidViscosity), "");
+    emit("a_liquid_viscosity_not_missing",
+        !saceReadinessMissing(a, SaceSimulationRequirement::LiquidViscosity), "");
     emit("a_missing_liquid_surface_tension",
         saceReadinessMissing(a, SaceSimulationRequirement::LiquidSurfaceTension), "");
 
@@ -236,8 +242,8 @@ void runSaceReadinessDiagnostics() {
         saceReadinessMissing(b, SaceSimulationRequirement::GasThermalConductivity), "");
     emit("b_missing_liquid_conductivity",
         saceReadinessMissing(b, SaceSimulationRequirement::LiquidThermalConductivity), "");
-    emit("b_missing_liquid_viscosity",
-        saceReadinessMissing(b, SaceSimulationRequirement::LiquidViscosity), "");
+    emit("b_liquid_viscosity_not_missing",
+        !saceReadinessMissing(b, SaceSimulationRequirement::LiquidViscosity), "");
     emit("b_missing_liquid_surface_tension",
         saceReadinessMissing(b, SaceSimulationRequirement::LiquidSurfaceTension), "");
     emit("a_b_readiness_class_matches", recA && recB && classMatches(a, b), "");
@@ -265,7 +271,8 @@ void runSaceReadinessDiagnostics() {
         recE && !e.liveGasReady && !e.liveLiquidReady && !e.liveLiquidGasPhaseChangeReady, "");
 
     emit("missing_mask_helper_works",
-        saceReadinessMissing(a, SaceSimulationRequirement::LiquidViscosity)
+        saceReadinessMissing(a, SaceSimulationRequirement::LiquidSurfaceTension)
+            && !saceReadinessMissing(a, SaceSimulationRequirement::LiquidViscosity)
             && !saceReadinessMissing(a, SaceSimulationRequirement::MolarMass)
             && !saceReadinessMissing(a, SaceSimulationRequirement::MolecularGraph), "");
     char const *viscKey = saceSimulationRequirementKey(SaceSimulationRequirement::LiquidViscosity);

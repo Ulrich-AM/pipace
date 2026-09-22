@@ -76,6 +76,7 @@ struct SaceGeneratedProperties {
     SaceScalarProperty idealGasHeatCapacityAt298KJPerMolK{};
     SaceScalarProperty saturatedLiquidHeatCapacityAt298KJPerMolK{};
     SaceScalarProperty saturatedLiquidDensityAt298KKgPerM3{};
+    SaceScalarProperty liquidDynamicViscosityAt298KPaS{};
 };
 
 inline char const *sacePropertySourceKey(SacePropertySource source) {
