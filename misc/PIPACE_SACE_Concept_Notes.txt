@@ -804,6 +804,23 @@ Implemented under chemistry/SaceEstimation.* :
 - Not live ThermalEngine specificHeat / gasSpecificHeat. No fallback for unsupported chemistry.
 - Public catalog API exposes only const record(); diagnostics may friend-access.
 
+PHASE 12 LANDING (COSTALD SATURATED LIQUID DENSITY)
+===================================================
+Implemented under chemistry/SaceEstimation.* :
+
+- Hankinson–Thomson COSTALD 1979 saturated-liquid volume.
+- Vs = V* * V0 * (1 - omega * Vdelta). rho = M / Vs [kg/m3].
+- Phase 12 V* is Joback Vc (not a fitted COSTALD characteristic volume).
+- Omega is SACE Lee-Kesler omega (not fitted omega_SRK). Therefore Low confidence.
+- Coherent path only: graph -> Joback bundle Tc/Vc/omega + identity kg/mol.
+- Strict range 0.25 < Tr < 0.95. No clamp. No extrapolation.
+- Saturation density at Psat(T), not compressed-liquid rho(T,P). No Tait.
+- Joback Vc is not ambient liquid molar volume. Do not use M/Vc.
+- Catalog stores 298.15 K kg/m3 only when that T is in range.
+- Not FluidProperties::density (sandbox-relative water=1). Not live FluidEngine.
+- Alcohols (Graph A) have no associating correction.
+
+
 
 
 

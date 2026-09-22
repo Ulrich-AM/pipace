@@ -367,6 +367,25 @@ void runSacePropertyDiagnostics() {
             && jobackLiqCpDst.confidence == SaceConfidence::High
             && nearMass(jobackLiqCpDst.value, 112.0), "");
 
+    SaceGeneratedProperties blankRho{};
+    emit("saturated_liquid_density_298_defaults_unknown",
+        !blankRho.saturatedLiquidDensityAt298KKgPerM3.known
+            && blankRho.saturatedLiquidDensityAt298KKgPerM3.source == SacePropertySource::Unknown, "");
+    SaceScalarProperty refRho = makeKnown(789.0f, SacePropertySource::Reference, SaceConfidence::High);
+    SaceScalarProperty jobackRho = makeKnown(821.662f, SacePropertySource::StructuralEstimate, SaceConfidence::Low);
+    emit("structural_estimate_low_does_not_overwrite_reference_high_density",
+        !saceAssignScalarProperty(refRho, jobackRho)
+            && refRho.source == SacePropertySource::Reference
+            && refRho.confidence == SaceConfidence::High
+            && nearMass(refRho.value, 789.0), "");
+    SaceScalarProperty jobackRhoDst = makeKnown(821.662f, SacePropertySource::StructuralEstimate, SaceConfidence::Low);
+    SaceScalarProperty refRhoSrc = makeKnown(789.0f, SacePropertySource::Reference, SaceConfidence::High);
+    emit("reference_high_overwrites_structural_estimate_low_density",
+        saceAssignScalarProperty(jobackRhoDst, refRhoSrc)
+            && jobackRhoDst.source == SacePropertySource::Reference
+            && jobackRhoDst.confidence == SaceConfidence::High
+            && nearMass(jobackRhoDst.value, 789.0), "");
+
     out << "summary\t" << (failed == 0 ? "PASS" : "FAIL") << '\t' << passed << " passed, "
         << failed << " failed\n";
 }

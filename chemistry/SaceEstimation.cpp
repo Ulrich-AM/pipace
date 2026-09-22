@@ -688,6 +688,103 @@ bool saceRowlinsonPolingLiquidHeatCapacityJPerMolK(
     return true;
 }
 
+bool saceBuildCostaldLiquidDensityModelFromJoback(
+    SaceMolecularGraph const &graph,
+    SaceJobackEstimateBundle const &bundle,
+    SaceCostaldLiquidDensityModel &out)
+{
+    out = {};
+    if (!bundle.criticalTemperatureK.known
+        || !bundle.criticalMolarVolumeM3PerMol.known
+        || !bundle.acentricFactor.known)
+        return false;
+    ElementalComposition elemental{};
+    if (!elementalCompositionFromGraph(graph, elemental))
+        return false;
+    SaceScalarProperty mm{};
+    if (!saceDeriveMolarMass(elemental, mm) || !mm.known || !(mm.value > 0.0f))
+        return false;
+    out.criticalTemperatureK = bundle.criticalTemperatureK.value;
+    out.characteristicVolumeM3PerMol = bundle.criticalMolarVolumeM3PerMol.value;
+    out.acentricFactor = bundle.acentricFactor.value;
+    out.molarMassKgPerMol = static_cast<double>(mm.value) * 1.0e-3;
+    if (!(out.criticalTemperatureK > 0.0) || !std::isfinite(out.criticalTemperatureK)
+        || !(out.characteristicVolumeM3PerMol > 0.0)
+        || !std::isfinite(out.characteristicVolumeM3PerMol)
+        || !std::isfinite(out.acentricFactor)
+        || !(out.molarMassKgPerMol > 0.0) || !std::isfinite(out.molarMassKgPerMol)) {
+        out = {};
+        return false;
+    }
+    out.valid = true;
+    return true;
+}
+
+bool saceCostaldSaturatedLiquidMolarVolumeM3PerMol(
+    SaceCostaldLiquidDensityModel const &model,
+    double temperatureK,
+    double &outM3PerMol)
+{
+    outM3PerMol = 0.0;
+    if (!model.valid)
+        return false;
+    if (!std::isfinite(temperatureK) || !(temperatureK > 0.0))
+        return false;
+    if (!std::isfinite(model.criticalTemperatureK) || !(model.criticalTemperatureK > 0.0)
+        || !std::isfinite(model.characteristicVolumeM3PerMol)
+        || !(model.characteristicVolumeM3PerMol > 0.0)
+        || !std::isfinite(model.acentricFactor))
+        return false;
+    double tr = temperatureK / model.criticalTemperatureK;
+    if (!std::isfinite(tr) || !(tr > kSaceCostaldTrMinExclusive)
+        || !(tr < kSaceCostaldTrMaxExclusive))
+        return false;
+    double tau = 1.0 - tr;
+    if (!(tau > 0.0) || !std::isfinite(tau))
+        return false;
+    double tau13 = std::cbrt(tau);
+    double tau23 = tau13 * tau13;
+    double tau43 = tau * tau13;
+    double v0 = 1.0 - 1.52816 * tau13 + 1.43907 * tau23 - 0.81446 * tau + 0.190454 * tau43;
+    if (!std::isfinite(v0) || !(v0 > 0.0))
+        return false;
+    double tr2 = tr * tr;
+    double tr3 = tr2 * tr;
+    double vdeltaNum = -0.296123 + 0.386914 * tr - 0.0427258 * tr2 - 0.0480645 * tr3;
+    double vdeltaDen = tr - 1.00001;
+    if (!std::isfinite(vdeltaNum) || !std::isfinite(vdeltaDen) || vdeltaDen == 0.0)
+        return false;
+    double vdelta = vdeltaNum / vdeltaDen;
+    if (!std::isfinite(vdelta))
+        return false;
+    double corr = 1.0 - model.acentricFactor * vdelta;
+    if (!std::isfinite(corr) || !(corr > 0.0))
+        return false;
+    double vs = model.characteristicVolumeM3PerMol * v0 * corr;
+    if (!std::isfinite(vs) || !(vs > 0.0))
+        return false;
+    outM3PerMol = vs;
+    return true;
+}
+
+bool saceCostaldSaturatedLiquidDensityKgPerM3(
+    SaceCostaldLiquidDensityModel const &model,
+    double temperatureK,
+    double &outKgPerM3)
+{
+    outKgPerM3 = 0.0;
+    if (!std::isfinite(model.molarMassKgPerMol) || !(model.molarMassKgPerMol > 0.0))
+        return false;
+    double vs = 0.0;
+    if (!saceCostaldSaturatedLiquidMolarVolumeM3PerMol(model, temperatureK, vs))
+        return false;
+    double rho = model.molarMassKgPerMol / vs;
+    if (!std::isfinite(rho) || !(rho > 0.0))
+        return false;
+    outKgPerM3 = rho;
+    return true;
+}
+
 bool saceEstimateJobackBundle(SaceMolecularGraph const &graph, SaceJobackEstimateBundle &out) {
     saceResetJobackEstimateBundle(out);
     SaceJobackFragmentationResult r = saceFragmentJobackGroups(graph, out.groups);
@@ -757,6 +854,12 @@ bool saceEstimateJobackBundle(SaceMolecularGraph const &graph, SaceJobackEstimat
         double cpl = 0.0;
         if (saceRowlinsonPolingLiquidHeatCapacityJPerMolK(liqCp, kSaceHeatCapacityReferenceK, cpl))
             out.saturatedLiquidHeatCapacityAt298KJPerMolK = jobackLowScalar(cpl);
+    }
+    SaceCostaldLiquidDensityModel dens{};
+    if (saceBuildCostaldLiquidDensityModelFromJoback(graph, out, dens)) {
+        double rho = 0.0;
+        if (saceCostaldSaturatedLiquidDensityKgPerM3(dens, kSaceHeatCapacityReferenceK, rho))
+            out.saturatedLiquidDensityAt298KKgPerM3 = jobackLowScalar(rho);
     }
 
     return true;
@@ -970,7 +1073,8 @@ void runSaceEstimationDiagnostics() {
             && !recE->properties.acentricFactor.known
             && !recE->properties.enthalpyVaporizationAtNormalBoilingJPerMol.known
             && !recE->properties.idealGasHeatCapacityAt298KJPerMolK.known
-            && !recE->properties.saturatedLiquidHeatCapacityAt298KJPerMolK.known, "");
+            && !recE->properties.saturatedLiquidHeatCapacityAt298KJPerMolK.known
+            && !recE->properties.saturatedLiquidDensityAt298KKgPerM3.known, "");
 
     SaceJobackEstimateBundle bunA{}, bunB{};
     emit("c2h6o_a_bundle_ok", saceEstimateJobackBundle(gA, bunA), "");
@@ -1051,7 +1155,11 @@ void runSaceEstimationDiagnostics() {
             && nearK(x.idealGasHeatCapacityAt298KJPerMolK.value,
                 y.idealGasHeatCapacityAt298KJPerMolK.value, 0.02)
             && nearK(x.saturatedLiquidHeatCapacityAt298KJPerMolK.value,
-                y.saturatedLiquidHeatCapacityAt298KJPerMolK.value, 0.05);
+                y.saturatedLiquidHeatCapacityAt298KJPerMolK.value, 0.05)
+            && x.saturatedLiquidDensityAt298KKgPerM3.known
+            && y.saturatedLiquidDensityAt298KKgPerM3.known
+            && nearK(x.saturatedLiquidDensityAt298KKgPerM3.value,
+                y.saturatedLiquidDensityAt298KKgPerM3.value, 0.05);
     };
     SaceJobackEstimateBundle permB{}, bondB{}, endB{};
     emit("atom_permutation_preserves_joback_bundle",
@@ -1067,7 +1175,8 @@ void runSaceEstimationDiagnostics() {
             && !b.acentricFactor.known
             && !b.enthalpyVaporizationAtNormalBoilingJPerMol.known
             && !b.idealGasHeatCapacityAt298KJPerMolK.known
-            && !b.saturatedLiquidHeatCapacityAt298KJPerMolK.known;
+            && !b.saturatedLiquidHeatCapacityAt298KJPerMolK.known
+            && !b.saturatedLiquidDensityAt298KKgPerM3.known;
     };
     SaceJobackEstimateBundle waterB{}, methaneB{}, unsB{};
     emit("water_all_joback_unknown",
@@ -1596,6 +1705,178 @@ void runSaceEstimationDiagnostics() {
             && nearK(recA->properties.idealGasHeatCapacityAt298KJPerMolK.value, 65.0, 0.02)
             && nearK(recA->properties.saturatedLiquidHeatCapacityAt298KJPerMolK.value, 112.0, 0.02), "");
     emit("generated_record_still_unspawnable_after_cp", recA && !recA->spawnable, "");
+
+    SaceCostaldLiquidDensityModel densA{}, densB{};
+    emit("a_costald_model_builds",
+        saceBuildCostaldLiquidDensityModelFromJoback(gA, bunA, densA) && densA.valid, "");
+    emit("b_costald_model_builds",
+        saceBuildCostaldLiquidDensityModelFromJoback(gB, bunB, densB) && densB.valid, "");
+    emit("a_costald_tc", densA.valid && nearK(densA.criticalTemperatureK, 499.407379, 0.05),
+        std::to_string(densA.criticalTemperatureK));
+    emit("a_costald_vstar", densA.valid && nearK(densA.characteristicVolumeM3PerMol, 1.665e-4, 1e-7),
+        std::to_string(densA.characteristicVolumeM3PerMol));
+    emit("a_costald_omega", densA.valid && nearK(densA.acentricFactor, 0.556081, 2e-5),
+        std::to_string(densA.acentricFactor));
+    emit("a_costald_molar_mass", densA.valid && nearK(densA.molarMassKgPerMol, 0.046069, 1e-6),
+        std::to_string(densA.molarMassKgPerMol));
+    emit("b_costald_inputs",
+        densB.valid
+            && nearK(densB.criticalTemperatureK, 428.173981, 0.05)
+            && nearK(densB.characteristicVolumeM3PerMol, 1.655e-4, 1e-7)
+            && nearK(densB.acentricFactor, 0.193764, 2e-5)
+            && nearK(densB.molarMassKgPerMol, 0.046069, 1e-6),
+        std::to_string(densB.criticalTemperatureK));
+
+    double aTr298 = 298.15 / densA.criticalTemperatureK;
+    double bTr298 = 298.15 / densB.criticalTemperatureK;
+    emit("a_costald_tr_298_15", nearK(aTr298, 0.597008, 2e-6), std::to_string(aTr298));
+    emit("b_costald_tr_298_15", nearK(bTr298, 0.696329, 2e-6), std::to_string(bTr298));
+
+    double aVs298 = 0, aRho298 = 0, bVs298 = 0, bRho298 = 0;
+    bool aVs298Ok = saceCostaldSaturatedLiquidMolarVolumeM3PerMol(densA, 298.15, aVs298);
+    bool aRho298Ok = saceCostaldSaturatedLiquidDensityKgPerM3(densA, 298.15, aRho298);
+    bool bVs298Ok = saceCostaldSaturatedLiquidMolarVolumeM3PerMol(densB, 298.15, bVs298);
+    bool bRho298Ok = saceCostaldSaturatedLiquidDensityKgPerM3(densB, 298.15, bRho298);
+    emit("a_vs_298_15", aVs298Ok && nearK(aVs298, 5.60681e-5, 2e-9), std::to_string(aVs298));
+    emit("a_rho_298_15", aRho298Ok && nearK(aRho298, 821.662, 0.05), std::to_string(aRho298));
+    emit("b_vs_298_15", bVs298Ok && nearK(bVs298, 6.58211e-5, 2e-9), std::to_string(bVs298));
+    emit("b_rho_298_15", bRho298Ok && nearK(bRho298, 699.912, 0.05), std::to_string(bRho298));
+    emit("a_density_gt_b_at_298_15", aRho298Ok && bRho298Ok && aRho298 > bRho298, "");
+
+    auto costaldAtTr = [&](SaceCostaldLiquidDensityModel const &m, double tr,
+        double &vs, double &rho)
+    {
+        double t = tr * m.criticalTemperatureK;
+        return saceCostaldSaturatedLiquidMolarVolumeM3PerMol(m, t, vs)
+            && saceCostaldSaturatedLiquidDensityKgPerM3(m, t, rho);
+    };
+    double aVs06 = 0, aRho06 = 0, aVs07 = 0, aRho07 = 0, aVs08 = 0, aRho08 = 0, aVs09 = 0, aRho09 = 0;
+    double bVs06 = 0, bRho06 = 0, bVs07 = 0, bRho07 = 0, bVs08 = 0, bRho08 = 0, bVs09 = 0, bRho09 = 0;
+    bool a06Ok = costaldAtTr(densA, 0.6, aVs06, aRho06);
+    bool a07Ok = costaldAtTr(densA, 0.7, aVs07, aRho07);
+    bool a08Ok = costaldAtTr(densA, 0.8, aVs08, aRho08);
+    bool a09Ok = costaldAtTr(densA, 0.9, aVs09, aRho09);
+    bool b06Ok = costaldAtTr(densB, 0.6, bVs06, bRho06);
+    bool b07Ok = costaldAtTr(densB, 0.7, bVs07, bRho07);
+    bool b08Ok = costaldAtTr(densB, 0.8, bVs08, bRho08);
+    bool b09Ok = costaldAtTr(densB, 0.9, bVs09, bRho09);
+    emit("a_costald_tr_0_6",
+        a06Ok && nearK(aVs06, 5.61984e-5, 2e-9) && nearK(aRho06, 819.756, 0.05),
+        std::to_string(aRho06));
+    emit("a_costald_tr_0_7",
+        a07Ok && nearK(aVs07, 6.11866e-5, 2e-9) && nearK(aRho07, 752.926, 0.05),
+        std::to_string(aRho07));
+    emit("a_costald_tr_0_8",
+        a08Ok && nearK(aVs08, 6.80648e-5, 2e-9) && nearK(aRho08, 676.840, 0.05),
+        std::to_string(aRho08));
+    emit("a_costald_tr_0_9",
+        a09Ok && nearK(aVs09, 7.93532e-5, 2e-9) && nearK(aRho09, 580.557, 0.05),
+        std::to_string(aRho09));
+    emit("b_costald_tr_0_6",
+        b06Ok && nearK(bVs06, 6.10485e-5, 2e-9) && nearK(bRho06, 754.629, 0.05),
+        std::to_string(bRho06));
+    emit("b_costald_tr_0_7",
+        b07Ok && nearK(bVs07, 6.60305e-5, 2e-9) && nearK(bRho07, 697.693, 0.05),
+        std::to_string(bRho07));
+    emit("b_costald_tr_0_8",
+        b08Ok && nearK(bVs08, 7.29471e-5, 2e-9) && nearK(bRho08, 631.540, 0.05),
+        std::to_string(bRho08));
+    emit("b_costald_tr_0_9",
+        b09Ok && nearK(bVs09, 8.44329e-5, 2e-9) && nearK(bRho09, 545.628, 0.05),
+        std::to_string(bRho09));
+    emit("a_sampled_density_decreases_with_t",
+        a06Ok && a07Ok && a08Ok && a09Ok
+            && aRho06 > aRho07 && aRho07 > aRho08 && aRho08 > aRho09
+            && aVs06 < aVs07 && aVs07 < aVs08 && aVs08 < aVs09, "");
+    emit("b_sampled_density_decreases_with_t",
+        b06Ok && b07Ok && b08Ok && b09Ok
+            && bRho06 > bRho07 && bRho07 > bRho08 && bRho08 > bRho09
+            && bVs06 < bVs07 && bVs07 < bVs08 && bVs08 < bVs09, "");
+
+    double rejectedVs = 0.0, rejectedRho = 0.0;
+    emit("costald_rejects_tr_le_0_25",
+        !saceCostaldSaturatedLiquidMolarVolumeM3PerMol(densA,
+            kSaceCostaldTrMinExclusive * densA.criticalTemperatureK, rejectedVs), "");
+    emit("costald_rejects_tr_ge_0_95",
+        !saceCostaldSaturatedLiquidMolarVolumeM3PerMol(densA,
+            kSaceCostaldTrMaxExclusive * densA.criticalTemperatureK, rejectedVs), "");
+    emit("costald_rejects_nonpositive_t",
+        !saceCostaldSaturatedLiquidMolarVolumeM3PerMol(densA, 0.0, rejectedVs)
+            && !saceCostaldSaturatedLiquidMolarVolumeM3PerMol(densA, -1.0, rejectedVs), "");
+    emit("costald_rejects_nan_inf",
+        !saceCostaldSaturatedLiquidMolarVolumeM3PerMol(densA, nanH, rejectedVs)
+            && !saceCostaldSaturatedLiquidMolarVolumeM3PerMol(densA, infH, rejectedVs), "");
+    SaceCostaldLiquidDensityModel invalidDens{};
+    emit("costald_rejects_invalid_model",
+        !saceCostaldSaturatedLiquidMolarVolumeM3PerMol(invalidDens, 298.15, rejectedVs), "");
+    SaceCostaldLiquidDensityModel badMass = densA;
+    badMass.molarMassKgPerMol = 0.0;
+    emit("costald_density_rejects_invalid_molar_mass",
+        !saceCostaldSaturatedLiquidDensityKgPerM3(badMass, 298.15, rejectedRho)
+            && rejectedRho == 0.0, "");
+
+    SaceCostaldLiquidDensityModel permDens{}, bondDens{}, endDens{};
+    double permRho = 0, bondRho = 0, endRho = 0;
+    emit("atom_permutation_preserves_costald",
+        saceBuildCostaldLiquidDensityModelFromJoback(permuteGraph(gA), permB, permDens)
+            && saceCostaldSaturatedLiquidDensityKgPerM3(permDens, 298.15, permRho)
+            && nearK(permRho, aRho298, 1e-8), "");
+    emit("bond_reorder_preserves_costald",
+        saceBuildCostaldLiquidDensityModelFromJoback(reorderBonds(gA), bondB, bondDens)
+            && saceCostaldSaturatedLiquidDensityKgPerM3(bondDens, 298.15, bondRho)
+            && nearK(bondRho, aRho298, 1e-8), "");
+    emit("reversed_endpoints_preserve_costald",
+        saceBuildCostaldLiquidDensityModelFromJoback(reverseEnds(gA), endB, endDens)
+            && saceCostaldSaturatedLiquidDensityKgPerM3(endDens, 298.15, endRho)
+            && nearK(endRho, aRho298, 1e-8), "");
+
+    emit("catalog_a_density_matches_direct",
+        recA && recA->properties.saturatedLiquidDensityAt298KKgPerM3.known
+            && nearK(recA->properties.saturatedLiquidDensityAt298KKgPerM3.value, aRho298, 0.05)
+            && nearK(bunA.saturatedLiquidDensityAt298KKgPerM3.value, aRho298, 0.05), "");
+    emit("catalog_b_density_matches_direct",
+        recB && recB->properties.saturatedLiquidDensityAt298KKgPerM3.known
+            && nearK(recB->properties.saturatedLiquidDensityAt298KKgPerM3.value, bRho298, 0.05)
+            && nearK(bunB.saturatedLiquidDensityAt298KKgPerM3.value, bRho298, 0.05), "");
+    emit("density_structural_estimate_low",
+        bunA.saturatedLiquidDensityAt298KKgPerM3.source == SacePropertySource::StructuralEstimate
+            && bunA.saturatedLiquidDensityAt298KKgPerM3.confidence == SaceConfidence::Low
+            && recA && recA->properties.saturatedLiquidDensityAt298KKgPerM3.source
+                == SacePropertySource::StructuralEstimate
+            && recA->properties.saturatedLiquidDensityAt298KKgPerM3.confidence == SaceConfidence::Low, "");
+    emit("water_no_costald_density", !waterB.saturatedLiquidDensityAt298KKgPerM3.known, "");
+    emit("methane_no_costald_density", !methaneB.saturatedLiquidDensityAt298KKgPerM3.known, "");
+    emit("density_not_in_canonical_identity",
+        std::strstr(sig, "821") == nullptr && std::strstr(sig, "density") == nullptr, sig);
+    emit("costald_not_in_canonical_identity",
+        std::strstr(sig, "COSTALD") == nullptr && std::strstr(sig, "Vstar") == nullptr, sig);
+
+    SaceGeneratedRecord *mutRho = cat.recordMutable(refA.generatedId);
+    if (mutRho)
+        mutRho->properties.saturatedLiquidDensityAt298KKgPerM3 = saceUnknownScalarProperty();
+    bool reattachRho = cat.attachMolecularGraph(refA.generatedId, "synthetic-structure-a", gA);
+    recA = cat.record(refA.generatedId);
+    emit("same_graph_reattach_backfills_density",
+        reattachRho && recA && recA->properties.saturatedLiquidDensityAt298KKgPerM3.known
+            && recA->properties.saturatedLiquidDensityAt298KKgPerM3.source
+                == SacePropertySource::StructuralEstimate
+            && nearK(recA->properties.saturatedLiquidDensityAt298KKgPerM3.value, aRho298, 0.05), "");
+
+    SaceGeneratedRecord *mutRhoRef = cat.recordMutable(refA.generatedId);
+    if (mutRhoRef) {
+        mutRhoRef->properties.saturatedLiquidDensityAt298KKgPerM3.known = true;
+        mutRhoRef->properties.saturatedLiquidDensityAt298KKgPerM3.value = 789.0f;
+        mutRhoRef->properties.saturatedLiquidDensityAt298KKgPerM3.source = SacePropertySource::Reference;
+        mutRhoRef->properties.saturatedLiquidDensityAt298KKgPerM3.confidence = SaceConfidence::High;
+    }
+    bool reattachRhoKeep = cat.attachMolecularGraph(refA.generatedId, "synthetic-structure-a", gA);
+    recA = cat.record(refA.generatedId);
+    emit("same_graph_backfill_preserves_reference_high_density",
+        reattachRhoKeep && recA
+            && recA->properties.saturatedLiquidDensityAt298KKgPerM3.source == SacePropertySource::Reference
+            && recA->properties.saturatedLiquidDensityAt298KKgPerM3.confidence == SaceConfidence::High
+            && nearK(recA->properties.saturatedLiquidDensityAt298KKgPerM3.value, 789.0, 0.05), "");
+    emit("generated_record_still_unspawnable_after_density", recA && !recA->spawnable, "");
 
     cat.clear();
     out << "summary\t" << (failed == 0 ? "PASS" : "FAIL") << '\t' << passed << " passed, "

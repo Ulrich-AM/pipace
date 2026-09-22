@@ -6,12 +6,13 @@
 
 #include <cstdint>
 
-// SACE Phase 7–11: Joback-Reid 1987 subset + Lee-Kesler Psat + Watson Hvap + Cp.
+// SACE Phase 7–12: Joback-Reid 1987 subset + Lee-Kesler Psat + Watson Hvap + Cp + COSTALD.
 // Phase 7: Tb[K] = 198.2 + SUM(Tb groups).
 // Phase 8: Tc, Pc, Vc from the same six groups and the Joback Tb (not stored Tb).
 // Phase 9: Lee-Kesler omega and Psat(T) from the same Joback Tb/Tc/Pc tuple.
 // Phase 10: Joback ΔHvap(Tb) [J/mol] + Watson Hvap(T). Not live phase physics.
 // Phase 11: Joback ideal-gas Cp(T) + Rowlinson-Poling liquid Cp(T). 298–1000 K.
+// Phase 12: COSTALD saturated-liquid Vs(T)/rho(T). Joback Vc as V* fallback.
 // StructuralEstimate / Low. Unsupported chemistry stays Unknown.
 // Not canonical identity. Not live PhaseProperties. Do not call from physics ticks.
 //
@@ -65,6 +66,8 @@ constexpr double kSaceHeatCapacityTMinK = 298.0;
 constexpr double kSaceHeatCapacityTMaxK = 1000.0;
 constexpr double kSaceHeatCapacityReferenceK = 298.15;
 constexpr double kSaceLiquidCpTrReject = 0.98;
+constexpr double kSaceCostaldTrMinExclusive = 0.25;
+constexpr double kSaceCostaldTrMaxExclusive = 0.95;
 
 constexpr double kJobackCpAIntercept = -37.93;
 constexpr double kJobackCpBIntercept = 0.210;
@@ -129,6 +132,7 @@ struct SaceJobackEstimateBundle {
     SaceScalarProperty enthalpyVaporizationAtNormalBoilingJPerMol{};
     SaceScalarProperty idealGasHeatCapacityAt298KJPerMolK{};
     SaceScalarProperty saturatedLiquidHeatCapacityAt298KJPerMolK{};
+    SaceScalarProperty saturatedLiquidDensityAt298KKgPerM3{};
 };
 
 // Lee-Kesler 1975 corresponding-states vapor-pressure model.
@@ -172,6 +176,19 @@ struct SaceJobackIdealGasCpModel {
 struct SaceRowlinsonPolingLiquidCpModel {
     SaceJobackIdealGasCpModel idealGasCp{};
     double criticalTemperatureK = 0.0;
+    double acentricFactor = 0.0;
+    double molarMassKgPerMol = 0.0;
+    bool valid = false;
+};
+
+// COSTALD saturated-liquid volume (Hankinson–Thomson 1979).
+// Phase 12 has no fitted COSTALD V* / omega_SRK; Joback Vc is the V* fallback
+// and SACE Lee-Kesler omega is the available acentric estimate. Low confidence.
+// Saturated density at Psat(T), not compressed-liquid rho(T,P).
+// Strict domain: 0.25 < Tr < 0.95. Not live FluidEngine. Not kg/m3 -> relative density.
+struct SaceCostaldLiquidDensityModel {
+    double criticalTemperatureK = 0.0;
+    double characteristicVolumeM3PerMol = 0.0;
     double acentricFactor = 0.0;
     double molarMassKgPerMol = 0.0;
     bool valid = false;
@@ -302,5 +319,18 @@ bool saceMolarHeatCapacityToSpecificJPerKgK(
     double cpJPerMolK,
     double molarMassKgPerMol,
     double &outJPerKgK);
+
+bool saceBuildCostaldLiquidDensityModelFromJoback(
+    SaceMolecularGraph const &graph,
+    SaceJobackEstimateBundle const &bundle,
+    SaceCostaldLiquidDensityModel &out);
+bool saceCostaldSaturatedLiquidMolarVolumeM3PerMol(
+    SaceCostaldLiquidDensityModel const &model,
+    double temperatureK,
+    double &outM3PerMol);
+bool saceCostaldSaturatedLiquidDensityKgPerM3(
+    SaceCostaldLiquidDensityModel const &model,
+    double temperatureK,
+    double &outKgPerM3);
 
 void runSaceEstimationDiagnostics();
