@@ -883,6 +883,27 @@ Implemented under chemistry/SaceEstimation.* :
   Sastri-Rao model, not from a single stored scalar.
 - Unsupported chemistry stays Unknown. Built-in Water surface tension is unchanged.
 
+PHASE 16 LANDING (SATO-RIEDEL / GHARAGHEIZI THERMAL CONDUCTIVITY)
+================================================================
+Implemented under chemistry/SaceEstimation.* :
+
+- Sato-Riedel kL [W/(m*K)] = (1.1053 / sqrt(MW[g/mol]))
+  * [3+20*(1-Tr)^(2/3)] / [3+20*(1-Tbr)^(2/3)]
+- Gharagheizi kG [W/(m*K)] from Tb, Pc, omega, MW with internal P = PcPa * 1e-4.
+- Coherent Joback Tb/Tc/Pc/omega + identity-derived MW only. No mixed stored fields.
+- Provenance StructuralEstimate / Low. Not canonical identity.
+- Physical W/(m*K) is not ThermalProperties::conductivity. No ThermalEngine map.
+- Stored 298.15 K liquid scalar requires COSTALD rho(298.15) as a domain gate;
+  density does not enter Sato-Riedel. Gas 298.15 K scalar needs only a successful query.
+- T < Tc for Sato-Riedel. No invented Gharagheizi T interval. No associating correction.
+- A conductivity model does not prove the queried phase is thermodynamically stable.
+- Graph A/B: preflight liveGasReady / liveLiquidReady / liveLiquidGasPhaseChangeReady.
+  generated records remain spawnable = false. No SubstanceId.
+- Assess conductivity readiness from trusted graph -> coherent Joback bundle ->
+  Sato-Riedel / Gharagheizi models, not from a single stored scalar.
+- Unsupported chemistry stays Unknown. Built-in Water/Air conductivity is unchanged.
+- Phase 17 must not collapse liquid vs gas k into one general conductivity number.
+
 
 
 

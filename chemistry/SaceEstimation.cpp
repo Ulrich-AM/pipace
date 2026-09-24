@@ -935,6 +935,161 @@ bool saceSastriRaoSurfaceTensionNPerM(
     return true;
 }
 
+bool saceBuildSatoRiedelLiquidConductivityModelFromJoback(
+    SaceMolecularGraph const &graph,
+    SaceJobackEstimateBundle const &bundle,
+    SaceSatoRiedelLiquidConductivityModel &out)
+{
+    out = {};
+    if (!bundle.normalBoilingPointK.known || !bundle.criticalTemperatureK.known)
+        return false;
+    ElementalComposition elemental{};
+    if (!elementalCompositionFromGraph(graph, elemental))
+        return false;
+    SaceScalarProperty mm{};
+    if (!saceDeriveMolarMass(elemental, mm) || !mm.known || !(mm.value > 0.0f))
+        return false;
+    double tb = bundle.normalBoilingPointK.value;
+    double tc = bundle.criticalTemperatureK.value;
+    double mw = static_cast<double>(mm.value);
+    if (!std::isfinite(tb) || !std::isfinite(tc) || !std::isfinite(mw))
+        return false;
+    if (!(tb > 0.0) || !(tc > 0.0) || !(mw > 0.0) || !(tb < tc))
+        return false;
+    out.normalBoilingPointK = tb;
+    out.criticalTemperatureK = tc;
+    out.molarMassGPerMol = mw;
+    out.valid = true;
+    return true;
+}
+
+bool saceSatoRiedelLiquidThermalConductivityWPerMK(
+    SaceSatoRiedelLiquidConductivityModel const &model,
+    double temperatureK,
+    double &outWPerMK)
+{
+    outWPerMK = 0.0;
+    if (!model.valid)
+        return false;
+    if (!std::isfinite(temperatureK) || !(temperatureK > 0.0))
+        return false;
+    double tb = model.normalBoilingPointK;
+    double tc = model.criticalTemperatureK;
+    double mw = model.molarMassGPerMol;
+    if (!std::isfinite(tb) || !std::isfinite(tc) || !std::isfinite(mw))
+        return false;
+    if (!(tb > 0.0) || !(tc > 0.0) || !(mw > 0.0) || !(tb < tc))
+        return false;
+    if (!(temperatureK < tc))
+        return false;
+    double tbr = tb / tc;
+    double tr = temperatureK / tc;
+    if (!(tbr > 0.0) || !(tbr < 1.0) || !(tr > 0.0) || !(tr < 1.0))
+        return false;
+    double oneMinusTbr = 1.0 - tbr;
+    double oneMinusTr = 1.0 - tr;
+    if (!(oneMinusTbr > 0.0) || !(oneMinusTr > 0.0))
+        return false;
+    double num = 3.0 + 20.0 * std::pow(oneMinusTr, 2.0 / 3.0);
+    double den = 3.0 + 20.0 * std::pow(oneMinusTbr, 2.0 / 3.0);
+    double pref = kSatoRiedelPrefactor / std::sqrt(mw);
+    if (!std::isfinite(num) || !std::isfinite(den) || !std::isfinite(pref) || !(den > 0.0))
+        return false;
+    double kL = pref * (num / den);
+    if (!std::isfinite(kL) || !(kL > 0.0))
+        return false;
+    outWPerMK = kL;
+    return true;
+}
+
+bool saceBuildGharagheiziGasConductivityModelFromJoback(
+    SaceMolecularGraph const &graph,
+    SaceJobackEstimateBundle const &bundle,
+    SaceGharagheiziGasConductivityModel &out)
+{
+    out = {};
+    if (!bundle.normalBoilingPointK.known || !bundle.criticalPressurePa.known
+        || !bundle.acentricFactor.known)
+        return false;
+    ElementalComposition elemental{};
+    if (!elementalCompositionFromGraph(graph, elemental))
+        return false;
+    SaceScalarProperty mm{};
+    if (!saceDeriveMolarMass(elemental, mm) || !mm.known || !(mm.value > 0.0f))
+        return false;
+    double tb = bundle.normalBoilingPointK.value;
+    double pc = bundle.criticalPressurePa.value;
+    double omega = bundle.acentricFactor.value;
+    double mw = static_cast<double>(mm.value);
+    if (!std::isfinite(tb) || !std::isfinite(pc) || !std::isfinite(omega) || !std::isfinite(mw))
+        return false;
+    if (!(tb > 0.0) || !(pc > 0.0) || !(mw > 0.0))
+        return false;
+    out.normalBoilingPointK = tb;
+    out.criticalPressurePa = pc;
+    out.acentricFactor = omega;
+    out.molarMassGPerMol = mw;
+    out.valid = true;
+    return true;
+}
+
+bool saceGharagheiziGasThermalConductivityWPerMK(
+    SaceGharagheiziGasConductivityModel const &model,
+    double temperatureK,
+    double &outWPerMK)
+{
+    outWPerMK = 0.0;
+    if (!model.valid)
+        return false;
+    if (!std::isfinite(temperatureK) || !(temperatureK > 0.0))
+        return false;
+    double tb = model.normalBoilingPointK;
+    double pc = model.criticalPressurePa;
+    double omega = model.acentricFactor;
+    double mw = model.molarMassGPerMol;
+    if (!std::isfinite(tb) || !std::isfinite(pc) || !std::isfinite(omega) || !std::isfinite(mw))
+        return false;
+    if (!(tb > 0.0) || !(pc > 0.0) || !(mw > 0.0))
+        return false;
+    double pScale = pc * kGharagheiziPcScale;
+    if (!std::isfinite(pScale) || !(pScale > 0.0))
+        return false;
+    double invTb = 1.0 / tb;
+    if (!std::isfinite(invTb))
+        return false;
+    double twoOmega = 2.0 * omega;
+    double c = twoOmega + kGharagheiziConst32825;
+    double tCInvTb = temperatureK * c * invTb;
+    double denom = twoOmega + temperatureK - tCInvTb + kGharagheiziConst32825;
+    double denomScale = std::fabs(twoOmega) + std::fabs(temperatureK)
+        + std::fabs(tCInvTb) + std::fabs(kGharagheiziConst32825);
+    if (!std::isfinite(denom) || !(std::fabs(denom) > 1.0e-12 * (1.0 + denomScale)))
+        return false;
+    double bNum = twoOmega + 2.0 * temperatureK - 2.0 * tCInvTb + kGharagheiziConst32825;
+    if (!std::isfinite(bNum))
+        return false;
+    double B = temperatureK + bNum / denom - tCInvTb;
+    if (!std::isfinite(B))
+        return false;
+    double x0 = kGharagheiziX0Omega * omega + kGharagheiziX0P * pScale
+        + kGharagheiziX0B * B + kGharagheiziX0Const;
+    if (!std::isfinite(x0))
+        return false;
+    double aDen = kGharagheiziX0P * mw * pScale * temperatureK;
+    if (!std::isfinite(aDen) || !(std::fabs(aDen) > 0.0))
+        return false;
+    double aNum = twoOmega + temperatureK - tCInvTb + kGharagheiziConst32825;
+    double A = (aNum / aDen) * (x0 * x0);
+    if (!std::isfinite(A))
+        return false;
+    double kG = kGharagheiziK0 + kGharagheiziKT * temperatureK
+        - kGharagheiziKMW * mw + kGharagheiziKA * A;
+    if (!std::isfinite(kG) || !(kG > 0.0))
+        return false;
+    outWPerMK = kG;
+    return true;
+}
+
 bool saceEstimateJobackBundle(SaceMolecularGraph const &graph, SaceJobackEstimateBundle &out) {
     saceResetJobackEstimateBundle(out);
     SaceJobackFragmentationResult r = saceFragmentJobackGroups(graph, out.groups);
@@ -1027,6 +1182,21 @@ bool saceEstimateJobackBundle(SaceMolecularGraph const &graph, SaceJobackEstimat
         double st = 0.0;
         if (saceSastriRaoSurfaceTensionNPerM(sigma, kSaceHeatCapacityReferenceK, st))
             out.liquidSurfaceTensionAt298KNPerM = jobackLowScalar(st);
+    }
+    SaceSatoRiedelLiquidConductivityModel liqK{};
+    if (saceBuildSatoRiedelLiquidConductivityModelFromJoback(graph, out, liqK)) {
+        double kL = 0.0;
+        double rhoGate = 0.0;
+        if (saceSatoRiedelLiquidThermalConductivityWPerMK(liqK, kSaceHeatCapacityReferenceK, kL)
+            && densOk
+            && saceCostaldSaturatedLiquidDensityKgPerM3(dens, kSaceHeatCapacityReferenceK, rhoGate))
+            out.liquidThermalConductivityAt298KWPerMK = jobackLowScalar(kL);
+    }
+    SaceGharagheiziGasConductivityModel gasK{};
+    if (saceBuildGharagheiziGasConductivityModelFromJoback(graph, out, gasK)) {
+        double kG = 0.0;
+        if (saceGharagheiziGasThermalConductivityWPerMK(gasK, kSaceHeatCapacityReferenceK, kG))
+            out.gasThermalConductivityAt298KWPerMK = jobackLowScalar(kG);
     }
 
     return true;
@@ -1243,7 +1413,9 @@ void runSaceEstimationDiagnostics() {
             && !recE->properties.saturatedLiquidHeatCapacityAt298KJPerMolK.known
             && !recE->properties.saturatedLiquidDensityAt298KKgPerM3.known
             && !recE->properties.liquidDynamicViscosityAt298KPaS.known
-            && !recE->properties.liquidSurfaceTensionAt298KNPerM.known, "");
+            && !recE->properties.liquidSurfaceTensionAt298KNPerM.known
+            && !recE->properties.liquidThermalConductivityAt298KWPerMK.known
+            && !recE->properties.gasThermalConductivityAt298KWPerMK.known, "");
 
     SaceJobackEstimateBundle bunA{}, bunB{};
     emit("c2h6o_a_bundle_ok", saceEstimateJobackBundle(gA, bunA), "");
@@ -1336,7 +1508,15 @@ void runSaceEstimationDiagnostics() {
             && x.liquidSurfaceTensionAt298KNPerM.known
             && y.liquidSurfaceTensionAt298KNPerM.known
             && nearK(x.liquidSurfaceTensionAt298KNPerM.value,
-                y.liquidSurfaceTensionAt298KNPerM.value, 1e-8);
+                y.liquidSurfaceTensionAt298KNPerM.value, 1e-8)
+            && x.liquidThermalConductivityAt298KWPerMK.known
+            && y.liquidThermalConductivityAt298KWPerMK.known
+            && nearK(x.liquidThermalConductivityAt298KWPerMK.value,
+                y.liquidThermalConductivityAt298KWPerMK.value, 1e-6)
+            && x.gasThermalConductivityAt298KWPerMK.known
+            && y.gasThermalConductivityAt298KWPerMK.known
+            && nearK(x.gasThermalConductivityAt298KWPerMK.value,
+                y.gasThermalConductivityAt298KWPerMK.value, 1e-7);
     };
     SaceJobackEstimateBundle permB{}, bondB{}, endB{};
     emit("atom_permutation_preserves_joback_bundle",
@@ -1355,7 +1535,9 @@ void runSaceEstimationDiagnostics() {
             && !b.saturatedLiquidHeatCapacityAt298KJPerMolK.known
             && !b.saturatedLiquidDensityAt298KKgPerM3.known
             && !b.liquidDynamicViscosityAt298KPaS.known
-            && !b.liquidSurfaceTensionAt298KNPerM.known;
+            && !b.liquidSurfaceTensionAt298KNPerM.known
+            && !b.liquidThermalConductivityAt298KWPerMK.known
+            && !b.gasThermalConductivityAt298KWPerMK.known;
     };
     SaceJobackEstimateBundle waterB{}, methaneB{}, unsB{};
     emit("water_all_joback_unknown",
@@ -2335,6 +2517,231 @@ void runSaceEstimationDiagnostics() {
             && recA->properties.liquidSurfaceTensionAt298KNPerM.confidence == SaceConfidence::High
             && nearK(recA->properties.liquidSurfaceTensionAt298KNPerM.value, 0.022, 1e-8), "");
     emit("generated_record_still_unspawnable_after_surface_tension", recA && !recA->spawnable, "");
+
+    SaceSatoRiedelLiquidConductivityModel liqKA{}, liqKB{};
+    SaceGharagheiziGasConductivityModel gasKA{}, gasKB{};
+    bool liqKAOk = saceBuildSatoRiedelLiquidConductivityModelFromJoback(gA, bunA, liqKA);
+    bool liqKBOk = saceBuildSatoRiedelLiquidConductivityModelFromJoback(gB, bunB, liqKB);
+    bool gasKAOk = saceBuildGharagheiziGasConductivityModelFromJoback(gA, bunA, gasKA);
+    bool gasKBOk = saceBuildGharagheiziGasConductivityModelFromJoback(gB, bunB, gasKB);
+    emit("a_sato_riedel_model_builds", liqKAOk && liqKA.valid, "");
+    emit("b_sato_riedel_model_builds", liqKBOk && liqKB.valid, "");
+    emit("a_sato_riedel_tb_tc_mw",
+        liqKAOk && nearK(liqKA.normalBoilingPointK, 337.540009, 0.02)
+            && nearK(liqKA.criticalTemperatureK, 499.407379, 0.05)
+            && nearK(liqKA.molarMassGPerMol, 46.069, 1e-4),
+        std::to_string(liqKA.molarMassGPerMol));
+    emit("b_sato_riedel_tb_tc_mw",
+        liqKBOk && nearK(liqKB.normalBoilingPointK, 267.779999, 0.02)
+            && nearK(liqKB.criticalTemperatureK, 428.173981, 0.05)
+            && nearK(liqKB.molarMassGPerMol, 46.069, 1e-4),
+        std::to_string(liqKB.molarMassGPerMol));
+
+    double aKL298 = 0, bKL298 = 0, aKL300 = 0, bKL300 = 0, aKLTb = 0, bKLTb = 0;
+    bool aKL298Ok = saceSatoRiedelLiquidThermalConductivityWPerMK(liqKA, 298.15, aKL298);
+    bool bKL298Ok = saceSatoRiedelLiquidThermalConductivityWPerMK(liqKB, 298.15, bKL298);
+    bool aKL300Ok = saceSatoRiedelLiquidThermalConductivityWPerMK(liqKA, 300.0, aKL300);
+    bool bKL300Ok = saceSatoRiedelLiquidThermalConductivityWPerMK(liqKB, 300.0, bKL300);
+    bool aKLTbOk = saceSatoRiedelLiquidThermalConductivityWPerMK(liqKA, liqKA.normalBoilingPointK, aKLTb);
+    bool bKLTbOk = saceSatoRiedelLiquidThermalConductivityWPerMK(liqKB, liqKB.normalBoilingPointK, bKLTb);
+    emit("a_kl_298_15", aKL298Ok && nearK(aKL298, 0.182156, 2e-6), std::to_string(aKL298));
+    emit("b_kl_298_15", bKL298Ok && nearK(bKL298, 0.146343, 2e-6), std::to_string(bKL298));
+    emit("a_kl_300", aKL300Ok && nearK(aKL300, 0.181279, 2e-6), std::to_string(aKL300));
+    emit("b_kl_300", bKL300Ok && nearK(bKL300, 0.145298, 2e-6), std::to_string(bKL300));
+    emit("a_kl_tb", aKLTbOk && nearK(aKLTb, 0.162846, 2e-6), std::to_string(aKLTb));
+    emit("b_kl_tb", bKLTbOk && nearK(bKLTb, 0.162846, 2e-6), std::to_string(bKLTb));
+    emit("a_b_liquid_conductivity_differs_at_298_15",
+        aKL298Ok && bKL298Ok && aKL298 != bKL298, "");
+
+    double rejectedKL = 0.0;
+    emit("sato_rejects_nonpositive_t",
+        !saceSatoRiedelLiquidThermalConductivityWPerMK(liqKA, 0.0, rejectedKL)
+            && !saceSatoRiedelLiquidThermalConductivityWPerMK(liqKA, -1.0, rejectedKL)
+            && rejectedKL == 0.0, "");
+    emit("sato_rejects_t_ge_tc",
+        !saceSatoRiedelLiquidThermalConductivityWPerMK(liqKA, liqKA.criticalTemperatureK, rejectedKL)
+            && !saceSatoRiedelLiquidThermalConductivityWPerMK(liqKA, liqKA.criticalTemperatureK + 1.0, rejectedKL), "");
+    SaceSatoRiedelLiquidConductivityModel invalidLiqK{};
+    emit("sato_rejects_invalid_model",
+        !saceSatoRiedelLiquidThermalConductivityWPerMK(invalidLiqK, 298.15, rejectedKL), "");
+    emit("sato_rejects_nan_inf",
+        !saceSatoRiedelLiquidThermalConductivityWPerMK(liqKA, nanH, rejectedKL)
+            && !saceSatoRiedelLiquidThermalConductivityWPerMK(liqKA, infH, rejectedKL), "");
+
+    emit("a_gharagheizi_model_builds", gasKAOk && gasKA.valid, "");
+    emit("b_gharagheizi_model_builds", gasKBOk && gasKB.valid, "");
+    emit("a_gharagheizi_tb_pc_omega_mw",
+        gasKAOk && nearK(gasKA.normalBoilingPointK, 337.540009, 0.02)
+            && nearK(gasKA.criticalPressurePa, 5756641.5, 80.0)
+            && nearK(gasKA.acentricFactor, 0.556081, 2e-4)
+            && nearK(gasKA.molarMassGPerMol, 46.069, 1e-4),
+        std::to_string(gasKA.acentricFactor));
+    emit("b_gharagheizi_tb_pc_omega_mw",
+        gasKBOk && nearK(gasKB.normalBoilingPointK, 267.779999, 0.02)
+            && nearK(gasKB.criticalPressurePa, 4910798.0, 80.0)
+            && nearK(gasKB.acentricFactor, 0.193764, 2e-4)
+            && nearK(gasKB.molarMassGPerMol, 46.069, 1e-4),
+        std::to_string(gasKB.acentricFactor));
+
+    double aKG298 = 0, bKG298 = 0, aKG300 = 0, bKG300 = 0, aKGTb = 0, bKGTb = 0;
+    bool aKG298Ok = saceGharagheiziGasThermalConductivityWPerMK(gasKA, 298.15, aKG298);
+    bool bKG298Ok = saceGharagheiziGasThermalConductivityWPerMK(gasKB, 298.15, bKG298);
+    bool aKG300Ok = saceGharagheiziGasThermalConductivityWPerMK(gasKA, 300.0, aKG300);
+    bool bKG300Ok = saceGharagheiziGasThermalConductivityWPerMK(gasKB, 300.0, bKG300);
+    bool aKGTbOk = saceGharagheiziGasThermalConductivityWPerMK(gasKA, gasKA.normalBoilingPointK, aKGTb);
+    bool bKGTbOk = saceGharagheiziGasThermalConductivityWPerMK(gasKB, gasKB.normalBoilingPointK, bKGTb);
+    emit("a_kg_298_15", aKG298Ok && nearK(aKG298, 0.0166586, 2e-7), std::to_string(aKG298));
+    emit("b_kg_298_15", bKG298Ok && nearK(bKG298, 0.0175132, 2e-7), std::to_string(bKG298));
+    emit("a_kg_300", aKG300Ok && nearK(aKG300, 0.0168037, 2e-7), std::to_string(aKG300));
+    emit("b_kg_300", bKG300Ok && nearK(bKG300, 0.0176690, 2e-7), std::to_string(bKG300));
+    emit("a_kg_tb", aKGTbOk && nearK(aKGTb, 0.0198316, 2e-7), std::to_string(aKGTb));
+    emit("b_kg_tb", bKGTbOk && nearK(bKGTb, 0.0150205, 2e-7), std::to_string(bKGTb));
+
+    SaceGharagheiziGasConductivityModel denomModel = gasKA;
+    denomModel.acentricFactor = -2.0;
+    denomModel.normalBoilingPointK = 10.0;
+    double cZero = 2.0 * denomModel.acentricFactor + kGharagheiziConst32825;
+    double tZero = -cZero * denomModel.normalBoilingPointK
+        / (denomModel.normalBoilingPointK - cZero);
+    double rejectedKG = 0.0;
+    emit("gharagheizi_rejects_invalid_denominator",
+        tZero > 0.0 && !saceGharagheiziGasThermalConductivityWPerMK(denomModel, tZero, rejectedKG),
+        std::to_string(tZero));
+    emit("gharagheizi_rejects_nonpositive_t",
+        !saceGharagheiziGasThermalConductivityWPerMK(gasKA, 0.0, rejectedKG)
+            && !saceGharagheiziGasThermalConductivityWPerMK(gasKA, -1.0, rejectedKG)
+            && rejectedKG == 0.0, "");
+    emit("gharagheizi_rejects_nan_inf",
+        !saceGharagheiziGasThermalConductivityWPerMK(gasKA, nanH, rejectedKG)
+            && !saceGharagheiziGasThermalConductivityWPerMK(gasKA, infH, rejectedKG), "");
+    SaceGharagheiziGasConductivityModel invalidGasK{};
+    emit("gharagheizi_rejects_invalid_model",
+        !saceGharagheiziGasThermalConductivityWPerMK(invalidGasK, 298.15, rejectedKG), "");
+
+    double aKL07 = 0, aKL08 = 0, aKL09 = 0, bKL07 = 0, bKL08 = 0, bKL09 = 0;
+    double aKG07 = 0, aKG08 = 0, aKG09 = 0, bKG07 = 0, bKG08 = 0, bKG09 = 0;
+    bool aKL07Ok = saceSatoRiedelLiquidThermalConductivityWPerMK(liqKA, 0.7 * liqKA.criticalTemperatureK, aKL07);
+    bool aKL08Ok = saceSatoRiedelLiquidThermalConductivityWPerMK(liqKA, 0.8 * liqKA.criticalTemperatureK, aKL08);
+    bool aKL09Ok = saceSatoRiedelLiquidThermalConductivityWPerMK(liqKA, 0.9 * liqKA.criticalTemperatureK, aKL09);
+    bool bKL07Ok = saceSatoRiedelLiquidThermalConductivityWPerMK(liqKB, 0.7 * liqKB.criticalTemperatureK, bKL07);
+    bool bKL08Ok = saceSatoRiedelLiquidThermalConductivityWPerMK(liqKB, 0.8 * liqKB.criticalTemperatureK, bKL08);
+    bool bKL09Ok = saceSatoRiedelLiquidThermalConductivityWPerMK(liqKB, 0.9 * liqKB.criticalTemperatureK, bKL09);
+    bool aKG07Ok = saceGharagheiziGasThermalConductivityWPerMK(gasKA, 0.7 * bunA.criticalTemperatureK.value, aKG07);
+    bool aKG08Ok = saceGharagheiziGasThermalConductivityWPerMK(gasKA, 0.8 * bunA.criticalTemperatureK.value, aKG08);
+    bool aKG09Ok = saceGharagheiziGasThermalConductivityWPerMK(gasKA, 0.9 * bunA.criticalTemperatureK.value, aKG09);
+    bool bKG07Ok = saceGharagheiziGasThermalConductivityWPerMK(gasKB, 0.7 * bunB.criticalTemperatureK.value, bKG07);
+    bool bKG08Ok = saceGharagheiziGasThermalConductivityWPerMK(gasKB, 0.8 * bunB.criticalTemperatureK.value, bKG08);
+    bool bKG09Ok = saceGharagheiziGasThermalConductivityWPerMK(gasKB, 0.9 * bunB.criticalTemperatureK.value, bKG09);
+    emit("a_kl_tr_0_7", aKL07Ok && nearK(aKL07, 0.156637, 2e-6), std::to_string(aKL07));
+    emit("a_kl_tr_0_8", aKL08Ok && nearK(aKL08, 0.128840, 2e-6), std::to_string(aKL08));
+    emit("a_kl_tr_0_9", aKL09Ok && nearK(aKL09, 0.0956998, 2e-6), std::to_string(aKL09));
+    emit("b_kl_tr_0_7", bKL07Ok && nearK(bKL07, 0.145456, 2e-6), std::to_string(bKL07));
+    emit("b_kl_tr_0_8", bKL08Ok && nearK(bKL08, 0.119643, 2e-6), std::to_string(bKL08));
+    emit("b_kl_tr_0_9", bKL09Ok && nearK(bKL09, 0.0888684, 2e-6), std::to_string(bKL09));
+    emit("a_kg_tr_0_7", aKG07Ok && nearK(aKG07, 0.0208372, 2e-7), std::to_string(aKG07));
+    emit("a_kg_tr_0_8", aKG08Ok && nearK(aKG08, 0.0251837, 2e-7), std::to_string(aKG08));
+    emit("a_kg_tr_0_9", aKG09Ok && nearK(aKG09, 0.0298152, 2e-7), std::to_string(aKG09));
+    emit("b_kg_tr_0_7", bKG07Ok && nearK(bKG07, 0.0176455, 2e-7), std::to_string(bKG07));
+    emit("b_kg_tr_0_8", bKG08Ok && nearK(bKG08, 0.0213782, 2e-7), std::to_string(bKG08));
+    emit("b_kg_tr_0_9", bKG09Ok && nearK(bKG09, 0.0253559, 2e-7), std::to_string(bKG09));
+
+    SaceSatoRiedelLiquidConductivityModel permLiqK{}, bondLiqK{}, endLiqK{};
+    SaceGharagheiziGasConductivityModel permGasK{}, bondGasK{}, endGasK{};
+    double permKL = 0, bondKL = 0, endKL = 0, permKG = 0, bondKG = 0, endKG = 0;
+    emit("atom_permutation_preserves_conductivity",
+        saceBuildSatoRiedelLiquidConductivityModelFromJoback(permuteGraph(gA), permB, permLiqK)
+            && saceBuildGharagheiziGasConductivityModelFromJoback(permuteGraph(gA), permB, permGasK)
+            && saceSatoRiedelLiquidThermalConductivityWPerMK(permLiqK, 298.15, permKL)
+            && saceGharagheiziGasThermalConductivityWPerMK(permGasK, 298.15, permKG)
+            && nearK(permKL, aKL298, 1e-12) && nearK(permKG, aKG298, 1e-12), "");
+    emit("bond_reorder_preserves_conductivity",
+        saceBuildSatoRiedelLiquidConductivityModelFromJoback(reorderBonds(gA), bondB, bondLiqK)
+            && saceBuildGharagheiziGasConductivityModelFromJoback(reorderBonds(gA), bondB, bondGasK)
+            && saceSatoRiedelLiquidThermalConductivityWPerMK(bondLiqK, 298.15, bondKL)
+            && saceGharagheiziGasThermalConductivityWPerMK(bondGasK, 298.15, bondKG)
+            && nearK(bondKL, aKL298, 1e-12) && nearK(bondKG, aKG298, 1e-12), "");
+    emit("reversed_endpoints_preserve_conductivity",
+        saceBuildSatoRiedelLiquidConductivityModelFromJoback(reverseEnds(gA), endB, endLiqK)
+            && saceBuildGharagheiziGasConductivityModelFromJoback(reverseEnds(gA), endB, endGasK)
+            && saceSatoRiedelLiquidThermalConductivityWPerMK(endLiqK, 298.15, endKL)
+            && saceGharagheiziGasThermalConductivityWPerMK(endGasK, 298.15, endKG)
+            && nearK(endKL, aKL298, 1e-12) && nearK(endKG, aKG298, 1e-12), "");
+
+    emit("catalog_a_liquid_conductivity_matches_direct",
+        recA && recA->properties.liquidThermalConductivityAt298KWPerMK.known
+            && nearK(recA->properties.liquidThermalConductivityAt298KWPerMK.value, aKL298, 2e-6)
+            && nearK(bunA.liquidThermalConductivityAt298KWPerMK.value, aKL298, 2e-6), "");
+    emit("catalog_b_liquid_conductivity_matches_direct",
+        recB && recB->properties.liquidThermalConductivityAt298KWPerMK.known
+            && nearK(recB->properties.liquidThermalConductivityAt298KWPerMK.value, bKL298, 2e-6)
+            && nearK(bunB.liquidThermalConductivityAt298KWPerMK.value, bKL298, 2e-6), "");
+    emit("catalog_a_gas_conductivity_matches_direct",
+        recA && recA->properties.gasThermalConductivityAt298KWPerMK.known
+            && nearK(recA->properties.gasThermalConductivityAt298KWPerMK.value, aKG298, 2e-7)
+            && nearK(bunA.gasThermalConductivityAt298KWPerMK.value, aKG298, 2e-7), "");
+    emit("catalog_b_gas_conductivity_matches_direct",
+        recB && recB->properties.gasThermalConductivityAt298KWPerMK.known
+            && nearK(recB->properties.gasThermalConductivityAt298KWPerMK.value, bKG298, 2e-7)
+            && nearK(bunB.gasThermalConductivityAt298KWPerMK.value, bKG298, 2e-7), "");
+    emit("conductivity_structural_estimate_low",
+        bunA.liquidThermalConductivityAt298KWPerMK.source == SacePropertySource::StructuralEstimate
+            && bunA.liquidThermalConductivityAt298KWPerMK.confidence == SaceConfidence::Low
+            && bunA.gasThermalConductivityAt298KWPerMK.source == SacePropertySource::StructuralEstimate
+            && bunA.gasThermalConductivityAt298KWPerMK.confidence == SaceConfidence::Low
+            && recA && recA->properties.liquidThermalConductivityAt298KWPerMK.source
+                == SacePropertySource::StructuralEstimate
+            && recA->properties.gasThermalConductivityAt298KWPerMK.source
+                == SacePropertySource::StructuralEstimate, "");
+    emit("water_no_generated_conductivity",
+        !waterB.liquidThermalConductivityAt298KWPerMK.known
+            && !waterB.gasThermalConductivityAt298KWPerMK.known, "");
+    emit("methane_no_generated_conductivity",
+        !methaneB.liquidThermalConductivityAt298KWPerMK.known
+            && !methaneB.gasThermalConductivityAt298KWPerMK.known, "");
+    emit("conductivity_not_in_canonical_identity",
+        std::strstr(sig, "conductivity") == nullptr && std::strstr(sig, "0.182") == nullptr, sig);
+    emit("conductivity_model_not_in_canonical_identity",
+        std::strstr(sig, "Sato") == nullptr && std::strstr(sig, "Gharagheizi") == nullptr, sig);
+
+    SaceGeneratedRecord *mutK = cat.recordMutable(refA.generatedId);
+    if (mutK) {
+        mutK->properties.liquidThermalConductivityAt298KWPerMK = saceUnknownScalarProperty();
+        mutK->properties.gasThermalConductivityAt298KWPerMK = saceUnknownScalarProperty();
+    }
+    bool reattachK = cat.attachMolecularGraph(refA.generatedId, "synthetic-structure-a", gA);
+    recA = cat.record(refA.generatedId);
+    emit("same_graph_reattach_backfills_conductivity",
+        reattachK && recA && recA->properties.liquidThermalConductivityAt298KWPerMK.known
+            && recA->properties.gasThermalConductivityAt298KWPerMK.known
+            && recA->properties.liquidThermalConductivityAt298KWPerMK.source
+                == SacePropertySource::StructuralEstimate
+            && recA->properties.gasThermalConductivityAt298KWPerMK.source
+                == SacePropertySource::StructuralEstimate
+            && nearK(recA->properties.liquidThermalConductivityAt298KWPerMK.value, aKL298, 2e-6)
+            && nearK(recA->properties.gasThermalConductivityAt298KWPerMK.value, aKG298, 2e-7), "");
+
+    SaceGeneratedRecord *mutKRef = cat.recordMutable(refA.generatedId);
+    if (mutKRef) {
+        mutKRef->properties.liquidThermalConductivityAt298KWPerMK.known = true;
+        mutKRef->properties.liquidThermalConductivityAt298KWPerMK.value = 0.17f;
+        mutKRef->properties.liquidThermalConductivityAt298KWPerMK.source = SacePropertySource::Reference;
+        mutKRef->properties.liquidThermalConductivityAt298KWPerMK.confidence = SaceConfidence::High;
+        mutKRef->properties.gasThermalConductivityAt298KWPerMK.known = true;
+        mutKRef->properties.gasThermalConductivityAt298KWPerMK.value = 0.02f;
+        mutKRef->properties.gasThermalConductivityAt298KWPerMK.source = SacePropertySource::Reference;
+        mutKRef->properties.gasThermalConductivityAt298KWPerMK.confidence = SaceConfidence::High;
+    }
+    bool reattachKKeep = cat.attachMolecularGraph(refA.generatedId, "synthetic-structure-a", gA);
+    recA = cat.record(refA.generatedId);
+    emit("same_graph_backfill_preserves_reference_high_conductivity",
+        reattachKKeep && recA
+            && recA->properties.liquidThermalConductivityAt298KWPerMK.source == SacePropertySource::Reference
+            && recA->properties.liquidThermalConductivityAt298KWPerMK.confidence == SaceConfidence::High
+            && recA->properties.gasThermalConductivityAt298KWPerMK.source == SacePropertySource::Reference
+            && recA->properties.gasThermalConductivityAt298KWPerMK.confidence == SaceConfidence::High
+            && nearK(recA->properties.liquidThermalConductivityAt298KWPerMK.value, 0.17, 1e-6)
+            && nearK(recA->properties.gasThermalConductivityAt298KWPerMK.value, 0.02, 1e-6), "");
+    emit("generated_record_still_unspawnable_after_conductivity", recA && !recA->spawnable, "");
 
     cat.clear();
     out << "summary\t" << (failed == 0 ? "PASS" : "FAIL") << '\t' << passed << " passed, "
