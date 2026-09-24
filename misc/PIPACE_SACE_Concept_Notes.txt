@@ -859,6 +859,30 @@ Implemented under chemistry/SaceEstimation.* :
   viscosity model, not from a single stored scalar.
 - Unsupported chemistry stays Unknown. Built-in Water viscosity is unchanged.
 
+PHASE 15 LANDING (SASTRI-RAO LIQUID SURFACE TENSION)
+====================================================
+Implemented under chemistry/SaceEstimation.* :
+
+- sigma = K * Pc_bar^x * Tb^y * Tc^z * [(1-Tr)/(1-Tbr)]^m
+- Raw correlation is mN/m; SACE stores/queries physical N/m (* 1e-3).
+- Pc_bar = Pc[Pa] * 1e-5. Coherent Joback Tb/Tc/Pc only; no mixed stored fields.
+- Classification from existing SaceFunctionalProfile: supported && hydroxylCount > 0
+  -> Alcohol coefficients, otherwise GeneralOrganic. Water is not an alcohol.
+- General: K=0.158, x=0.50, y=-1.5, z=1.85, m=11/9.
+- Alcohol: K=2.28, x=0.25, y=0.175, z=0, m=0.8. No acid branch.
+- Provenance StructuralEstimate / Low. Not canonical identity.
+- Physical N/m is not FluidProperties::surfaceTension sandbox units. No FluidEngine map.
+- sigma(Tc) = 0. T > Tc rejected. No invented low-T cutoff.
+- A mathematical value below an unknown melting/triple point does not prove liquid stability.
+- Graph A alcohol-like sigma(298.15) ~= 0.0207066 N/m.
+- Graph B general organic sigma(298.15) ~= 0.0144424 N/m. Same formula, different structure.
+- Readiness: A/B LiquidSurfaceTension missing = false. Still missing
+  LiquidThermalConductivity and GasThermalConductivity.
+  thermo-ready remains true; live-ready remains false.
+- Assess surface-tension readiness from trusted graph -> coherent Joback bundle ->
+  Sastri-Rao model, not from a single stored scalar.
+- Unsupported chemistry stays Unknown. Built-in Water surface tension is unchanged.
+
 
 
 

@@ -405,6 +405,25 @@ void runSacePropertyDiagnostics() {
             && jobackViscDst.confidence == SaceConfidence::High
             && nearMass(jobackViscDst.value, 0.0012, 1e-8), "");
 
+    SaceGeneratedProperties blankSigma{};
+    emit("liquid_surface_tension_298_defaults_unknown",
+        !blankSigma.liquidSurfaceTensionAt298KNPerM.known
+            && blankSigma.liquidSurfaceTensionAt298KNPerM.source == SacePropertySource::Unknown, "");
+    SaceScalarProperty refSigma = makeKnown(0.022f, SacePropertySource::Reference, SaceConfidence::High);
+    SaceScalarProperty jobackSigma = makeKnown(0.0207066f, SacePropertySource::StructuralEstimate, SaceConfidence::Low);
+    emit("structural_estimate_low_does_not_overwrite_reference_high_surface_tension",
+        !saceAssignScalarProperty(refSigma, jobackSigma)
+            && refSigma.source == SacePropertySource::Reference
+            && refSigma.confidence == SaceConfidence::High
+            && nearMass(refSigma.value, 0.022, 1e-8), "");
+    SaceScalarProperty jobackSigmaDst = makeKnown(0.0207066f, SacePropertySource::StructuralEstimate, SaceConfidence::Low);
+    SaceScalarProperty refSigmaSrc = makeKnown(0.022f, SacePropertySource::Reference, SaceConfidence::High);
+    emit("reference_high_overwrites_structural_estimate_low_surface_tension",
+        saceAssignScalarProperty(jobackSigmaDst, refSigmaSrc)
+            && jobackSigmaDst.source == SacePropertySource::Reference
+            && jobackSigmaDst.confidence == SaceConfidence::High
+            && nearMass(jobackSigmaDst.value, 0.022, 1e-8), "");
+
     out << "summary\t" << (failed == 0 ? "PASS" : "FAIL") << '\t' << passed << " passed, "
         << failed << " failed\n";
 }

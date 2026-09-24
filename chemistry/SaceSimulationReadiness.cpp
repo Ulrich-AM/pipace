@@ -159,8 +159,14 @@ SaceSimulationReadiness saceAssessSimulationReadiness(SaceGeneratedRecord const 
     if (!viscOk)
         markMissing(r, SaceSimulationRequirement::LiquidViscosity);
 
+    SaceSastriRaoSurfaceTensionModel sigma{};
+    bool sigmaOk = bundleOk
+        && saceBuildSastriRaoSurfaceTensionModelFromJoback(record.molecularGraph, bundle, sigma)
+        && sigma.valid;
+    if (!sigmaOk)
+        markMissing(r, SaceSimulationRequirement::LiquidSurfaceTension);
+
     // Remaining transport estimates are not implemented. Never invent Water/Air fallbacks.
-    markMissing(r, SaceSimulationRequirement::LiquidSurfaceTension);
     markMissing(r, SaceSimulationRequirement::LiquidThermalConductivity);
     markMissing(r, SaceSimulationRequirement::GasThermalConductivity);
 
@@ -228,8 +234,8 @@ void runSaceReadinessDiagnostics() {
         saceReadinessMissing(a, SaceSimulationRequirement::LiquidThermalConductivity), "");
     emit("a_liquid_viscosity_not_missing",
         !saceReadinessMissing(a, SaceSimulationRequirement::LiquidViscosity), "");
-    emit("a_missing_liquid_surface_tension",
-        saceReadinessMissing(a, SaceSimulationRequirement::LiquidSurfaceTension), "");
+    emit("a_liquid_surface_tension_not_missing",
+        !saceReadinessMissing(a, SaceSimulationRequirement::LiquidSurfaceTension), "");
 
     SaceSimulationReadiness b = recB ? saceAssessSimulationReadiness(*recB) : SaceSimulationReadiness{};
     emit("b_gas_thermo_ready", b.gasThermoReady, "");
@@ -244,8 +250,8 @@ void runSaceReadinessDiagnostics() {
         saceReadinessMissing(b, SaceSimulationRequirement::LiquidThermalConductivity), "");
     emit("b_liquid_viscosity_not_missing",
         !saceReadinessMissing(b, SaceSimulationRequirement::LiquidViscosity), "");
-    emit("b_missing_liquid_surface_tension",
-        saceReadinessMissing(b, SaceSimulationRequirement::LiquidSurfaceTension), "");
+    emit("b_liquid_surface_tension_not_missing",
+        !saceReadinessMissing(b, SaceSimulationRequirement::LiquidSurfaceTension), "");
     emit("a_b_readiness_class_matches", recA && recB && classMatches(a, b), "");
     emit("a_b_numerical_properties_differ",
         recA && recB
@@ -271,7 +277,8 @@ void runSaceReadinessDiagnostics() {
         recE && !e.liveGasReady && !e.liveLiquidReady && !e.liveLiquidGasPhaseChangeReady, "");
 
     emit("missing_mask_helper_works",
-        saceReadinessMissing(a, SaceSimulationRequirement::LiquidSurfaceTension)
+        saceReadinessMissing(a, SaceSimulationRequirement::LiquidThermalConductivity)
+            && !saceReadinessMissing(a, SaceSimulationRequirement::LiquidSurfaceTension)
             && !saceReadinessMissing(a, SaceSimulationRequirement::LiquidViscosity)
             && !saceReadinessMissing(a, SaceSimulationRequirement::MolarMass)
             && !saceReadinessMissing(a, SaceSimulationRequirement::MolecularGraph), "");

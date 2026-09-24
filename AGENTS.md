@@ -55,8 +55,8 @@ PIPACE/
     SaceMolecule.h/.cpp                        # Phase 4 small-molecule graphs (not canonical identity)
     SaceDescriptors.h/.cpp                     # Phase 5 trusted graph binding helpers + structural descriptors
     SaceFunctional.h/.cpp                      # Phase 6 H/C/O functional motifs (not identity, not properties)
-    SaceEstimation.h/.cpp                      # Phase 7–14 Joback Tb/Tc/Pc/Vc/Hvap/Cp + Lee-Kesler/Watson/Rowlinson-Poling/COSTALD + viscosity (StructuralEstimate/Low)
-    SaceSimulationReadiness.h/.cpp             # Phase 13–14 generated thermo vs live simulation preflight (not spawnable)
+    SaceEstimation.h/.cpp                      # Phase 7–15 Joback thermo + Lee-Kesler/Watson/COSTALD + viscosity + Sastri-Rao surface tension (StructuralEstimate/Low)
+    SaceSimulationReadiness.h/.cpp             # Phase 13–15 generated thermo vs live simulation preflight (not spawnable)
   sim/
     SimulationQuality.h/.cpp                   # SimulationQualityProfile + tick scheduler
   docs/
@@ -109,7 +109,9 @@ SACE Phase 12 adds COSTALD saturated-liquid molar volume Vs(T) and density rho(T
 
 SACE Phase 13 (`chemistry/SaceSimulationReadiness`) is a computed preflight for generated records only. It distinguishes gas/liquid thermodynamic readiness and liquid–gas equilibrium readiness from live GasEngine/FluidEngine/phase-change readiness. Built-in `ThermalProperties` currently has one general `conductivity` plus `solidConductivity`; readiness still names liquid vs gas conductivity separately for a later compiler. Physical SACE kg/m³ must not be written into sandbox-relative `FluidProperties`. Readiness is not identity, is not stored on the catalog record, and is not for physics ticks. Generated records remain unspawnable.
 
-SACE Phase 14 adds Joback liquid dynamic viscosity `mu [Pa*s] = MW[g/mol] * exp(A/T + B)` from the same six groups (`StructuralEstimate` / `Low`). A = SUM(mu_a) − 597.82, B = SUM(mu_b) − 11.202. MW stays numerical g/mol in the Joback equation (not kg/mol). Output is physical Pa·s, not `FluidProperties::viscosity` sandbox units; no FluidEngine mapping. The source does not publish a universal validity temperature interval; Phase 14 does not invent one. The stored 298.15 K scalar is gated by a successful COSTALD liquid-density evaluation at that T (domain gate only; density does not enter μ). Graph A/B no longer miss readiness `LiquidViscosity`; they remain not live-ready because surface tension and liquid/gas thermal conductivity are still missing. Unsupported chemistry stays Unknown. No ethanol correction.
+SACE Phase 14 adds Joback liquid dynamic viscosity `mu [Pa*s] = MW[g/mol] * exp(A/T + B)` from the same six groups (`StructuralEstimate` / `Low`). A = SUM(mu_a) − 597.82, B = SUM(mu_b) − 11.202. MW stays numerical g/mol in the Joback equation (not kg/mol). Output is physical Pa·s, not `FluidProperties::viscosity` sandbox units; no FluidEngine mapping. The source does not publish a universal validity temperature interval; Phase 14 does not invent one. The stored 298.15 K scalar is gated by a successful COSTALD liquid-density evaluation at that T (domain gate only; density does not enter μ). Graph A/B no longer miss readiness `LiquidViscosity`. Unsupported chemistry stays Unknown. No ethanol correction.
+
+SACE Phase 15 adds Sastri–Rao (1995) liquid surface tension from the same coherent Joback Tb/Tc/Pc plus the SACE functional profile (`StructuralEstimate` / `Low`). General organic: `K=0.158`, `x=0.50`, `y=-1.5`, `z=1.85`, `m=11/9`. Alcohol-like (`supported` profile with `hydroxylCount > 0`): `K=2.28`, `x=0.25`, `y=0.175`, `z=0`, `m=0.8`. No acid branch. `Pc` enters as bar (`Pa × 1e-5`); the correlation returns mN/m and is stored/queried as physical N/m. `σ(Tc)=0`. A mathematical value below an unknown melting/triple point is not proof of liquid stability. Physical N/m is not `FluidProperties::surfaceTension` sandbox units; no FluidEngine mapping. Graph A/B no longer miss readiness `LiquidSurfaceTension`; they remain not live-ready because liquid/gas thermal conductivity are still missing. Water is not an alcohol and is not routed through this estimator.
 
 These mappings are **implementation, not laws**:
 
@@ -273,9 +275,10 @@ adds Joback ideal-gas Cp(T) (298–1000 K) and Rowlinson–Poling liquid Cp; it 
 not live ThermalEngine data. **SACE Phase 12** adds COSTALD saturated-liquid
 Vs(T)/rho(T) with Joback Vc as V* fallback; it is not live FluidEngine density.
 **SACE Phase 13** adds generated thermo vs live simulation readiness. **SACE Phase 14**
-adds Joback liquid dynamic viscosity (Pa·s, MW in g/mol); Graph A/B are thermo-ready
-and no longer miss LiquidViscosity, but remain not live-ready until surface tension
-and thermal conductivities exist.
+adds Joback liquid dynamic viscosity (Pa·s, MW in g/mol). **SACE Phase 15** adds
+Sastri–Rao liquid surface tension (N/m) from coherent Joback Tb/Tc/Pc plus
+functional hydroxyl classification. Graph A/B no longer miss LiquidViscosity or
+LiquidSurfaceTension, but remain not live-ready until thermal conductivities exist.
 Live `Liquid ⇄ Gas` and `Solid ⇄ Liquid` are generic by
 SubstanceId (`world/PhaseChangeEngine.cpp`). Honey mixtures still skip phase
 change. Runtime-generated world matter, reaction families, graph isomorphism,
