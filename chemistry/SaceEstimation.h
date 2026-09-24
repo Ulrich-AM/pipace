@@ -6,7 +6,7 @@
 
 #include <cstdint>
 
-// SACE Phase 7–14: Joback-Reid 1987 subset + Lee-Kesler Psat + Watson Hvap + Cp + COSTALD + viscosity.
+// SACE Phase 7–15: Joback-Reid 1987 subset + Lee-Kesler Psat + Watson Hvap + Cp + COSTALD + viscosity + Sastri-Rao sigma.
 // Phase 7: Tb[K] = 198.2 + SUM(Tb groups).
 // Phase 8: Tc, Pc, Vc from the same six groups and the Joback Tb (not stored Tb).
 // Phase 9: Lee-Kesler omega and Psat(T) from the same Joback Tb/Tc/Pc tuple.
@@ -14,6 +14,8 @@
 // Phase 11: Joback ideal-gas Cp(T) + Rowlinson-Poling liquid Cp(T). 298–1000 K.
 // Phase 12: COSTALD saturated-liquid Vs(T)/rho(T). Joback Vc as V* fallback.
 // Phase 14: Joback liquid dynamic viscosity mu = MW[g/mol] * exp(A/T + B) in Pa*s.
+// Phase 15: Sastri-Rao liquid surface tension in N/m from coherent Joback Tb/Tc/Pc
+// plus functional hydroxyl classification (Alcohol vs GeneralOrganic).
 // No published universal Joback viscosity temperature interval is claimed.
 // StructuralEstimate / Low. Unsupported chemistry stays Unknown.
 // Not canonical identity. Not live PhaseProperties. Do not call from physics ticks.
@@ -86,6 +88,19 @@ constexpr double kJobackViscMuBAlcoholOH = -5.057;
 constexpr double kJobackViscMuAEtherO = 122.09;
 constexpr double kJobackViscMuBEtherO = -0.386;
 
+constexpr double kSastriRaoPcPaToBar = 1.0e-5;
+constexpr double kSastriRaoMNPerMToNPerM = 1.0e-3;
+constexpr double kSastriRaoGeneralK = 0.158;
+constexpr double kSastriRaoGeneralX = 0.50;
+constexpr double kSastriRaoGeneralY = -1.5;
+constexpr double kSastriRaoGeneralZ = 1.85;
+constexpr double kSastriRaoGeneralM = 11.0 / 9.0;
+constexpr double kSastriRaoAlcoholK = 2.28;
+constexpr double kSastriRaoAlcoholX = 0.25;
+constexpr double kSastriRaoAlcoholY = 0.175;
+constexpr double kSastriRaoAlcoholZ = 0.0;
+constexpr double kSastriRaoAlcoholM = 0.8;
+
 constexpr double kJobackCpAIntercept = -37.93;
 constexpr double kJobackCpBIntercept = 0.210;
 constexpr double kJobackCpCIntercept = -3.91e-4;
@@ -151,6 +166,7 @@ struct SaceJobackEstimateBundle {
     SaceScalarProperty saturatedLiquidHeatCapacityAt298KJPerMolK{};
     SaceScalarProperty saturatedLiquidDensityAt298KKgPerM3{};
     SaceScalarProperty liquidDynamicViscosityAt298KPaS{};
+    SaceScalarProperty liquidSurfaceTensionAt298KNPerM{};
 };
 
 // Lee-Kesler 1975 corresponding-states vapor-pressure model.
@@ -221,6 +237,24 @@ struct SaceJobackLiquidViscosityModel {
     double aKelvin = 0.0;
     double bDimensionless = 0.0;
     double molarMassGPerMol = 0.0;
+    bool valid = false;
+};
+
+enum class SaceSurfaceTensionClass : uint8_t {
+    GeneralOrganic = 0,
+    Alcohol
+};
+
+// Sastri-Rao 1995 liquid surface tension from one coherent Joback Tb/Tc/Pc
+// tuple plus SACE functional hydroxyl classification. Output is physical N/m,
+// not FluidProperties::surfaceTension sandbox units. No acid branch.
+// A value below an unknown melting/triple point is not proof of liquid stability.
+// sigma(Tc) = 0. Not live FluidEngine.
+struct SaceSastriRaoSurfaceTensionModel {
+    double normalBoilingPointK = 0.0;
+    double criticalTemperatureK = 0.0;
+    double criticalPressurePa = 0.0;
+    SaceSurfaceTensionClass chemicalClass = SaceSurfaceTensionClass::GeneralOrganic;
     bool valid = false;
 };
 
@@ -389,5 +423,14 @@ bool saceJobackLiquidViscosityPaS(
     SaceJobackLiquidViscosityModel const &model,
     double temperatureK,
     double &outPaS);
+
+bool saceBuildSastriRaoSurfaceTensionModelFromJoback(
+    SaceMolecularGraph const &graph,
+    SaceJobackEstimateBundle const &bundle,
+    SaceSastriRaoSurfaceTensionModel &out);
+bool saceSastriRaoSurfaceTensionNPerM(
+    SaceSastriRaoSurfaceTensionModel const &model,
+    double temperatureK,
+    double &outNPerM);
 
 void runSaceEstimationDiagnostics();

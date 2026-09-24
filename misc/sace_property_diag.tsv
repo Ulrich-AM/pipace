@@ -47,4 +47,7 @@ test	reference_high_overwrites_structural_estimate_low_density	PASS
 test	liquid_dynamic_viscosity_298_defaults_unknown	PASS	
 test	structural_estimate_low_does_not_overwrite_reference_high_viscosity	PASS	
 test	reference_high_overwrites_structural_estimate_low_viscosity	PASS	
-summary	PASS	49 passed, 0 failed
+test	liquid_surface_tension_298_defaults_unknown	PASS	
+test	structural_estimate_low_does_not_overwrite_reference_high_surface_tension	PASS	
+test	reference_high_overwrites_structural_estimate_low_surface_tension	PASS	
+summary	PASS	52 passed, 0 failed

@@ -64,6 +64,8 @@ void SaceCatalog::applyStructuralThermoEstimates(SaceGeneratedRecord &record,
         bundle.saturatedLiquidDensityAt298KKgPerM3);
     saceAssignScalarProperty(record.properties.liquidDynamicViscosityAt298KPaS,
         bundle.liquidDynamicViscosityAt298KPaS);
+    saceAssignScalarProperty(record.properties.liquidSurfaceTensionAt298KNPerM,
+        bundle.liquidSurfaceTensionAt298KNPerM);
 }
 
 ChemicalIdentity SaceCatalog::identityView(SaceGeneratedRecord const &rec) const {

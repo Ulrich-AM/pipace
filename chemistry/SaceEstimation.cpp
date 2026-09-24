@@ -1,6 +1,7 @@
 #include "chemistry/SaceEstimation.h"
 
 #include "chemistry/SaceCatalog.h"
+#include "chemistry/SaceFunctional.h"
 #include "chemistry/SaceIdentity.h"
 #include "fluid/DiagOutput.h"
 #include "substance/SubstanceProperties.h"
@@ -843,6 +844,97 @@ bool saceJobackLiquidViscosityPaS(
     return true;
 }
 
+bool saceBuildSastriRaoSurfaceTensionModelFromJoback(
+    SaceMolecularGraph const &graph,
+    SaceJobackEstimateBundle const &bundle,
+    SaceSastriRaoSurfaceTensionModel &out)
+{
+    out = {};
+    if (!bundle.normalBoilingPointK.known || !bundle.criticalTemperatureK.known
+        || !bundle.criticalPressurePa.known)
+        return false;
+    double tb = bundle.normalBoilingPointK.value;
+    double tc = bundle.criticalTemperatureK.value;
+    double pc = bundle.criticalPressurePa.value;
+    if (!std::isfinite(tb) || !std::isfinite(tc) || !std::isfinite(pc))
+        return false;
+    if (!(tb > 0.0) || !(tc > 0.0) || !(pc > 0.0) || !(tb < tc))
+        return false;
+    SaceFunctionalProfile profile{};
+    if (!deriveFunctionalProfile(graph, profile))
+        return false;
+    out.normalBoilingPointK = tb;
+    out.criticalTemperatureK = tc;
+    out.criticalPressurePa = pc;
+    out.chemicalClass = (profile.supported && profile.hydroxylCount > 0)
+        ? SaceSurfaceTensionClass::Alcohol
+        : SaceSurfaceTensionClass::GeneralOrganic;
+    out.valid = true;
+    return true;
+}
+
+bool saceSastriRaoSurfaceTensionNPerM(
+    SaceSastriRaoSurfaceTensionModel const &model,
+    double temperatureK,
+    double &outNPerM)
+{
+    outNPerM = 0.0;
+    if (!model.valid)
+        return false;
+    if (!std::isfinite(temperatureK) || !(temperatureK > 0.0))
+        return false;
+    double tb = model.normalBoilingPointK;
+    double tc = model.criticalTemperatureK;
+    double pc = model.criticalPressurePa;
+    if (!std::isfinite(tb) || !std::isfinite(tc) || !std::isfinite(pc))
+        return false;
+    if (!(tb > 0.0) || !(tc > 0.0) || !(pc > 0.0) || !(tb < tc))
+        return false;
+    if (temperatureK > tc)
+        return false;
+    if (!(temperatureK < tc)) {
+        outNPerM = 0.0;
+        return true;
+    }
+    double tbr = tb / tc;
+    double tr = temperatureK / tc;
+    if (!(tbr > 0.0) || !(tbr < 1.0) || !(tr > 0.0) || !(tr < 1.0))
+        return false;
+    double oneMinusTbr = 1.0 - tbr;
+    double oneMinusTr = 1.0 - tr;
+    if (!(oneMinusTbr > 0.0) || !(oneMinusTr > 0.0))
+        return false;
+    double k = kSastriRaoGeneralK;
+    double x = kSastriRaoGeneralX;
+    double y = kSastriRaoGeneralY;
+    double z = kSastriRaoGeneralZ;
+    double m = kSastriRaoGeneralM;
+    if (model.chemicalClass == SaceSurfaceTensionClass::Alcohol) {
+        k = kSastriRaoAlcoholK;
+        x = kSastriRaoAlcoholX;
+        y = kSastriRaoAlcoholY;
+        z = kSastriRaoAlcoholZ;
+        m = kSastriRaoAlcoholM;
+    }
+    double pcBar = pc * kSastriRaoPcPaToBar;
+    if (!std::isfinite(pcBar) || !(pcBar > 0.0))
+        return false;
+    double pcTerm = std::pow(pcBar, x);
+    double tbTerm = std::pow(tb, y);
+    double tcTerm = std::pow(tc, z);
+    double ratio = oneMinusTr / oneMinusTbr;
+    double ratioTerm = std::pow(ratio, m);
+    if (!std::isfinite(pcTerm) || !std::isfinite(tbTerm) || !std::isfinite(tcTerm)
+        || !std::isfinite(ratio) || !std::isfinite(ratioTerm))
+        return false;
+    double sigmaMNPerM = k * pcTerm * tbTerm * tcTerm * ratioTerm;
+    double sigmaNPerM = sigmaMNPerM * kSastriRaoMNPerMToNPerM;
+    if (!std::isfinite(sigmaNPerM) || !(sigmaNPerM >= 0.0))
+        return false;
+    outNPerM = sigmaNPerM;
+    return true;
+}
+
 bool saceEstimateJobackBundle(SaceMolecularGraph const &graph, SaceJobackEstimateBundle &out) {
     saceResetJobackEstimateBundle(out);
     SaceJobackFragmentationResult r = saceFragmentJobackGroups(graph, out.groups);
@@ -928,6 +1020,13 @@ bool saceEstimateJobackBundle(SaceMolecularGraph const &graph, SaceJobackEstimat
             && densOk
             && saceCostaldSaturatedLiquidDensityKgPerM3(dens, kSaceHeatCapacityReferenceK, rhoGate))
             out.liquidDynamicViscosityAt298KPaS = jobackLowScalar(mu);
+    }
+    SaceSastriRaoSurfaceTensionModel sigma{};
+    if (saceBuildSastriRaoSurfaceTensionModelFromJoback(graph, out, sigma)
+        && kSaceHeatCapacityReferenceK < sigma.criticalTemperatureK) {
+        double st = 0.0;
+        if (saceSastriRaoSurfaceTensionNPerM(sigma, kSaceHeatCapacityReferenceK, st))
+            out.liquidSurfaceTensionAt298KNPerM = jobackLowScalar(st);
     }
 
     return true;
@@ -1143,7 +1242,8 @@ void runSaceEstimationDiagnostics() {
             && !recE->properties.idealGasHeatCapacityAt298KJPerMolK.known
             && !recE->properties.saturatedLiquidHeatCapacityAt298KJPerMolK.known
             && !recE->properties.saturatedLiquidDensityAt298KKgPerM3.known
-            && !recE->properties.liquidDynamicViscosityAt298KPaS.known, "");
+            && !recE->properties.liquidDynamicViscosityAt298KPaS.known
+            && !recE->properties.liquidSurfaceTensionAt298KNPerM.known, "");
 
     SaceJobackEstimateBundle bunA{}, bunB{};
     emit("c2h6o_a_bundle_ok", saceEstimateJobackBundle(gA, bunA), "");
@@ -1232,7 +1332,11 @@ void runSaceEstimationDiagnostics() {
             && x.liquidDynamicViscosityAt298KPaS.known
             && y.liquidDynamicViscosityAt298KPaS.known
             && nearK(x.liquidDynamicViscosityAt298KPaS.value,
-                y.liquidDynamicViscosityAt298KPaS.value, 1e-8);
+                y.liquidDynamicViscosityAt298KPaS.value, 1e-8)
+            && x.liquidSurfaceTensionAt298KNPerM.known
+            && y.liquidSurfaceTensionAt298KNPerM.known
+            && nearK(x.liquidSurfaceTensionAt298KNPerM.value,
+                y.liquidSurfaceTensionAt298KNPerM.value, 1e-8);
     };
     SaceJobackEstimateBundle permB{}, bondB{}, endB{};
     emit("atom_permutation_preserves_joback_bundle",
@@ -1250,7 +1354,8 @@ void runSaceEstimationDiagnostics() {
             && !b.idealGasHeatCapacityAt298KJPerMolK.known
             && !b.saturatedLiquidHeatCapacityAt298KJPerMolK.known
             && !b.saturatedLiquidDensityAt298KKgPerM3.known
-            && !b.liquidDynamicViscosityAt298KPaS.known;
+            && !b.liquidDynamicViscosityAt298KPaS.known
+            && !b.liquidSurfaceTensionAt298KNPerM.known;
     };
     SaceJobackEstimateBundle waterB{}, methaneB{}, unsB{};
     emit("water_all_joback_unknown",
@@ -2094,6 +2199,142 @@ void runSaceEstimationDiagnostics() {
             && recA->properties.liquidDynamicViscosityAt298KPaS.confidence == SaceConfidence::High
             && nearK(recA->properties.liquidDynamicViscosityAt298KPaS.value, 0.0012, 1e-8), "");
     emit("generated_record_still_unspawnable_after_viscosity", recA && !recA->spawnable, "");
+
+    SaceSastriRaoSurfaceTensionModel stA{}, stB{};
+    bool stAOk = saceBuildSastriRaoSurfaceTensionModelFromJoback(gA, bunA, stA);
+    bool stBOk = saceBuildSastriRaoSurfaceTensionModelFromJoback(gB, bunB, stB);
+    emit("a_sastri_rao_model_builds", stAOk && stA.valid, "");
+    emit("b_sastri_rao_model_builds", stBOk && stB.valid, "");
+    emit("a_surface_tension_class_alcohol",
+        stA.chemicalClass == SaceSurfaceTensionClass::Alcohol, "");
+    emit("b_surface_tension_class_general_organic",
+        stB.chemicalClass == SaceSurfaceTensionClass::GeneralOrganic, "");
+    emit("a_sastri_rao_tb_tc_pc",
+        stAOk && nearK(stA.normalBoilingPointK, 337.540009, 0.02)
+            && nearK(stA.criticalTemperatureK, 499.407379, 0.05)
+            && nearK(stA.criticalPressurePa, 5756641.5, 80.0),
+        std::to_string(stA.criticalPressurePa));
+    emit("b_sastri_rao_tb_tc_pc",
+        stBOk && nearK(stB.normalBoilingPointK, 267.779999, 0.02)
+            && nearK(stB.criticalTemperatureK, 428.173981, 0.05)
+            && nearK(stB.criticalPressurePa, 4910798.0, 80.0),
+        std::to_string(stB.criticalPressurePa));
+
+    double aSig298 = 0.0, bSig298 = 0.0;
+    bool aSig298Ok = saceSastriRaoSurfaceTensionNPerM(stA, 298.15, aSig298);
+    bool bSig298Ok = saceSastriRaoSurfaceTensionNPerM(stB, 298.15, bSig298);
+    emit("a_sigma_298_15", aSig298Ok && nearK(aSig298, 0.0207066, 2e-7), std::to_string(aSig298));
+    emit("b_sigma_298_15", bSig298Ok && nearK(bSig298, 0.0144424, 2e-7), std::to_string(bSig298));
+    emit("a_sigma_greater_than_b_at_298_15",
+        aSig298Ok && bSig298Ok && aSig298 > bSig298, "");
+
+    double aTr06 = 0, aTr07 = 0, aTr08 = 0, aTr09 = 0, aTr10 = 0;
+    double bTr06 = 0, bTr07 = 0, bTr08 = 0, bTr09 = 0, bTr10 = 0;
+    bool aSig06Ok = saceSastriRaoSurfaceTensionNPerM(stA, 0.6 * stA.criticalTemperatureK, aTr06);
+    bool aSig07Ok = saceSastriRaoSurfaceTensionNPerM(stA, 0.7 * stA.criticalTemperatureK, aTr07);
+    bool aSig08Ok = saceSastriRaoSurfaceTensionNPerM(stA, 0.8 * stA.criticalTemperatureK, aTr08);
+    bool aSig09Ok = saceSastriRaoSurfaceTensionNPerM(stA, 0.9 * stA.criticalTemperatureK, aTr09);
+    bool aSig10Ok = saceSastriRaoSurfaceTensionNPerM(stA, stA.criticalTemperatureK, aTr10);
+    bool bSig06Ok = saceSastriRaoSurfaceTensionNPerM(stB, 0.6 * stB.criticalTemperatureK, bTr06);
+    bool bSig07Ok = saceSastriRaoSurfaceTensionNPerM(stB, 0.7 * stB.criticalTemperatureK, bTr07);
+    bool bSig08Ok = saceSastriRaoSurfaceTensionNPerM(stB, 0.8 * stB.criticalTemperatureK, bTr08);
+    bool bSig09Ok = saceSastriRaoSurfaceTensionNPerM(stB, 0.9 * stB.criticalTemperatureK, bTr09);
+    bool bSig10Ok = saceSastriRaoSurfaceTensionNPerM(stB, stB.criticalTemperatureK, bTr10);
+    emit("a_sigma_tr_0_6", aSig06Ok && nearK(aTr06, 0.0205835, 2e-7), std::to_string(aTr06));
+    emit("a_sigma_tr_0_7", aSig07Ok && nearK(aTr07, 0.0163519, 2e-7), std::to_string(aTr07));
+    emit("a_sigma_tr_0_8", aSig08Ok && nearK(aTr08, 0.0118221, 2e-7), std::to_string(aTr08));
+    emit("a_sigma_tr_0_9", aSig09Ok && nearK(aTr09, 0.00679001, 2e-7), std::to_string(aTr09));
+    emit("b_sigma_tr_0_6", bSig06Ok && nearK(bTr06, 0.0202249, 2e-7), std::to_string(bTr06));
+    emit("b_sigma_tr_0_7", bSig07Ok && nearK(bTr07, 0.0142293, 2e-7), std::to_string(bTr07));
+    emit("b_sigma_tr_0_8", bSig08Ok && nearK(bTr08, 0.00866885, 2e-7), std::to_string(bTr08));
+    emit("b_sigma_tr_0_9", bSig09Ok && nearK(bTr09, 0.00371566, 2e-7), std::to_string(bTr09));
+    emit("a_sigma_tc_exactly_zero", aSig10Ok && aTr10 == 0.0, std::to_string(aTr10));
+    emit("b_sigma_tc_exactly_zero", bSig10Ok && bTr10 == 0.0, std::to_string(bTr10));
+
+    double rejectedSig = 0.0;
+    emit("surface_tension_rejects_t_gt_tc",
+        !saceSastriRaoSurfaceTensionNPerM(stA, stA.criticalTemperatureK + 1.0, rejectedSig), "");
+    emit("surface_tension_rejects_nonpositive_t",
+        !saceSastriRaoSurfaceTensionNPerM(stA, 0.0, rejectedSig)
+            && !saceSastriRaoSurfaceTensionNPerM(stA, -1.0, rejectedSig)
+            && rejectedSig == 0.0, "");
+    emit("surface_tension_rejects_nan_inf",
+        !saceSastriRaoSurfaceTensionNPerM(stA, nanH, rejectedSig)
+            && !saceSastriRaoSurfaceTensionNPerM(stA, infH, rejectedSig), "");
+    SaceSastriRaoSurfaceTensionModel invalidSt{};
+    emit("surface_tension_rejects_invalid_model",
+        !saceSastriRaoSurfaceTensionNPerM(invalidSt, 298.15, rejectedSig), "");
+    emit("a_sampled_sigma_decreases_toward_tc",
+        aSig06Ok && aSig07Ok && aSig08Ok && aSig09Ok && aSig10Ok
+            && aTr06 > aTr07 && aTr07 > aTr08 && aTr08 > aTr09 && aTr09 > aTr10
+            && aTr10 == 0.0, "");
+    emit("b_sampled_sigma_decreases_toward_tc",
+        bSig06Ok && bSig07Ok && bSig08Ok && bSig09Ok && bSig10Ok
+            && bTr06 > bTr07 && bTr07 > bTr08 && bTr08 > bTr09 && bTr09 > bTr10
+            && bTr10 == 0.0, "");
+
+    SaceSastriRaoSurfaceTensionModel permSt{}, bondSt{}, endSt{};
+    double permSig = 0, bondSig = 0, endSig = 0;
+    emit("atom_permutation_preserves_surface_tension",
+        saceBuildSastriRaoSurfaceTensionModelFromJoback(permuteGraph(gA), permB, permSt)
+            && permSt.chemicalClass == SaceSurfaceTensionClass::Alcohol
+            && saceSastriRaoSurfaceTensionNPerM(permSt, 298.15, permSig)
+            && nearK(permSig, aSig298, 1e-12), "");
+    emit("bond_reorder_preserves_surface_tension",
+        saceBuildSastriRaoSurfaceTensionModelFromJoback(reorderBonds(gA), bondB, bondSt)
+            && bondSt.chemicalClass == SaceSurfaceTensionClass::Alcohol
+            && saceSastriRaoSurfaceTensionNPerM(bondSt, 298.15, bondSig)
+            && nearK(bondSig, aSig298, 1e-12), "");
+    emit("reversed_endpoints_preserve_surface_tension",
+        saceBuildSastriRaoSurfaceTensionModelFromJoback(reverseEnds(gA), endB, endSt)
+            && endSt.chemicalClass == SaceSurfaceTensionClass::Alcohol
+            && saceSastriRaoSurfaceTensionNPerM(endSt, 298.15, endSig)
+            && nearK(endSig, aSig298, 1e-12), "");
+
+    emit("water_no_generated_sastri_rao_surface_tension",
+        !waterB.liquidSurfaceTensionAt298KNPerM.known, "");
+    emit("methane_no_generated_surface_tension",
+        !methaneB.liquidSurfaceTensionAt298KNPerM.known, "");
+    emit("surface_tension_not_in_canonical_identity",
+        std::strstr(sig, "surface") == nullptr && std::strstr(sig, "0.0207") == nullptr, sig);
+    emit("surface_tension_model_not_in_canonical_identity",
+        std::strstr(sig, "Sastri") == nullptr && std::strstr(sig, "sigma") == nullptr, sig);
+
+    emit("catalog_a_surface_tension_matches_direct",
+        recA && recA->properties.liquidSurfaceTensionAt298KNPerM.known
+            && nearK(recA->properties.liquidSurfaceTensionAt298KNPerM.value, aSig298, 2e-7)
+            && nearK(bunA.liquidSurfaceTensionAt298KNPerM.value, aSig298, 2e-7), "");
+    emit("catalog_b_surface_tension_matches_direct",
+        recB && recB->properties.liquidSurfaceTensionAt298KNPerM.known
+            && nearK(recB->properties.liquidSurfaceTensionAt298KNPerM.value, bSig298, 2e-7)
+            && nearK(bunB.liquidSurfaceTensionAt298KNPerM.value, bSig298, 2e-7), "");
+
+    SaceGeneratedRecord *mutSt = cat.recordMutable(refA.generatedId);
+    if (mutSt)
+        mutSt->properties.liquidSurfaceTensionAt298KNPerM = saceUnknownScalarProperty();
+    bool reattachSt = cat.attachMolecularGraph(refA.generatedId, "synthetic-structure-a", gA);
+    recA = cat.record(refA.generatedId);
+    emit("same_graph_reattach_backfills_surface_tension",
+        reattachSt && recA && recA->properties.liquidSurfaceTensionAt298KNPerM.known
+            && recA->properties.liquidSurfaceTensionAt298KNPerM.source
+                == SacePropertySource::StructuralEstimate
+            && nearK(recA->properties.liquidSurfaceTensionAt298KNPerM.value, aSig298, 2e-7), "");
+
+    SaceGeneratedRecord *mutStRef = cat.recordMutable(refA.generatedId);
+    if (mutStRef) {
+        mutStRef->properties.liquidSurfaceTensionAt298KNPerM.known = true;
+        mutStRef->properties.liquidSurfaceTensionAt298KNPerM.value = 0.022f;
+        mutStRef->properties.liquidSurfaceTensionAt298KNPerM.source = SacePropertySource::Reference;
+        mutStRef->properties.liquidSurfaceTensionAt298KNPerM.confidence = SaceConfidence::High;
+    }
+    bool reattachStKeep = cat.attachMolecularGraph(refA.generatedId, "synthetic-structure-a", gA);
+    recA = cat.record(refA.generatedId);
+    emit("same_graph_backfill_preserves_reference_high_surface_tension",
+        reattachStKeep && recA
+            && recA->properties.liquidSurfaceTensionAt298KNPerM.source == SacePropertySource::Reference
+            && recA->properties.liquidSurfaceTensionAt298KNPerM.confidence == SaceConfidence::High
+            && nearK(recA->properties.liquidSurfaceTensionAt298KNPerM.value, 0.022, 1e-8), "");
+    emit("generated_record_still_unspawnable_after_surface_tension", recA && !recA->spawnable, "");
 
     cat.clear();
     out << "summary\t" << (failed == 0 ? "PASS" : "FAIL") << '\t' << passed << " passed, "

@@ -258,4 +258,41 @@ test	viscosity_model_not_in_canonical_identity	PASS	molecule|1:2,8:1|water
 test	same_graph_reattach_backfills_viscosity	PASS	
 test	same_graph_backfill_preserves_reference_high_viscosity	PASS	
 test	generated_record_still_unspawnable_after_viscosity	PASS	
-summary	PASS	260 passed, 0 failed
+test	a_sastri_rao_model_builds	PASS	
+test	b_sastri_rao_model_builds	PASS	
+test	a_surface_tension_class_alcohol	PASS	
+test	b_surface_tension_class_general_organic	PASS	
+test	a_sastri_rao_tb_tc_pc	PASS	5756641.500000
+test	b_sastri_rao_tb_tc_pc	PASS	4910798.000000
+test	a_sigma_298_15	PASS	0.020707
+test	b_sigma_298_15	PASS	0.014442
+test	a_sigma_greater_than_b_at_298_15	PASS	
+test	a_sigma_tr_0_6	PASS	0.020583
+test	a_sigma_tr_0_7	PASS	0.016352
+test	a_sigma_tr_0_8	PASS	0.011822
+test	a_sigma_tr_0_9	PASS	0.006790
+test	b_sigma_tr_0_6	PASS	0.020225
+test	b_sigma_tr_0_7	PASS	0.014229
+test	b_sigma_tr_0_8	PASS	0.008669
+test	b_sigma_tr_0_9	PASS	0.003716
+test	a_sigma_tc_exactly_zero	PASS	0.000000
+test	b_sigma_tc_exactly_zero	PASS	0.000000
+test	surface_tension_rejects_t_gt_tc	PASS	
+test	surface_tension_rejects_nonpositive_t	PASS	
+test	surface_tension_rejects_nan_inf	PASS	
+test	surface_tension_rejects_invalid_model	PASS	
+test	a_sampled_sigma_decreases_toward_tc	PASS	
+test	b_sampled_sigma_decreases_toward_tc	PASS	
+test	atom_permutation_preserves_surface_tension	PASS	
+test	bond_reorder_preserves_surface_tension	PASS	
+test	reversed_endpoints_preserve_surface_tension	PASS	
+test	water_no_generated_sastri_rao_surface_tension	PASS	
+test	methane_no_generated_surface_tension	PASS	
+test	surface_tension_not_in_canonical_identity	PASS	molecule|1:2,8:1|water
+test	surface_tension_model_not_in_canonical_identity	PASS	molecule|1:2,8:1|water
+test	catalog_a_surface_tension_matches_direct	PASS	
+test	catalog_b_surface_tension_matches_direct	PASS	
+test	same_graph_reattach_backfills_surface_tension	PASS	
+test	same_graph_backfill_preserves_reference_high_surface_tension	PASS	
+test	generated_record_still_unspawnable_after_surface_tension	PASS	
+summary	PASS	297 passed, 0 failed
