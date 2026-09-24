@@ -424,6 +424,43 @@ void runSacePropertyDiagnostics() {
             && jobackSigmaDst.confidence == SaceConfidence::High
             && nearMass(jobackSigmaDst.value, 0.022, 1e-8), "");
 
+    SaceGeneratedProperties blankLiqK{};
+    emit("liquid_thermal_conductivity_298_defaults_unknown",
+        !blankLiqK.liquidThermalConductivityAt298KWPerMK.known
+            && blankLiqK.liquidThermalConductivityAt298KWPerMK.source == SacePropertySource::Unknown, "");
+    SaceGeneratedProperties blankGasK{};
+    emit("gas_thermal_conductivity_298_defaults_unknown",
+        !blankGasK.gasThermalConductivityAt298KWPerMK.known
+            && blankGasK.gasThermalConductivityAt298KWPerMK.source == SacePropertySource::Unknown, "");
+    SaceScalarProperty refLiqK = makeKnown(0.17f, SacePropertySource::Reference, SaceConfidence::High);
+    SaceScalarProperty jobackLiqK = makeKnown(0.182156f, SacePropertySource::StructuralEstimate, SaceConfidence::Low);
+    emit("structural_estimate_low_does_not_overwrite_reference_high_liquid_conductivity",
+        !saceAssignScalarProperty(refLiqK, jobackLiqK)
+            && refLiqK.source == SacePropertySource::Reference
+            && refLiqK.confidence == SaceConfidence::High
+            && nearMass(refLiqK.value, 0.17, 1e-8), "");
+    SaceScalarProperty jobackLiqKDst = makeKnown(0.182156f, SacePropertySource::StructuralEstimate, SaceConfidence::Low);
+    SaceScalarProperty refLiqKSrc = makeKnown(0.17f, SacePropertySource::Reference, SaceConfidence::High);
+    emit("reference_high_overwrites_structural_estimate_low_liquid_conductivity",
+        saceAssignScalarProperty(jobackLiqKDst, refLiqKSrc)
+            && jobackLiqKDst.source == SacePropertySource::Reference
+            && jobackLiqKDst.confidence == SaceConfidence::High
+            && nearMass(jobackLiqKDst.value, 0.17, 1e-8), "");
+    SaceScalarProperty refGasK = makeKnown(0.02f, SacePropertySource::Reference, SaceConfidence::High);
+    SaceScalarProperty jobackGasK = makeKnown(0.0166586f, SacePropertySource::StructuralEstimate, SaceConfidence::Low);
+    emit("structural_estimate_low_does_not_overwrite_reference_high_gas_conductivity",
+        !saceAssignScalarProperty(refGasK, jobackGasK)
+            && refGasK.source == SacePropertySource::Reference
+            && refGasK.confidence == SaceConfidence::High
+            && nearMass(refGasK.value, 0.02, 1e-8), "");
+    SaceScalarProperty jobackGasKDst = makeKnown(0.0166586f, SacePropertySource::StructuralEstimate, SaceConfidence::Low);
+    SaceScalarProperty refGasKSrc = makeKnown(0.02f, SacePropertySource::Reference, SaceConfidence::High);
+    emit("reference_high_overwrites_structural_estimate_low_gas_conductivity",
+        saceAssignScalarProperty(jobackGasKDst, refGasKSrc)
+            && jobackGasKDst.source == SacePropertySource::Reference
+            && jobackGasKDst.confidence == SaceConfidence::High
+            && nearMass(jobackGasKDst.value, 0.02, 1e-8), "");
+
     out << "summary\t" << (failed == 0 ? "PASS" : "FAIL") << '\t' << passed << " passed, "
         << failed << " failed\n";
 }

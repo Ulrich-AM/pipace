@@ -166,9 +166,19 @@ SaceSimulationReadiness saceAssessSimulationReadiness(SaceGeneratedRecord const 
     if (!sigmaOk)
         markMissing(r, SaceSimulationRequirement::LiquidSurfaceTension);
 
-    // Remaining transport estimates are not implemented. Never invent Water/Air fallbacks.
-    markMissing(r, SaceSimulationRequirement::LiquidThermalConductivity);
-    markMissing(r, SaceSimulationRequirement::GasThermalConductivity);
+    SaceSatoRiedelLiquidConductivityModel liqK{};
+    bool liquidKOk = bundleOk
+        && saceBuildSatoRiedelLiquidConductivityModelFromJoback(record.molecularGraph, bundle, liqK)
+        && liqK.valid;
+    if (!liquidKOk)
+        markMissing(r, SaceSimulationRequirement::LiquidThermalConductivity);
+
+    SaceGharagheiziGasConductivityModel gasK{};
+    bool gasKOk = bundleOk
+        && saceBuildGharagheiziGasConductivityModelFromJoback(record.molecularGraph, bundle, gasK)
+        && gasK.valid;
+    if (!gasKOk)
+        markMissing(r, SaceSimulationRequirement::GasThermalConductivity);
 
     r.gasThermoReady = graphOk && massOk && gasCpOk;
     r.liquidThermoReady = graphOk && massOk && liqCpOk && densOk;
@@ -225,13 +235,13 @@ void runSaceReadinessDiagnostics() {
     emit("a_gas_thermo_ready", a.gasThermoReady, "");
     emit("a_liquid_thermo_ready", a.liquidThermoReady, "");
     emit("a_liquid_gas_equilibrium_ready", a.liquidGasEquilibriumReady, "");
-    emit("a_live_gas_not_ready", !a.liveGasReady, "");
-    emit("a_live_liquid_not_ready", !a.liveLiquidReady, "");
-    emit("a_live_phase_change_not_ready", !a.liveLiquidGasPhaseChangeReady, "");
-    emit("a_missing_gas_conductivity",
-        saceReadinessMissing(a, SaceSimulationRequirement::GasThermalConductivity), "");
-    emit("a_missing_liquid_conductivity",
-        saceReadinessMissing(a, SaceSimulationRequirement::LiquidThermalConductivity), "");
+    emit("a_live_gas_ready", a.liveGasReady, "");
+    emit("a_live_liquid_ready", a.liveLiquidReady, "");
+    emit("a_live_phase_change_ready", a.liveLiquidGasPhaseChangeReady, "");
+    emit("a_gas_conductivity_not_missing",
+        !saceReadinessMissing(a, SaceSimulationRequirement::GasThermalConductivity), "");
+    emit("a_liquid_conductivity_not_missing",
+        !saceReadinessMissing(a, SaceSimulationRequirement::LiquidThermalConductivity), "");
     emit("a_liquid_viscosity_not_missing",
         !saceReadinessMissing(a, SaceSimulationRequirement::LiquidViscosity), "");
     emit("a_liquid_surface_tension_not_missing",
@@ -241,13 +251,13 @@ void runSaceReadinessDiagnostics() {
     emit("b_gas_thermo_ready", b.gasThermoReady, "");
     emit("b_liquid_thermo_ready", b.liquidThermoReady, "");
     emit("b_liquid_gas_equilibrium_ready", b.liquidGasEquilibriumReady, "");
-    emit("b_live_gas_not_ready", !b.liveGasReady, "");
-    emit("b_live_liquid_not_ready", !b.liveLiquidReady, "");
-    emit("b_live_phase_change_not_ready", !b.liveLiquidGasPhaseChangeReady, "");
-    emit("b_missing_gas_conductivity",
-        saceReadinessMissing(b, SaceSimulationRequirement::GasThermalConductivity), "");
-    emit("b_missing_liquid_conductivity",
-        saceReadinessMissing(b, SaceSimulationRequirement::LiquidThermalConductivity), "");
+    emit("b_live_gas_ready", b.liveGasReady, "");
+    emit("b_live_liquid_ready", b.liveLiquidReady, "");
+    emit("b_live_phase_change_ready", b.liveLiquidGasPhaseChangeReady, "");
+    emit("b_gas_conductivity_not_missing",
+        !saceReadinessMissing(b, SaceSimulationRequirement::GasThermalConductivity), "");
+    emit("b_liquid_conductivity_not_missing",
+        !saceReadinessMissing(b, SaceSimulationRequirement::LiquidThermalConductivity), "");
     emit("b_liquid_viscosity_not_missing",
         !saceReadinessMissing(b, SaceSimulationRequirement::LiquidViscosity), "");
     emit("b_liquid_surface_tension_not_missing",
@@ -277,9 +287,12 @@ void runSaceReadinessDiagnostics() {
         recE && !e.liveGasReady && !e.liveLiquidReady && !e.liveLiquidGasPhaseChangeReady, "");
 
     emit("missing_mask_helper_works",
-        saceReadinessMissing(a, SaceSimulationRequirement::LiquidThermalConductivity)
+        !saceReadinessMissing(a, SaceSimulationRequirement::LiquidThermalConductivity)
+            && !saceReadinessMissing(a, SaceSimulationRequirement::GasThermalConductivity)
             && !saceReadinessMissing(a, SaceSimulationRequirement::LiquidSurfaceTension)
             && !saceReadinessMissing(a, SaceSimulationRequirement::LiquidViscosity)
+            && saceReadinessMissing(e, SaceSimulationRequirement::LiquidThermalConductivity)
+            && saceReadinessMissing(e, SaceSimulationRequirement::GasThermalConductivity)
             && !saceReadinessMissing(a, SaceSimulationRequirement::MolarMass)
             && !saceReadinessMissing(a, SaceSimulationRequirement::MolecularGraph), "");
     char const *viscKey = saceSimulationRequirementKey(SaceSimulationRequirement::LiquidViscosity);

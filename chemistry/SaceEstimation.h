@@ -6,7 +6,7 @@
 
 #include <cstdint>
 
-// SACE Phase 7–15: Joback-Reid 1987 subset + Lee-Kesler Psat + Watson Hvap + Cp + COSTALD + viscosity + Sastri-Rao sigma.
+// SACE Phase 7–16: Joback-Reid 1987 subset + Lee-Kesler Psat + Watson Hvap + Cp + COSTALD + viscosity + Sastri-Rao sigma + thermal conductivity.
 // Phase 7: Tb[K] = 198.2 + SUM(Tb groups).
 // Phase 8: Tc, Pc, Vc from the same six groups and the Joback Tb (not stored Tb).
 // Phase 9: Lee-Kesler omega and Psat(T) from the same Joback Tb/Tc/Pc tuple.
@@ -16,6 +16,8 @@
 // Phase 14: Joback liquid dynamic viscosity mu = MW[g/mol] * exp(A/T + B) in Pa*s.
 // Phase 15: Sastri-Rao liquid surface tension in N/m from coherent Joback Tb/Tc/Pc
 // plus functional hydroxyl classification (Alcohol vs GeneralOrganic).
+// Phase 16: Sato-Riedel liquid kL(T) and Gharagheizi gas kG(T) in W/(m*K).
+// Not live ThermalEngine. No phase-specific conductivity mapping yet.
 // No published universal Joback viscosity temperature interval is claimed.
 // StructuralEstimate / Low. Unsupported chemistry stays Unknown.
 // Not canonical identity. Not live PhaseProperties. Do not call from physics ticks.
@@ -101,6 +103,18 @@ constexpr double kSastriRaoAlcoholY = 0.175;
 constexpr double kSastriRaoAlcoholZ = 0.0;
 constexpr double kSastriRaoAlcoholM = 0.8;
 
+constexpr double kSatoRiedelPrefactor = 1.1053;
+constexpr double kGharagheiziPcScale = 1.0e-4;
+constexpr double kGharagheiziConst32825 = 3.2825;
+constexpr double kGharagheiziX0Omega = 3.9752;
+constexpr double kGharagheiziX0P = 0.1;
+constexpr double kGharagheiziX0B = 1.9876;
+constexpr double kGharagheiziX0Const = 6.5243;
+constexpr double kGharagheiziK0 = 7.9505e-4;
+constexpr double kGharagheiziKT = 3.989e-5;
+constexpr double kGharagheiziKMW = 5.419e-5;
+constexpr double kGharagheiziKA = 3.989e-5;
+
 constexpr double kJobackCpAIntercept = -37.93;
 constexpr double kJobackCpBIntercept = 0.210;
 constexpr double kJobackCpCIntercept = -3.91e-4;
@@ -167,6 +181,8 @@ struct SaceJobackEstimateBundle {
     SaceScalarProperty saturatedLiquidDensityAt298KKgPerM3{};
     SaceScalarProperty liquidDynamicViscosityAt298KPaS{};
     SaceScalarProperty liquidSurfaceTensionAt298KNPerM{};
+    SaceScalarProperty liquidThermalConductivityAt298KWPerMK{};
+    SaceScalarProperty gasThermalConductivityAt298KWPerMK{};
 };
 
 // Lee-Kesler 1975 corresponding-states vapor-pressure model.
@@ -255,6 +271,28 @@ struct SaceSastriRaoSurfaceTensionModel {
     double criticalTemperatureK = 0.0;
     double criticalPressurePa = 0.0;
     SaceSurfaceTensionClass chemicalClass = SaceSurfaceTensionClass::GeneralOrganic;
+    bool valid = false;
+};
+
+// Sato-Riedel corresponding-states liquid thermal conductivity.
+// kL = (1.1053 / sqrt(MW[g/mol])) * [3+20(1-Tr)^(2/3)] / [3+20(1-Tbr)^(2/3)]
+// Output W/(m*K). Approximate corresponding-states estimate, not reference data.
+// Not high-pressure liquid k. Not proof of liquid stability. Not live ThermalEngine.
+struct SaceSatoRiedelLiquidConductivityModel {
+    double normalBoilingPointK = 0.0;
+    double criticalTemperatureK = 0.0;
+    double molarMassGPerMol = 0.0;
+    bool valid = false;
+};
+
+// Gharagheizi pure-gas thermal conductivity. Pc stored in Pa; internal scale
+// P = PcPa * 1e-4 is the corrected implementation convention, not ordinary bar.
+// Output W/(m*K). Not a pressure-dependent transport model. Not live ThermalEngine.
+struct SaceGharagheiziGasConductivityModel {
+    double normalBoilingPointK = 0.0;
+    double criticalPressurePa = 0.0;
+    double acentricFactor = 0.0;
+    double molarMassGPerMol = 0.0;
     bool valid = false;
 };
 
@@ -432,5 +470,23 @@ bool saceSastriRaoSurfaceTensionNPerM(
     SaceSastriRaoSurfaceTensionModel const &model,
     double temperatureK,
     double &outNPerM);
+
+bool saceBuildSatoRiedelLiquidConductivityModelFromJoback(
+    SaceMolecularGraph const &graph,
+    SaceJobackEstimateBundle const &bundle,
+    SaceSatoRiedelLiquidConductivityModel &out);
+bool saceSatoRiedelLiquidThermalConductivityWPerMK(
+    SaceSatoRiedelLiquidConductivityModel const &model,
+    double temperatureK,
+    double &outWPerMK);
+
+bool saceBuildGharagheiziGasConductivityModelFromJoback(
+    SaceMolecularGraph const &graph,
+    SaceJobackEstimateBundle const &bundle,
+    SaceGharagheiziGasConductivityModel &out);
+bool saceGharagheiziGasThermalConductivityWPerMK(
+    SaceGharagheiziGasConductivityModel const &model,
+    double temperatureK,
+    double &outWPerMK);
 
 void runSaceEstimationDiagnostics();

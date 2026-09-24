@@ -295,4 +295,60 @@ test	catalog_b_surface_tension_matches_direct	PASS
 test	same_graph_reattach_backfills_surface_tension	PASS	
 test	same_graph_backfill_preserves_reference_high_surface_tension	PASS	
 test	generated_record_still_unspawnable_after_surface_tension	PASS	
-summary	PASS	297 passed, 0 failed
+test	a_sato_riedel_model_builds	PASS	
+test	b_sato_riedel_model_builds	PASS	
+test	a_sato_riedel_tb_tc_mw	PASS	46.069000
+test	b_sato_riedel_tb_tc_mw	PASS	46.069000
+test	a_kl_298_15	PASS	0.182156
+test	b_kl_298_15	PASS	0.146343
+test	a_kl_300	PASS	0.181279
+test	b_kl_300	PASS	0.145298
+test	a_kl_tb	PASS	0.162846
+test	b_kl_tb	PASS	0.162846
+test	a_b_liquid_conductivity_differs_at_298_15	PASS	
+test	sato_rejects_nonpositive_t	PASS	
+test	sato_rejects_t_ge_tc	PASS	
+test	sato_rejects_invalid_model	PASS	
+test	sato_rejects_nan_inf	PASS	
+test	a_gharagheizi_model_builds	PASS	
+test	b_gharagheizi_model_builds	PASS	
+test	a_gharagheizi_tb_pc_omega_mw	PASS	0.556081
+test	b_gharagheizi_tb_pc_omega_mw	PASS	0.193764
+test	a_kg_298_15	PASS	0.016659
+test	b_kg_298_15	PASS	0.017513
+test	a_kg_300	PASS	0.016804
+test	b_kg_300	PASS	0.017669
+test	a_kg_tb	PASS	0.019832
+test	b_kg_tb	PASS	0.015021
+test	gharagheizi_rejects_invalid_denominator	PASS	0.669466
+test	gharagheizi_rejects_nonpositive_t	PASS	
+test	gharagheizi_rejects_nan_inf	PASS	
+test	gharagheizi_rejects_invalid_model	PASS	
+test	a_kl_tr_0_7	PASS	0.156637
+test	a_kl_tr_0_8	PASS	0.128840
+test	a_kl_tr_0_9	PASS	0.095700
+test	b_kl_tr_0_7	PASS	0.145456
+test	b_kl_tr_0_8	PASS	0.119643
+test	b_kl_tr_0_9	PASS	0.088868
+test	a_kg_tr_0_7	PASS	0.020837
+test	a_kg_tr_0_8	PASS	0.025184
+test	a_kg_tr_0_9	PASS	0.029815
+test	b_kg_tr_0_7	PASS	0.017646
+test	b_kg_tr_0_8	PASS	0.021378
+test	b_kg_tr_0_9	PASS	0.025356
+test	atom_permutation_preserves_conductivity	PASS	
+test	bond_reorder_preserves_conductivity	PASS	
+test	reversed_endpoints_preserve_conductivity	PASS	
+test	catalog_a_liquid_conductivity_matches_direct	PASS	
+test	catalog_b_liquid_conductivity_matches_direct	PASS	
+test	catalog_a_gas_conductivity_matches_direct	PASS	
+test	catalog_b_gas_conductivity_matches_direct	PASS	
+test	conductivity_structural_estimate_low	PASS	
+test	water_no_generated_conductivity	PASS	
+test	methane_no_generated_conductivity	PASS	
+test	conductivity_not_in_canonical_identity	PASS	molecule|1:2,8:1|water
+test	conductivity_model_not_in_canonical_identity	PASS	molecule|1:2,8:1|water
+test	same_graph_reattach_backfills_conductivity	PASS	
+test	same_graph_backfill_preserves_reference_high_conductivity	PASS	
+test	generated_record_still_unspawnable_after_conductivity	PASS	
+summary	PASS	353 passed, 0 failed
