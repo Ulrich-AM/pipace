@@ -1,0 +1,32 @@
+test	built_in_water_roundtrip	PASS	
+test	built_in_air_roundtrip	PASS	
+test	built_in_oxygen_roundtrip	PASS	
+test	built_in_co2_roundtrip	PASS	
+test	built_in_wrong_generated_extract_rejected	PASS	
+test	built_in_water_phase_agrees	PASS	
+test	substance_none_is_runtime_none	PASS	
+test	invalid_builtin_id_rejected	PASS	
+test	generated_a_registered	PASS	
+test	generated_b_registered	PASS	
+test	generated_a_roundtrip	PASS	
+test	generated_b_roundtrip	PASS	
+test	generated_a_b_distinct	PASS	
+test	registration_idempotent	PASS	
+test	generated_a_liquid_profile_retained	PASS	
+test	generated_a_gas_profile_retained	PASS	
+test	generated_a_phase_profile_retained	PASS	
+test	generated_liquid_supported	PASS	
+test	generated_gas_supported	PASS	
+test	generated_solid_not_supported	PASS	
+test	unsupported_registration_rejected	PASS	
+test	generated_display_matches_catalog	PASS	Element #1
+test	built_in_display_unchanged	PASS	
+test	catalog_identity_unchanged	PASS	molecule|1:6,6:2,8:1|synthetic-structure-a
+test	registry_reset_invalidates_entry	PASS	
+test	stale_ref_does_not_resolve_after_reset	PASS	
+test	generated_record_still_unspawnable	PASS	
+test	substance_count_remains_12	PASS	12
+test	sace_substance_ref_bridge_builtin	PASS	
+test	runtime_ref_size_is_4	PASS	4
+test	built_ins_not_in_generated_registry	PASS	
+summary	PASS	31 passed, 0 failed

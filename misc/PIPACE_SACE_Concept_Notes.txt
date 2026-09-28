@@ -922,6 +922,22 @@ Implemented under chemistry/SaceSimulationCompiler.* :
 - Generated records remain spawnable = false. SUBSTANCE_COUNT == 12.
 - No live FluidEngine / GasEngine / ThermalEngine / PhaseChangeEngine integration.
 
+PHASE 18 LANDING (RUNTIME SUBSTANCE REF + GENERATED REGISTRY)
+=============================================================
+Implemented under substance/RuntimeSubstance.h and
+substance/GeneratedMaterialRegistry.* :
+
+- RuntimeSubstanceRef is a packed 32-bit handle (trivially copyable).
+  Built-in: kind + SubstanceId. Generated: kind + never-reused runtime handle.
+  SaceRecordId is NOT packed into the handle.
+- SaceSubstanceRef remains the chemistry/catalog resolution type.
+  runtimeRefFromSaceSubstanceRef is an explicit bridge.
+- Generated registry caches compiled Phase 17 profiles. Built-ins are not copied.
+- Registration uses the compiler and is idempotent. Not player spawnability.
+- SaceCatalog::clear() resets the generated runtime registry.
+  Stale generated refs cannot resolve to a later reused SaceRecordId.
+- SUBSTANCE_COUNT remains 12. FluidEngine/GasEngine/MatterIdentity unchanged.
+
 
 
 
