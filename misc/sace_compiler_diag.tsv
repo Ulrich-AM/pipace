@@ -1,0 +1,47 @@
+test	a_readiness_succeeds	PASS	
+test	a_compiler_succeeds	PASS	
+test	a_liquid_valid	PASS	
+test	a_gas_valid	PASS	
+test	a_liquid_gas_phase_valid	PASS	
+test	a_source_record_preserved	PASS	
+test	a_liquid_fields_finite_positive	PASS	
+test	a_gas_fields_finite_positive	PASS	
+test	b_readiness_succeeds	PASS	
+test	b_compiler_succeeds	PASS	
+test	b_liquid_valid	PASS	
+test	b_gas_valid	PASS	
+test	b_liquid_gas_phase_valid	PASS	
+test	b_source_record_preserved	PASS	
+test	b_liquid_fields_finite_positive	PASS	
+test	b_gas_fields_finite_positive	PASS	
+test	a_b_density_differs	PASS	
+test	a_b_viscosity_differs	PASS	
+test	a_b_surface_tension_differs	PASS	
+test	a_b_liquid_conductivity_differs	PASS	
+test	a_b_gas_conductivity_differs	PASS	
+test	a_b_liquid_cp_differs	PASS	
+test	a_b_boiling_point_differs	PASS	
+test	a_density_relative_roundtrip	PASS	0.821662
+test	b_density_relative_roundtrip	PASS	0.699912
+test	a_density_relative_near_expected	PASS	0.821662
+test	b_density_relative_near_expected	PASS	0.699912
+test	viscosity_water_unit_bridge	PASS	0.005413
+test	surface_tension_water_unit_bridge	PASS	0.055000
+test	joback_viscosity_temperature_shape	PASS	0.601675
+test	liquid_conductivity_from_sato_riedel	PASS	0.182156
+test	gas_conductivity_from_gharagheizi	PASS	0.016659
+test	liquid_and_gas_conductivity_not_collapsed	PASS	
+test	physical_models_retained	PASS	
+test	unsupported_readiness_false	PASS	
+test	unsupported_compiler_refuses	PASS	
+test	unsupported_no_nan_fallback	PASS	
+test	compiler_does_not_alter_signature	PASS	molecule|1:6,6:2,8:1|synthetic-structure-a
+test	compiler_does_not_alter_record_id	PASS	
+test	compiler_does_not_alter_display_ordinal	PASS	
+test	compiler_does_not_alter_structure_key	PASS	
+test	generated_record_unspawnable	PASS	
+test	substance_count_remains_12	PASS	12
+test	profile_valid_means_any_subprofile	PASS	
+test	a_compiled_reference_values	PASS	rhoRel=0.821662 liqCp=3228.400146 gasCp=1402.698364 kL=0.182156 kG=0.016659 muSol=0.006090 sigSol=0.015824 Tb=337.540009 MW=46.069000
+test	b_compiled_reference_values	PASS	rhoRel=0.699912 liqCp=2437.969727 gasCp=1448.112427 kL=0.146343 kG=0.017513 muSol=0.000670 sigSol=0.011037 Tb=267.779999 MW=46.069000
+summary	PASS	46 passed, 0 failed
