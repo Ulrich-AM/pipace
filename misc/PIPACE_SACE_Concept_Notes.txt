@@ -904,6 +904,24 @@ Implemented under chemistry/SaceEstimation.* :
 - Unsupported chemistry stays Unknown. Built-in Water/Air conductivity is unchanged.
 - Phase 17 must not collapse liquid vs gas k into one general conductivity number.
 
+PHASE 17 LANDING (GENERATED SIMULATION COMPILER)
+================================================
+Implemented under chemistry/SaceSimulationCompiler.* :
+
+- SaceCompiledSimulationProfile is an intermediate engine-facing translation.
+  Not SubstanceDefinition. Not SubstanceId. Not world storage.
+- Density: rho_rel = rho_physical[kg/m3] / WATER_DENSITY_KG_M3.
+- Cp: molar J/(mol*K) -> mass-specific J/(kg*K) via saceMolarHeatCapacityToSpecificJPerKgK.
+- Conductivity remains physical W/(m*K). Liquid Sato-Riedel and gas Gharagheizi
+  stay separate. No ThermalConfig scale during compilation.
+- Viscosity Pa*s and surface tension N/m use Water-relative solver calibration
+  anchors at 298.15 K. Those anchors are unit bridges, not fallback properties.
+- Joback viscosity A is the compiled Arrhenius temperature shape.
+- Original T-dependent SACE models remain on the compiled profile.
+- profile.valid = at least one coherent subprofile (gas / liquid / liquid-gas).
+- Generated records remain spawnable = false. SUBSTANCE_COUNT == 12.
+- No live FluidEngine / GasEngine / ThermalEngine / PhaseChangeEngine integration.
+
 
 
 
