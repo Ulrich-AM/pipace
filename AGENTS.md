@@ -40,6 +40,8 @@ PIPACE/
   substance/
     SubstanceProperties.h  # Grouped intrinsic properties (mechanical/fluid/thermal/phase/porous/…)
     SubstanceTypes.h / SubstanceRegistry.h/.cpp  # SubstanceId, MatterPhase, registry
+    RuntimeSubstance.h     # Phase 18 packed RuntimeSubstanceRef (not SubstanceId)
+    GeneratedMaterialRegistry.h/.cpp # Phase 18 generated compiled-profile cache (session-local)
     PhaseTransfer.h/.cpp  # fill/mass/gas-amount conversion
   world/
     WorldQuery.h/.cpp      # sampleMatterAt (SubstanceId + phase), phase/registry diags
@@ -80,6 +82,7 @@ duplicate property tables.
 - `MatterPhase` = current represented phase (WHICH phase this cell/body is)
 - `SubstanceId` = compact engine identity (built-in domain; no runtime-generated IDs yet)
 - `SaceRecordId` = SACE catalog handle for generated identities. Not a `SubstanceId`. Not valid for FluidEngine / GasEngine / RigidBodyEngine / ThermalEngine / ReactionEngine.
+- `RuntimeSubstanceRef` = packed 32-bit engine handle (built-in SubstanceId or generated runtime handle). Not canonical identity. Not stored in FluidEngine/GasEngine yet.
 - player-facing name (`displayName` / `displayNameKey`) = metadata only; never canonical chemistry
 - generated `Element #HEX` = presentation only; not chemical identity
 - engine storage = numerical representation (HOW that phase is simulated today)
@@ -117,6 +120,8 @@ SACE Phase 15 adds Sastri–Rao (1995) liquid surface tension from the same cohe
 SACE Phase 16 adds Sato–Riedel liquid thermal conductivity and Gharagheizi gas thermal conductivity in W/(m·K) (`StructuralEstimate` / `Low`) from one coherent Joback path. Sato–Riedel uses Joback Tb/Tc plus identity-derived MW[g/mol]; T < Tc only. The stored 298.15 K liquid scalar is gated by COSTALD ρ(298.15) as a liquid-domain check (density does not enter kL). Gharagheizi uses Joback Tb/Pc, Lee–Kesler omega, and MW; internal `P = Pc[Pa] × 1e-4` is the published/corrected scale, not ordinary bar. No associating correction. Not live `ThermalEngine` / `ThermalProperties::conductivity`. Graph A/B become preflight `liveGasReady` / `liveLiquidReady` / `liveLiquidGasPhaseChangeReady` while remaining **unspawnable**.
 
 SACE Phase 17 (`chemistry/SaceSimulationCompiler`) compiles a generated record plus coherent models plus readiness into a `SaceCompiledSimulationProfile`. Physical properties stay separate from identity. Density maps kg/m³ → water-relative (`WATER_DENSITY_KG_M3`). Molar Cp maps to J/(kg·K). Thermal conductivity stays physical W/(m·K) and **liquid k and gas k remain separate fields/models** (not `ThermalProperties::conductivity`). Viscosity (Pa·s) and surface tension (N/m) use explicit Water-relative solver calibration anchors (`kPhysicalWaterViscosityAt298KPaS`, `kPhysicalWaterSurfaceTensionAt298KNPerM`); those anchors are not material fallbacks. Joback viscosity A is the compiled Arrhenius shape. Original T-dependent models are retained. `profile.valid` means at least one coherent subprofile compiled. Generated records remain unspawnable; `SUBSTANCE_COUNT` remains 12; no generated `SubstanceId` or world integration.
+
+SACE Phase 18 (`substance/RuntimeSubstance.h`, `substance/GeneratedMaterialRegistry`) adds a packed 32-bit `RuntimeSubstanceRef` that can name a built-in `SubstanceId` or a generated runtime handle. Generated `SaceRecordId` stays chemistry identity and is **not** packed into the handle (handles are never reused in-process). `SaceCatalog::clear()` resets the generated runtime registry so stale refs cannot alias a later record. Registration compiles via Phase 17 and is idempotent; it is not player spawnability. Built-ins are not copied into the generated registry. Liquid/gas component storage, `MatterIdentity`, and world queries remain `SubstanceId`. `SUBSTANCE_COUNT` remains 12.
 
 These mappings are **implementation, not laws**:
 
@@ -287,7 +292,9 @@ Gharagheizi gas k (W/(m·K)); Graph A/B become preflight live-ready but remain
 unspawnable. **SACE Phase 17** compiles those models into an engine-safe profile
 (water-relative density, mass-specific Cp, physical phase-specific k, calibrated
 solver viscosity/surface tension) without allocating a SubstanceId or spawning
-generated matter.
+generated matter. **SACE Phase 18** adds compact `RuntimeSubstanceRef` plus a
+session-local generated compiled-profile registry. Registration is not spawnability
+and does not occupy FluidEngine/GasEngine cells.
 Live `Liquid ⇄ Gas` and `Solid ⇄ Liquid` are generic by
 SubstanceId (`world/PhaseChangeEngine.cpp`). Honey mixtures still skip phase
 change. Runtime-generated world matter, reaction families, graph isomorphism,

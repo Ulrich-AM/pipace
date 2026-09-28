@@ -3,6 +3,7 @@
 #include "chemistry/SaceEstimation.h"
 #include "chemistry/SaceIdentity.h"
 #include "fluid/DiagOutput.h"
+#include "substance/GeneratedMaterialRegistry.h"
 
 #include <cmath>
 #include <cstddef>
@@ -24,6 +25,7 @@ SaceCatalog &saceGeneratedCatalog() {
 }
 
 void SaceCatalog::clear() {
+    resetGeneratedRuntimeMaterials();
     records_.clear();
     bySignature_.clear();
     nextDisplayOrdinal_ = 1;
