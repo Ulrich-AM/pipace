@@ -129,6 +129,8 @@ Phase 19A (`substance/RuntimeSubstanceProperties`) adds a read-only property que
 
 Phase 19B1 migrates `LiquidComponent` and `GasComponent` payload/view identity to `RuntimeSubstanceRef` while keeping FluidEngine/GasEngine internal SoA arrays built-in `SubstanceId` for one more phase. Built-in compatibility overloads preserve existing callers. Standalone generated payloads can add/find/merge/copy/scale/compact and liquid/gas mixture-property helpers consume the Phase-17/19A generated profiles. Live engine commits explicitly reject generated refs until 19B2 rather than truncating or relabeling identity.
 
+Phase 19B2a migrates FluidEngine's internal liquid composition ID arrays (`liquidCompId`, `nextCompId`) to `RuntimeSubstanceRef`. Public liquid mutation/query APIs remain built-in `SubstanceId`-based in this subphase, and conservative transport explicitly unwraps built-ins before calling those APIs. Generated runtime refs are still not commit/transport-enabled inside FluidEngine until 19B2b. Water/Honey behavior must remain unchanged.
+
 These mappings are **implementation, not laws**:
 
 | Current representation | Engine |
