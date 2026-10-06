@@ -52,7 +52,7 @@ float slotMin(Inventory const &inv) {
 
 int findSlot(Inventory const &inv, SubstanceId id) {
     for (int n = 0; n < inv.count; ++n)
-        if (inv.items[n].id == id) return n;
+        if (inv.items[n].id == runtimeBuiltIn(id)) return n;
     return -1;
 }
 
@@ -173,7 +173,7 @@ void recountFill(Inventory &inv) {
     float s = 0.0f;
     int w = 0;
     for (int n = 0; n < inv.count; ++n) {
-        if (inv.items[n].amount > slotMin(inv) && inv.items[n].id != SUBSTANCE_NONE) {
+        if (inv.items[n].amount > slotMin(inv) && !runtimeSubstanceIsNone(inv.items[n].id)) {
             if (w != n) inv.items[w] = inv.items[n];
             s += inv.items[w].amount;
             ++w;
