@@ -305,6 +305,12 @@ private:
     void commitNextComposition(int index);
     float addComponentUntracked(int index, RuntimeSubstanceRef id, float amount);
     float addNextComponentUntracked(int index, RuntimeSubstanceRef id, float amount);
+    float addComponentUntracked(int index, SubstanceId id, float amount) {
+        return addComponentUntracked(index, runtimeBuiltIn(id), amount);
+    }
+    float addNextComponentUntracked(int index, SubstanceId id, float amount) {
+        return addNextComponentUntracked(index, runtimeBuiltIn(id), amount);
+    }
     bool cellHasDuplicateComponents(int index) const;
     void returnAdvectOverflow(int origin, float vol, LiquidCarry &carry, int x0, int y0, int x1, int y1);
 };
