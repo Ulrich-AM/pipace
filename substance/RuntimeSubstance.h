@@ -114,3 +114,9 @@ inline uint32_t runtimeGeneratedHandleValue(RuntimeSubstanceRef ref) {
         return 0;
     return runtimeSubstancePayload(ref);
 }
+
+// Phase-aware validity query. Built-ins delegate to SubstanceDefinition;
+// generated refs resolve through GeneratedMaterialRegistry. Declared here so
+// hot component types can validate RuntimeSubstanceRef without depending on
+// the registry's heavy implementation header.
+bool runtimeSupportsPhase(RuntimeSubstanceRef ref, MatterPhase phase);
