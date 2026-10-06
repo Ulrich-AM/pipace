@@ -890,9 +890,11 @@ void drawShell(HDC dc, ShellState &shell, View const &view) {
             }
             insHead("inspector_section_composition", kInsHeadComposition);
             for (int n = 0; n < liqComps.count; ++n) {
-                SubstanceId sid = liqComps.items[n].id;
+                RuntimeSubstanceRef ref = liqComps.items[n].id;
                 float amt = liqComps.items[n].amount;
-                if (!(amt > kMinLiquidComponent) || !validLiquidComponentId(sid)) continue;
+                if (!(amt > kMinLiquidComponent) || !validLiquidComponentId(ref)
+                    || !runtimeSubstanceIsBuiltIn(ref)) continue;
+                SubstanceId sid = runtimeBuiltinId(ref);
                 float frac = (totAmt > kMinLiquidComponent) ? std::clamp(amt / totAmt, 0.0f, 1.0f) : 0.0f;
                 COLORREF col = (sid == SUBSTANCE_WATER) ? kInsCompWater
                     : (sid == SUBSTANCE_HONEY) ? kInsCompHoney
@@ -903,8 +905,9 @@ void drawShell(HDC dc, ShellState &shell, View const &view) {
             insHead("inspector_section_composition", kInsHeadComposition);
             float tot = g->amount[static_cast<size_t>(hi)];
             for (int n = 0; n < gasComps.count; ++n) {
-                SubstanceId sid = gasComps.items[n].id;
-                if (!validGasComponentId(sid)) continue;
+                RuntimeSubstanceRef ref = gasComps.items[n].id;
+                if (!validGasComponentId(ref) || !runtimeSubstanceIsBuiltIn(ref)) continue;
+                SubstanceId sid = runtimeBuiltinId(ref);
                 float frac = (tot > 1.0e-8f) ? std::clamp(gasComps.items[n].amount / tot, 0.0f, 1.0f) : 0.0f;
                 insSplit(tr(substanceDef(sid).displayNameKey), formatPercent(frac), kInsHeadGas);
             }
