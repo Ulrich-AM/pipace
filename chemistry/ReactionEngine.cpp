@@ -29,8 +29,16 @@ namespace {
 constexpr float kDefaultMaxExtentPerSecond = 1.0f;
 
 
+struct InventoryItem {
+    SubstanceId id = SUBSTANCE_NONE;
+    float amount = 0.0f;
+};
+
 struct Inventory {
-    LiquidComponent items[kMaxLiquidComponents]{};
+    // Reaction definitions are still SubstanceId-based in Phase 19B1.
+    // Keep this private work inventory independent from RuntimeSubstanceRef
+    // world payloads; synthetic diagnostics intentionally use unregistered IDs.
+    InventoryItem items[kMaxLiquidComponents]{};
     int count = 0;
     float fill = 0.0f;
     float heat = 0.0f;
@@ -409,8 +417,12 @@ Inventory fromView(LiquidComponentView const &view, float fill, float heat, bool
     inv.gas = false;
     inv.cellsPerMeter = cellsPerMeter;
     for (int n = 0; n < view.count && n < kMaxLiquidComponents; ++n) {
-        if (view.items[n].amount > kMinLiquidComponent)
-            inv.items[inv.count++] = view.items[n];
+        if (view.items[n].amount <= kMinLiquidComponent
+            || !runtimeSubstanceIsBuiltIn(view.items[n].id))
+            continue;
+        inv.items[inv.count++] = {
+            runtimeBuiltinId(view.items[n].id), view.items[n].amount
+        };
     }
     recountFill(inv);
     return inv;
@@ -427,8 +439,12 @@ Inventory fromGasView(GasComponentView const &view, float amt, float heat, bool 
     inv.gas = true;
     inv.cellsPerMeter = cellsPerMeter;
     for (int n = 0; n < view.count && n < kMaxGasComponents; ++n) {
-        if (view.items[n].amount > kMinGasComponent)
-            inv.items[inv.count++] = {view.items[n].id, view.items[n].amount};
+        if (view.items[n].amount <= kMinGasComponent
+            || !runtimeSubstanceIsBuiltIn(view.items[n].id))
+            continue;
+        inv.items[inv.count++] = {
+            runtimeBuiltinId(view.items[n].id), view.items[n].amount
+        };
     }
     recountFill(inv);
     return inv;
@@ -437,7 +453,8 @@ Inventory fromGasView(GasComponentView const &view, float amt, float heat, bool 
 LiquidComponentView toView(Inventory const &inv) {
     LiquidComponentView view;
     view.count = inv.count;
-    for (int n = 0; n < inv.count; ++n) view.items[n] = inv.items[n];
+    for (int n = 0; n < inv.count; ++n)
+        view.items[n] = {inv.items[n].id, inv.items[n].amount};
     return view;
 }
 

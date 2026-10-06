@@ -210,9 +210,14 @@ struct FluidEngine {
     LiquidComponentView liquidComponents(int index) const;
     template<typename Fn>
     void forEachLiquidComponent(int index, Fn &&fn) const {
+        // Phase 19B1 compatibility: engine SoA storage is still built-in-only.
+        // Runtime-ref payloads are unwrapped explicitly here until 19B2 migrates
+        // the internal composition arrays themselves.
         LiquidComponentView view = liquidComponents(index);
-        for (int n = 0; n < view.count; ++n)
-            fn(view.items[n].id, view.items[n].amount);
+        for (int n = 0; n < view.count; ++n) {
+            if (!runtimeSubstanceIsBuiltIn(view.items[n].id)) continue;
+            fn(runtimeBuiltinId(view.items[n].id), view.items[n].amount);
+        }
     }
     LiquidMixtureProperties mixProperties(int index) const; // density, Cp, k, gamma; viscosity unused
     float mixDensity(int index) const;

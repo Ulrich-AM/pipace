@@ -106,14 +106,17 @@ MaterialVisual blendLiquidVisual(LiquidComponent const *items, int count) {
     for (int n = 0; n < count; ++n) {
         if (!validLiquidComponentId(items[n].id) || items[n].amount <= kMinLiquidComponent)
             continue;
+        if (!runtimeSubstanceIsBuiltIn(items[n].id))
+            continue;
+        SubstanceId sid = runtimeBuiltinId(items[n].id);
         if (first) {
-            vis = visualForSubstance(items[n].id);
+            vis = visualForSubstance(sid);
             acc = items[n].amount;
             first = false;
             continue;
         }
         float w = items[n].amount / (acc + items[n].amount);
-        lerpVisual(vis, visualForSubstance(items[n].id), w);
+        lerpVisual(vis, visualForSubstance(sid), w);
         acc += items[n].amount;
     }
     return vis;

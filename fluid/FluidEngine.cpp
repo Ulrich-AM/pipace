@@ -472,10 +472,14 @@ bool FluidEngine::tryCommitLiquidOccupancy(int index, LiquidComponentView const 
     int n = 0;
     float sum = 0.0f;
     for (int s = 0; s < view.count; ++s) {
-        SubstanceId id = view.items[s].id;
+        RuntimeSubstanceRef ref = view.items[s].id;
         float amt = view.items[s].amount;
         if (!std::isfinite(amt) || amt < 0.0f) return false;
         if (!(amt > kMinLiquidComponent)) continue;
+        // 19B1 deliberately keeps engine SoA storage built-in-only. Generated
+        // payload refs become commit-capable in 19B2.
+        if (!runtimeSubstanceIsBuiltIn(ref)) return false;
+        SubstanceId id = runtimeBuiltinId(ref);
         if (!validLiquidComponentId(id)) return false;
         for (int a = 0; a < n; ++a)
             if (packed[a].id == id) return false;
@@ -486,7 +490,7 @@ bool FluidEngine::tryCommitLiquidOccupancy(int index, LiquidComponentView const 
     int base = compositionSlot(index, 0);
     for (int s = 0; s < kMaxLiquidComponents; ++s) {
         if (s < n) {
-            liquidCompId[static_cast<size_t>(base + s)] = packed[s].id;
+            liquidCompId[static_cast<size_t>(base + s)] = runtimeBuiltinId(packed[s].id);
             liquidCompAmt[static_cast<size_t>(base + s)] = packed[s].amount;
         } else {
             liquidCompId[static_cast<size_t>(base + s)] = SUBSTANCE_NONE;
@@ -504,8 +508,10 @@ void FluidEngine::applyCarry(int index, LiquidCarry const &c) {
     dyeR[i] += c.dyeR;
     dyeG[i] += c.dyeG;
     dyeB[i] += c.dyeB;
-    for (int n = 0; n < c.compCount; ++n)
-        (void)addComponentUntracked(index, c.comps[n].id, c.comps[n].amount);
+    for (int n = 0; n < c.compCount; ++n) {
+        if (!runtimeSubstanceIsBuiltIn(c.comps[n].id)) continue;
+        (void)addComponentUntracked(index, runtimeBuiltinId(c.comps[n].id), c.comps[n].amount);
+    }
 }
 
 namespace {

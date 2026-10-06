@@ -114,3 +114,24 @@ inline uint32_t runtimeGeneratedHandleValue(RuntimeSubstanceRef ref) {
         return 0;
     return runtimeSubstancePayload(ref);
 }
+
+// Safe compatibility comparisons for code that still names built-ins directly.
+// A generated ref never compares equal to any SubstanceId.
+inline bool operator==(RuntimeSubstanceRef ref, SubstanceId id) {
+    return runtimeSubstanceIsBuiltIn(ref) && runtimeBuiltinId(ref) == id;
+}
+inline bool operator==(SubstanceId id, RuntimeSubstanceRef ref) {
+    return ref == id;
+}
+inline bool operator!=(RuntimeSubstanceRef ref, SubstanceId id) {
+    return !(ref == id);
+}
+inline bool operator!=(SubstanceId id, RuntimeSubstanceRef ref) {
+    return !(ref == id);
+}
+
+// Implemented by GeneratedMaterialRegistry.cpp. Built-ins delegate to the
+// existing registry; generated refs resolve their compiled runtime profile.
+// Keeping the declaration here lets hot payload types validate phase support
+// without including the SACE compiler/registry implementation headers.
+bool runtimeSupportsPhase(RuntimeSubstanceRef ref, MatterPhase phase);

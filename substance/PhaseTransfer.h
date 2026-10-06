@@ -2,6 +2,7 @@
 
 #include "gas/GasTypes.h"
 #include "substance/SubstanceTypes.h"
+#include "substance/GeneratedMaterialRegistry.h"
 #include "thermal/ThermalTypes.h"
 
 #include <algorithm>
@@ -272,87 +273,145 @@ inline double molesToStorageAmount(SubstanceId id, MatterPhase phase, double mol
     return massKgToAmount(id, phase, molesToMassKg(id, moles), cellsPerMeter);
 }
 
-// Shared gas heat capacity: Σ mass_i · Cp_gas,i. Pure Air uses gasMassKg × air Cp.
-// Missing molar/density data uses Air's mass scale as a numerical fallback only.
+// Shared gas heat capacity: Σ mass_i · Cp_gas,i.
+// Built-ins preserve the existing SubstanceId path. Generated runtime refs use
+// their compiled gas profile; missing generated data fails that component
+// closed rather than borrowing Air material properties.
 inline float gasMixtureThermalCapacity(GasComponentView const &view, float cellsPerMeter = 4.0f) {
     if (view.count <= 0) return 0.0f;
-    if (view.count == 1 && view.items[0].id == SUBSTANCE_AIR)
-        return thermalCapacity(gasMassKg(view.items[0].amount, cellsPerMeter),
-            thermalForSubstance(SUBSTANCE_AIR).specificHeat);
     float cap = 0.0f;
     for (int n = 0; n < view.count; ++n) {
-        SubstanceId id = view.items[n].id;
+        RuntimeSubstanceRef ref = view.items[n].id;
         float amt = view.items[n].amount;
-        if (!(amt > GAS_MIN_AMOUNT) || !validGasComponentId(id)) continue;
-        float mass = 0.0f;
-        if (id == SUBSTANCE_AIR)
-            mass = gasMassKg(amt, cellsPerMeter);
-        else {
-            mass = static_cast<float>(gasAmountToMassKg(id, amt, static_cast<double>(cellsPerMeter)));
-            if (!(mass > 0.0f) || !std::isfinite(mass))
+        if (!(amt > GAS_MIN_AMOUNT) || !validGasComponentId(ref)) continue;
+
+        if (runtimeSubstanceIsBuiltIn(ref)) {
+            SubstanceId id = runtimeBuiltinId(ref);
+            float mass = 0.0f;
+            if (id == SUBSTANCE_AIR)
                 mass = gasMassKg(amt, cellsPerMeter);
+            else {
+                mass = static_cast<float>(gasAmountToMassKg(id, amt,
+                    static_cast<double>(cellsPerMeter)));
+                if (!(mass > 0.0f) || !std::isfinite(mass))
+                    mass = gasMassKg(amt, cellsPerMeter);
+            }
+            cap += thermalCapacity(mass, gasPhaseSpecificHeat(id));
+            continue;
         }
-        cap += thermalCapacity(mass, gasPhaseSpecificHeat(id));
+
+        SaceCompiledGasProfile const *gasProfile = runtimeGasProfile(ref);
+        if (!gasProfile || !gasProfile->valid
+            || !(gasProfile->molarMassGPerMol > 0.0f)
+            || !(gasProfile->specificHeatJPerKgK > 0.0f))
+            continue;
+        double T = static_cast<double>(AMBIENT_TEMPERATURE_K);
+        if (!(T > 1.0)) T = 293.15;
+        double Mkg = static_cast<double>(gasProfile->molarMassGPerMol) * 1.0e-3;
+        double rho = static_cast<double>(GAS_REFERENCE_PRESSURE_PA) * Mkg
+            / (static_cast<double>(UNIVERSAL_GAS_R_J_MOL_K) * T);
+        double mass = static_cast<double>(amt) * rho * sandboxCellVolumeM3(cellsPerMeter);
+        if (!(mass > 0.0) || !std::isfinite(mass)) continue;
+        cap += thermalCapacity(static_cast<float>(mass), gasProfile->specificHeatJPerKgK);
     }
     return cap;
 }
 
-// Amount-fraction mixture of referenceGasDensityKgM3. Pure-component fast path.
-// Missing/invalid density uses Air's tabulated rho as a numerical fallback only;
-// it does not relabel the substance as Air.
+// Amount-fraction mixture of reference gas density at one atmosphere and
+// ambient temperature. Built-ins keep their existing behavior. Generated
+// components derive rho from compiled molar mass via the ideal-gas law.
 inline float gasMixtureReferenceDensityKgM3(GasComponentView const &view) {
     float airRho = AIR_DENSITY_KG_M3;
     if (!(airRho > 0.0f) || !std::isfinite(airRho)) airRho = 1.204f;
-    auto rhoOf = [&](SubstanceId id) {
-        double rho = referenceGasDensityKgM3(id);
-        if (rho > 0.0 && std::isfinite(rho)) return static_cast<float>(rho);
-        return airRho;
+
+    auto rhoOf = [&](RuntimeSubstanceRef ref) {
+        if (runtimeSubstanceIsBuiltIn(ref)) {
+            double rho = referenceGasDensityKgM3(runtimeBuiltinId(ref));
+            if (rho > 0.0 && std::isfinite(rho)) return static_cast<float>(rho);
+            return airRho;
+        }
+        SaceCompiledGasProfile const *gasProfile = runtimeGasProfile(ref);
+        if (!gasProfile || !gasProfile->valid || !(gasProfile->molarMassGPerMol > 0.0f))
+            return 0.0f;
+        double T = static_cast<double>(AMBIENT_TEMPERATURE_K);
+        if (!(T > 1.0)) T = 293.15;
+        double Mkg = static_cast<double>(gasProfile->molarMassGPerMol) * 1.0e-3;
+        double rho = static_cast<double>(GAS_REFERENCE_PRESSURE_PA) * Mkg
+            / (static_cast<double>(UNIVERSAL_GAS_R_J_MOL_K) * T);
+        return (rho > 0.0 && std::isfinite(rho)) ? static_cast<float>(rho) : 0.0f;
     };
+
     if (view.count <= 0) return airRho;
-    if (view.count == 1) return rhoOf(view.items[0].id);
+    if (view.count == 1) {
+        float rho = rhoOf(view.items[0].id);
+        return rho > 0.0f ? rho : airRho;
+    }
+
     float tot = 0.0f;
-    for (int n = 0; n < view.count; ++n) {
+    for (int n = 0; n < view.count; ++n)
         if (view.items[n].amount > GAS_MIN_AMOUNT && validGasComponentId(view.items[n].id))
             tot += view.items[n].amount;
-    }
     if (!(tot > GAS_MIN_AMOUNT)) return airRho;
+
     float rho = 0.0f;
+    float represented = 0.0f;
     for (int n = 0; n < view.count; ++n) {
-        SubstanceId id = view.items[n].id;
+        RuntimeSubstanceRef ref = view.items[n].id;
         float amt = view.items[n].amount;
-        if (!(amt > GAS_MIN_AMOUNT) || !validGasComponentId(id)) continue;
-        rho += (amt / tot) * rhoOf(id);
+        if (!(amt > GAS_MIN_AMOUNT) || !validGasComponentId(ref)) continue;
+        float componentRho = rhoOf(ref);
+        if (!(componentRho > 0.0f)) continue;
+        float phi = amt / tot;
+        rho += phi * componentRho;
+        represented += phi;
     }
-    if (!(rho > 0.0f) || !std::isfinite(rho)) return airRho;
+    if (!(rho > 0.0f) || !std::isfinite(rho) || represented <= 0.0f) return airRho;
     return rho;
 }
 
-// Amount-fraction mixture of thermal.conductivity. Pure-component fast path.
-// Missing/invalid k uses Air conductivity as a numerical fallback only.
+// Amount-fraction mixture of phase-appropriate thermal conductivity.
+// Generated components use their compiled gas conductivity and never borrow
+// Air conductivity as a generated-material fallback.
 inline float gasMixtureConductivity(GasComponentView const &view) {
     float airK = thermalForSubstance(SUBSTANCE_AIR).conductivity;
     if (!(airK > 0.0f) || !std::isfinite(airK)) airK = 0.026f;
-    auto kOf = [&](SubstanceId id) {
-        float k = thermalForSubstance(id).conductivity;
-        if (k > 0.0f && std::isfinite(k)) return k;
-        return airK;
+
+    auto kOf = [&](RuntimeSubstanceRef ref) {
+        if (runtimeSubstanceIsBuiltIn(ref)) {
+            float k = thermalForSubstance(runtimeBuiltinId(ref)).conductivity;
+            return (k > 0.0f && std::isfinite(k)) ? k : airK;
+        }
+        SaceCompiledGasProfile const *gasProfile = runtimeGasProfile(ref);
+        if (!gasProfile || !gasProfile->valid) return 0.0f;
+        float k = gasProfile->thermalConductivityWPerMK;
+        return (k > 0.0f && std::isfinite(k)) ? k : 0.0f;
     };
+
     if (view.count <= 0) return airK;
-    if (view.count == 1) return kOf(view.items[0].id);
+    if (view.count == 1) {
+        float k = kOf(view.items[0].id);
+        return k > 0.0f ? k : airK;
+    }
+
     float tot = 0.0f;
-    for (int n = 0; n < view.count; ++n) {
+    for (int n = 0; n < view.count; ++n)
         if (view.items[n].amount > GAS_MIN_AMOUNT && validGasComponentId(view.items[n].id))
             tot += view.items[n].amount;
-    }
     if (!(tot > GAS_MIN_AMOUNT)) return airK;
+
     float k = 0.0f;
+    float represented = 0.0f;
     for (int n = 0; n < view.count; ++n) {
-        SubstanceId id = view.items[n].id;
+        RuntimeSubstanceRef ref = view.items[n].id;
         float amt = view.items[n].amount;
-        if (!(amt > GAS_MIN_AMOUNT) || !validGasComponentId(id)) continue;
-        k += (amt / tot) * kOf(id);
+        if (!(amt > GAS_MIN_AMOUNT) || !validGasComponentId(ref)) continue;
+        float componentK = kOf(ref);
+        if (!(componentK > 0.0f)) continue;
+        float phi = amt / tot;
+        k += phi * componentK;
+        represented += phi;
     }
-    if (!(k > 0.0f) || !std::isfinite(k)) return airK;
+    if (!(k > 0.0f) || !std::isfinite(k) || represented <= 0.0f) return airK;
     return k;
 }
 

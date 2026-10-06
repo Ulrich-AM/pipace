@@ -43,6 +43,7 @@ PIPACE/
     RuntimeSubstance.h     # Phase 18 packed RuntimeSubstanceRef (not SubstanceId)
     GeneratedMaterialRegistry.h/.cpp # Phase 18 generated compiled-profile cache (session-local)
     RuntimeSubstanceProperties.h/.cpp # Phase 19A built-in/generated read-only property bridge
+    RuntimeComponentDiagnostics.h/.cpp # Phase 19B1 runtime component payload validation
     PhaseTransfer.h/.cpp  # fill/mass/gas-amount conversion
   world/
     WorldQuery.h/.cpp      # sampleMatterAt (SubstanceId + phase), phase/registry diags
@@ -125,6 +126,8 @@ SACE Phase 17 (`chemistry/SaceSimulationCompiler`) compiles a generated record p
 SACE Phase 18 (`substance/RuntimeSubstance.h`, `substance/GeneratedMaterialRegistry`) adds a packed 32-bit `RuntimeSubstanceRef` that can name a built-in `SubstanceId` or a generated runtime handle. Generated `SaceRecordId` stays chemistry identity and is **not** packed into the handle (handles are never reused in-process). `SaceCatalog::clear()` resets the generated runtime registry so stale refs cannot alias a later record. Registration compiles via Phase 17 and is idempotent; it is not player spawnability. Built-ins are not copied into the generated registry. Liquid/gas component storage, `MatterIdentity`, and world queries remain `SubstanceId`. `SUBSTANCE_COUNT` remains 12.
 
 Phase 19A (`substance/RuntimeSubstanceProperties`) adds a read-only property query bridge over `RuntimeSubstanceRef`. Built-ins delegate to existing `SubstanceDefinition` tables. Generated liquid/gas refs evaluate the retained Phase-17 SACE models at query temperature (COSTALD density, Rowlinson-Poling/Joback Cp, Sato-Riedel/Gharagheizi conductivity, compiled Joback solver viscosity, Sastri-Rao surface tension calibration). Generated queries fail closed on model-domain failure and never borrow Water/Air material properties. This phase does **not** migrate FluidEngine/GasEngine component storage or make generated matter spawnable.
+
+Phase 19B1 migrates `LiquidComponent` and `GasComponent` payload/view identity to `RuntimeSubstanceRef` while keeping FluidEngine/GasEngine internal SoA arrays built-in `SubstanceId` for one more phase. Built-in compatibility overloads preserve existing callers. Standalone generated payloads can add/find/merge/copy/scale/compact and liquid/gas mixture-property helpers consume the Phase-17/19A generated profiles. Live engine commits explicitly reject generated refs until 19B2 rather than truncating or relabeling identity.
 
 These mappings are **implementation, not laws**:
 
