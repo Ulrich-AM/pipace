@@ -148,6 +148,12 @@ private:
     void commitGasCompFromNext(int index);
     float addGasComponentUntracked(int index, RuntimeSubstanceRef id, float componentAmount);
     float addNextGasComponentUntracked(int index, RuntimeSubstanceRef id, float componentAmount);
+    float addGasComponentUntracked(int index, SubstanceId id, float componentAmount) {
+        return addGasComponentUntracked(index, runtimeBuiltIn(id), componentAmount);
+    }
+    float addNextGasComponentUntracked(int index, SubstanceId id, float componentAmount) {
+        return addNextGasComponentUntracked(index, runtimeBuiltIn(id), componentAmount);
+    }
     void writePureGas(int index, SubstanceId id, float componentAmount);
     void scaleGasComposition(int index, float frac);
     void syncAmountFromComposition(int index);
