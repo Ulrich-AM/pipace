@@ -1338,7 +1338,7 @@ void ThermalEngine::runDiagnostics(FluidEngine &fluid, RigidBodyEngine &rigid, G
         for (SplashParticle const &p : fluid.splashes) {
             float water = 0.0f;
             for (int n = 0; n < p.compCount; ++n)
-                if (p.comps[n].id == SUBSTANCE_WATER) water += p.comps[n].amount;
+                if (p.comps[n].id == runtimeBuiltIn(SUBSTANCE_WATER)) water += p.comps[n].amount;
             if (water > 0.0f) m += liquidFillToMassKg(SUBSTANCE_WATER, water, cpm);
         }
         return m;
