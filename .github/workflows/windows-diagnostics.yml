@@ -1,0 +1,78 @@
+name: Windows diagnostics
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  diagnostics:
+    runs-on: windows-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake -S . -B build-ci -G "Visual Studio 17 2022" -A x64
+
+      - name: Build
+        run: cmake --build build-ci --config Release --parallel
+
+      - name: Run diagnostics
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $exe = Join-Path $PWD "build-ci/Release/pipace.exe"
+          if (!(Test-Path $exe)) { throw "PIPACE executable not found: $exe" }
+
+          $tests = @(
+            @{ Name = "SACE identity";          Arg = "--sace-identity-diag";          File = "misc/sace_identity_diag.tsv" },
+            @{ Name = "SACE catalog";           Arg = "--sace-catalog-diag";           File = "misc/sace_catalog_diag.tsv" },
+            @{ Name = "SACE properties";        Arg = "--sace-property-diag";          File = "misc/sace_property_diag.tsv" },
+            @{ Name = "SACE molecule";          Arg = "--sace-molecule-diag";          File = "misc/sace_molecule_diag.tsv" },
+            @{ Name = "SACE descriptors";       Arg = "--sace-descriptor-diag";        File = "misc/sace_descriptor_diag.tsv" },
+            @{ Name = "SACE functional";        Arg = "--sace-functional-diag";        File = "misc/sace_functional_diag.tsv" },
+            @{ Name = "SACE estimation";        Arg = "--sace-estimation-diag";        File = "misc/sace_estimation_diag.tsv" },
+            @{ Name = "SACE readiness";         Arg = "--sace-readiness-diag";         File = "misc/sace_readiness_diag.tsv" },
+            @{ Name = "SACE compiler";          Arg = "--sace-compiler-diag";          File = "misc/sace_compiler_diag.tsv" },
+            @{ Name = "SACE runtime registry";  Arg = "--sace-runtime-registry-diag";  File = "misc/sace_runtime_registry_diag.tsv" },
+            @{ Name = "Runtime properties";     Arg = "--runtime-property-diag";        File = "misc/runtime_property_diag.tsv" },
+            @{ Name = "Substance registry";     Arg = "--substance-registry-diag";     File = "misc/substance_registry_diag.tsv" }
+          )
+
+          Write-Host ""
+          Write-Host "=== PIPACE diagnostic summaries ==="
+          foreach ($test in $tests) {
+            if (Test-Path $test.File) { Remove-Item $test.File -Force }
+            $proc = Start-Process -FilePath $exe -ArgumentList $test.Arg -Wait -PassThru
+            if ($proc.ExitCode -ne 0) {
+              throw "$($test.Name) exited with code $($proc.ExitCode)"
+            }
+            if (!(Test-Path $test.File)) {
+              throw "$($test.Name) did not create $($test.File)"
+            }
+
+            $rows = Get-Content $test.File
+            $failRows = @($rows | Where-Object { $_ -match "\tFAIL\t" -or $_ -match "^summary\tFAIL\t" })
+            if ($failRows.Count -gt 0) {
+              Write-Host "::error::$($test.Name) has FAIL rows"
+              $failRows | ForEach-Object { Write-Host $_ }
+              throw "$($test.Name) failed"
+            }
+
+            $summary = $rows | Where-Object { $_ -match "^summary\t" } | Select-Object -Last 1
+            if (-not $summary) {
+              throw "$($test.Name) has no summary row"
+            }
+            Write-Host ("{0,-24} {1}" -f $test.Name, $summary)
+          }
+
+      - name: Upload diagnostic TSVs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: diagnostic-tsvs
+          path: misc/*_diag.tsv
+          if-no-files-found: warn
