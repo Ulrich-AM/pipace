@@ -3154,6 +3154,19 @@ void FluidEngine::runLiquidCompositionDiagnostics() {
     emit("pure_water_sum",
         near(componentSum(i), fill[static_cast<size_t>(i)]),
         "sum=" + std::to_string(componentSum(i)) + " fill=" + std::to_string(fill[static_cast<size_t>(i)]));
+    {
+        int base = compositionSlot(i, 0);
+        copyCompositionToNext(i);
+        RuntimeSubstanceRef stored = liquidCompId[static_cast<size_t>(base)];
+        RuntimeSubstanceRef nextStored = nextCompId[static_cast<size_t>(base)];
+        emit("runtime_ref_internal_storage",
+            runtimeSubstanceIsBuiltIn(stored)
+                && runtimeBuiltinId(stored) == SUBSTANCE_WATER
+                && runtimeSubstanceIsBuiltIn(nextStored)
+                && runtimeBuiltinId(nextStored) == SUBSTANCE_WATER,
+            "raw=" + std::to_string(stored.raw)
+                + " nextRaw=" + std::to_string(nextStored.raw));
+    }
 
     resetCell();
     setLiquidComponentAmount(i, SUBSTANCE_WATER, 1.0f);
