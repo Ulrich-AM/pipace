@@ -3121,7 +3121,7 @@ void FluidEngine::runLiquidCompositionDiagnostics() {
     };
     auto componentSum = [&](int idx) {
         float s = 0.0f;
-        forEachLiquidComponent(idx, [&](SubstanceId, float amt) { s += amt; });
+        forEachLiquidComponent(idx, [&](RuntimeSubstanceRef, float amt) { s += amt; });
         return s;
     };
 
