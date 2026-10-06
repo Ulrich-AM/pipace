@@ -31,10 +31,10 @@ struct GasEngine {
     std::vector<uint8_t> thermalChunkWake;
 
     // Fixed-capacity SoA composition. amount[] is occupancy; these slots say what it is.
-    std::vector<SubstanceId> gasCompId; // cell * kMaxGasComponents + slot
+    std::vector<RuntimeSubstanceRef> gasCompId; // cell * kMaxGasComponents + slot
     std::vector<float> gasCompAmt;
     std::vector<uint8_t> gasCompCount;
-    std::vector<SubstanceId> nextGasCompId;
+    std::vector<RuntimeSubstanceRef> nextGasCompId;
     std::vector<float> nextGasCompAmt;
     std::vector<uint8_t> nextGasCompCount;
 
@@ -82,20 +82,46 @@ struct GasEngine {
     void runDiagnostics(FluidEngine &fluid, RigidBodyEngine &rigid);
     void runCompositionSanityCheck(FluidEngine &fluid, RigidBodyEngine &rigid);
 
-    float gasComponentAmount(int index, SubstanceId id) const;
-    float gasComponentFraction(int index, SubstanceId id) const;
-    SubstanceId dominantGasSubstance(int index) const;
+    float gasComponentAmount(int index, RuntimeSubstanceRef id) const;
+    float gasComponentFraction(int index, RuntimeSubstanceRef id) const;
+    RuntimeSubstanceRef dominantGasRef(int index) const;
     bool gasCompositionValid(int index) const;
     GasComponentView gasComponents(int index) const;
-    void setGasComponentAmount(int index, SubstanceId id, float componentAmount);
-    void addGasComponentAmount(int index, SubstanceId id, float delta);
-    float takeGasComponentAmount(int index, SubstanceId id, float da);
+    void setGasComponentAmount(int index, RuntimeSubstanceRef id, float componentAmount);
+    void addGasComponentAmount(int index, RuntimeSubstanceRef id, float delta);
+    float takeGasComponentAmount(int index, RuntimeSubstanceRef id, float da);
     bool tryCommitGasOccupancy(int index, GasComponentView const &view);
     void clearGasComposition(int index);
     // Cached total * mole fraction. Solver / GASP / rigid forces.
-    float gasPartialPressurePa(int index, SubstanceId id) const;
+    float gasPartialPressurePa(int index, RuntimeSubstanceRef id) const;
     // Live amount/volume/T. Water phase change must not wait on pressure[].
-    float gasPartialPressurePaFromCurrentState(int index, SubstanceId id) const;
+    float gasPartialPressurePaFromCurrentState(int index, RuntimeSubstanceRef id) const;
+
+    // Built-in compatibility wrappers. Storage is RuntimeSubstanceRef.
+    float gasComponentAmount(int index, SubstanceId id) const {
+        return gasComponentAmount(index, runtimeBuiltIn(id));
+    }
+    float gasComponentFraction(int index, SubstanceId id) const {
+        return gasComponentFraction(index, runtimeBuiltIn(id));
+    }
+    SubstanceId dominantGasSubstance(int index) const {
+        return runtimeBuiltinId(dominantGasRef(index));
+    }
+    void setGasComponentAmount(int index, SubstanceId id, float componentAmount) {
+        setGasComponentAmount(index, runtimeBuiltIn(id), componentAmount);
+    }
+    void addGasComponentAmount(int index, SubstanceId id, float delta) {
+        addGasComponentAmount(index, runtimeBuiltIn(id), delta);
+    }
+    float takeGasComponentAmount(int index, SubstanceId id, float da) {
+        return takeGasComponentAmount(index, runtimeBuiltIn(id), da);
+    }
+    float gasPartialPressurePa(int index, SubstanceId id) const {
+        return gasPartialPressurePa(index, runtimeBuiltIn(id));
+    }
+    float gasPartialPressurePaFromCurrentState(int index, SubstanceId id) const {
+        return gasPartialPressurePaFromCurrentState(index, runtimeBuiltIn(id));
+    }
 
     // Compatibility wrappers over generic composition. Water vapor is
     // SUBSTANCE_WATER + MatterPhase::Gas; Air is SUBSTANCE_AIR. Not a second store.
@@ -120,8 +146,8 @@ private:
     void compactGasComposition(int index);
     void copyGasCompToNext(int index);
     void commitGasCompFromNext(int index);
-    float addGasComponentUntracked(int index, SubstanceId id, float componentAmount);
-    float addNextGasComponentUntracked(int index, SubstanceId id, float componentAmount);
+    float addGasComponentUntracked(int index, RuntimeSubstanceRef id, float componentAmount);
+    float addNextGasComponentUntracked(int index, RuntimeSubstanceRef id, float componentAmount);
     void writePureGas(int index, SubstanceId id, float componentAmount);
     void scaleGasComposition(int index, float frac);
     void syncAmountFromComposition(int index);
