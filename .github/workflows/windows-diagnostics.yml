@@ -39,6 +39,8 @@ jobs:
             @{ Name = "SACE compiler";          Arg = "--sace-compiler-diag";          File = "misc/sace_compiler_diag.tsv" },
             @{ Name = "SACE runtime registry";  Arg = "--sace-runtime-registry-diag";  File = "misc/sace_runtime_registry_diag.tsv" },
             @{ Name = "Runtime properties";     Arg = "--runtime-property-diag";        File = "misc/runtime_property_diag.tsv" },
+            @{ Name = "Runtime components";     Arg = "--runtime-component-diag";       File = "misc/runtime_component_diag.tsv" },
+            @{ Name = "Liquid composition";     Arg = "--liquid-composition-diag";      File = "misc/liquid_composition_diag.tsv" },
             @{ Name = "Substance registry";     Arg = "--substance-registry-diag";     File = "misc/substance_registry_diag.tsv" }
           )
 
