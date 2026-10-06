@@ -92,6 +92,22 @@ void applyDye(MaterialVisual &vis, float ir, float ig, float ib) {
             static_cast<int>(ib * 255.0f), dyeI);
 }
 
+MaterialVisual visualForLiquidRef(RuntimeSubstanceRef ref) {
+    if (runtimeSubstanceIsBuiltIn(ref))
+        return visualForSubstance(runtimeBuiltinId(ref));
+
+    // Phase 20 will assign persistent generated-material visuals. Until then,
+    // use a neutral generated placeholder rather than pretending it is Water.
+    MaterialVisual v;
+    uint32_t h = runtimeGeneratedHandleValue(ref);
+    v.r = 112 + static_cast<int>((h * 37u) % 72u);
+    v.g = 112 + static_cast<int>((h * 61u) % 72u);
+    v.b = 112 + static_cast<int>((h * 83u) % 72u);
+    v.glowEligible = false;
+    v.glowStrength = 0.0f;
+    return v;
+}
+
 MaterialVisual blendLiquidVisual(LiquidComponent const *items, int count) {
     float tot = 0.0f;
     for (int n = 0; n < count; ++n) {
@@ -107,13 +123,13 @@ MaterialVisual blendLiquidVisual(LiquidComponent const *items, int count) {
         if (!validLiquidComponentId(items[n].id) || items[n].amount <= kMinLiquidComponent)
             continue;
         if (first) {
-            vis = visualForSubstance(items[n].id);
+            vis = visualForLiquidRef(items[n].id);
             acc = items[n].amount;
             first = false;
             continue;
         }
         float w = items[n].amount / (acc + items[n].amount);
-        lerpVisual(vis, visualForSubstance(items[n].id), w);
+        lerpVisual(vis, visualForLiquidRef(items[n].id), w);
         acc += items[n].amount;
     }
     return vis;
