@@ -29,6 +29,7 @@ add_executable(pipace WIN32
   chemistry/SaceSimulationReadiness.cpp
   chemistry/SaceSimulationCompiler.cpp
   substance/GeneratedMaterialRegistry.cpp
+  substance/RuntimeSubstanceProperties.cpp
   world/WorldQuery.cpp
   world/WaterPhaseChange.cpp
   world/PhaseChangeEngine.cpp
