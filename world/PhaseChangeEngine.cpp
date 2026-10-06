@@ -158,25 +158,25 @@ bool gasCellCanAcceptComponent(GasEngine const &gas, int index, SubstanceId id) 
 bool liquidCellAcceptsCondensate(FluidEngine const &fluid, int i, SubstanceId id) {
     float fill = fluid.fill[static_cast<size_t>(i)];
     if (fill < kMinFillMove) return true;
-    SubstanceId pureId = SUBSTANCE_NONE;
+    RuntimeSubstanceRef pureRef = runtimeNone();
     float mainAmt = 0.0f;
     float otherAmt = 0.0f;
     LiquidComponentView view = fluid.liquidComponents(i);
     for (int n = 0; n < view.count; ++n) {
-        SubstanceId sid = view.items[n].id;
+        RuntimeSubstanceRef sid = view.items[n].id;
         float amt = view.items[n].amount;
         if (!validLiquidComponentId(sid) || !std::isfinite(amt) || amt <= kMinLiquidComponent)
             continue;
-        if (pureId == SUBSTANCE_NONE || sid == pureId) {
-            pureId = sid;
+        if (runtimeSubstanceIsNone(pureRef) || sid == pureRef) {
+            pureRef = sid;
             mainAmt += amt;
         } else {
             otherAmt += amt;
         }
     }
-    if (pureId == SUBSTANCE_NONE) return true;
+    if (runtimeSubstanceIsNone(pureRef)) return true;
     if (otherAmt > kMeaningfulLiquidComponent) return false;
-    return pureId == id;
+    return pureRef == runtimeBuiltIn(id);
 }
 
 bool resolvePureLiquidForVaporization(FluidEngine const &fluid, int i,
@@ -187,21 +187,23 @@ bool resolvePureLiquidForVaporization(FluidEngine const &fluid, int i,
     float fill = fluid.fill[static_cast<size_t>(i)];
     if (fill < kMinFillMove) return false;
     LiquidComponentView view = fluid.liquidComponents(i);
-    SubstanceId found = SUBSTANCE_NONE;
+    RuntimeSubstanceRef foundRef = runtimeNone();
     float mainAmt = 0.0f;
     float otherAmt = 0.0f;
     for (int n = 0; n < view.count; ++n) {
-        SubstanceId sid = view.items[n].id;
+        RuntimeSubstanceRef sid = view.items[n].id;
         float amt = view.items[n].amount;
         if (!validLiquidComponentId(sid) || !std::isfinite(amt) || amt <= kMinLiquidComponent)
             continue;
-        if (found == SUBSTANCE_NONE || sid == found) {
-            found = sid;
+        if (runtimeSubstanceIsNone(foundRef) || sid == foundRef) {
+            foundRef = sid;
             mainAmt += amt;
         } else {
             otherAmt += amt;
         }
     }
+    if (runtimeSubstanceIsNone(foundRef)) return false;
+    SubstanceId found = runtimeBuiltinId(foundRef);
     if (found == SUBSTANCE_NONE) return false;
     if (otherAmt > kMeaningfulLiquidComponent) return false;
     if (mainAmt + kMeaningfulLiquidComponent < fill) return false;
@@ -219,21 +221,23 @@ bool resolvePureLiquidForSolidification(FluidEngine const &fluid, int i,
     float fill = fluid.fill[static_cast<size_t>(i)];
     if (fill < kMinFillMove) return false;
     LiquidComponentView view = fluid.liquidComponents(i);
-    SubstanceId found = SUBSTANCE_NONE;
+    RuntimeSubstanceRef foundRef = runtimeNone();
     float mainAmt = 0.0f;
     float otherAmt = 0.0f;
     for (int n = 0; n < view.count; ++n) {
-        SubstanceId sid = view.items[n].id;
+        RuntimeSubstanceRef sid = view.items[n].id;
         float amt = view.items[n].amount;
         if (!validLiquidComponentId(sid) || !std::isfinite(amt) || amt <= kMinLiquidComponent)
             continue;
-        if (found == SUBSTANCE_NONE || sid == found) {
-            found = sid;
+        if (runtimeSubstanceIsNone(foundRef) || sid == foundRef) {
+            foundRef = sid;
             mainAmt += amt;
         } else {
             otherAmt += amt;
         }
     }
+    if (runtimeSubstanceIsNone(foundRef)) return false;
+    SubstanceId found = runtimeBuiltinId(foundRef);
     if (found == SUBSTANCE_NONE) return false;
     if (otherAmt > kMeaningfulLiquidComponent) return false;
     if (mainAmt + kMeaningfulLiquidComponent < fill) return false;
@@ -781,10 +785,11 @@ bool gasViewHasLiveLiquidGasVapor(GasComponentView const &view) {
     int n = view.count;
     if (n > kMaxGasComponents) n = kMaxGasComponents;
     for (int i = 0; i < n; ++i) {
-        SubstanceId id = view.items[i].id;
+        RuntimeSubstanceRef ref = view.items[i].id;
         float amt = view.items[i].amount;
         if (!(amt > GAS_MIN_AMOUNT) || !std::isfinite(amt)) continue;
-        if (supportsLiveLiquidGasTransition(id)) return true;
+        SubstanceId id = runtimeBuiltinId(ref);
+        if (id != SUBSTANCE_NONE && supportsLiveLiquidGasTransition(id)) return true;
     }
     return false;
 }
@@ -1020,9 +1025,11 @@ LiquidGasPhaseTickStats stepLiquidGasPhaseChange(FluidEngine &fluid, RigidBodyEn
             GasComponentView view = gas.gasComponents(gi);
             float Tgas = ThermalEngine::gasTempK(gas, gi);
             for (int c = 0; c < view.count && c < kMaxGasComponents; ++c) {
-                SubstanceId id = view.items[c].id;
+                RuntimeSubstanceRef ref = view.items[c].id;
+                SubstanceId id = runtimeBuiltinId(ref);
                 float vap = view.items[c].amount;
-                if (!(vap > GAS_MIN_AMOUNT) || !supportsLiveLiquidGasTransition(id)) continue;
+                if (id == SUBSTANCE_NONE || !(vap > GAS_MIN_AMOUNT)
+                    || !supportsLiveLiquidGasTransition(id)) continue;
                 PhaseProperties const &phase = phaseForSubstance(id);
                 float Lv = phase.latentHeatVaporization;
                 float cpLiquid = thermalForSubstance(id).specificHeat;
