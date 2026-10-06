@@ -34,14 +34,16 @@ struct FluidEngine {
     std::vector<float> liquidHeat;
     std::vector<float> nextHeat;
     std::vector<float> dyeR, dyeG, dyeB; // dye mass; concentration = dye / fill
-    std::vector<SubstanceId> liquidCompId; // SoA: cell * kMaxLiquidComponents + slot
+    // Phase 19B2a: liquid composition identity storage is RuntimeSubstanceRef.
+    // Public mutation APIs remain built-in SubstanceId-only until 19B2b.
+    std::vector<RuntimeSubstanceRef> liquidCompId; // SoA: cell * kMaxLiquidComponents + slot
     std::vector<float> liquidCompAmt;
     std::vector<uint8_t> liquidCompCount;
     std::vector<SubstanceId> solidifyPendingId; // one pending solid SubstanceId per cell
     std::vector<float> solidifyPendingKg;       // sub-pixel solid mass waiting for a rigid pixel
     std::vector<float> solidifyPendingHeatJ;    // sensible energy of that pending solid mass
     std::vector<float> nextDyeR, nextDyeG, nextDyeB;
-    std::vector<SubstanceId> nextCompId;
+    std::vector<RuntimeSubstanceRef> nextCompId;
     std::vector<float> nextCompAmt;
     std::vector<uint8_t> nextCompCount;
     std::vector<float> pressure;
@@ -210,9 +212,8 @@ struct FluidEngine {
     LiquidComponentView liquidComponents(int index) const;
     template<typename Fn>
     void forEachLiquidComponent(int index, Fn &&fn) const {
-        // Phase 19B1 compatibility: engine SoA storage is still built-in-only.
-        // Runtime-ref payloads are unwrapped explicitly here until 19B2 migrates
-        // the internal composition arrays themselves.
+        // Phase 19B2a compatibility: storage is RuntimeSubstanceRef, while the
+        // public callback remains built-in SubstanceId-only until 19B2b.
         LiquidComponentView view = liquidComponents(index);
         for (int n = 0; n < view.count; ++n) {
             if (!runtimeSubstanceIsBuiltIn(view.items[n].id)) continue;
