@@ -1,6 +1,7 @@
 #pragma once
 
 #include "thermal/ThermalTypes.h"
+#include "substance/RuntimeSubstance.h"
 
 #include <algorithm>
 #include <cmath>
@@ -48,8 +49,13 @@ constexpr int kMaxLiquidComponents = 4;
 constexpr float kMinLiquidComponent = 1.0e-8f;
 
 struct LiquidComponent {
-    SubstanceId id = SUBSTANCE_NONE;
+    RuntimeSubstanceRef id{};
     float amount = 0.0f;
+
+    LiquidComponent() = default;
+    LiquidComponent(RuntimeSubstanceRef ref, float value) : id(ref), amount(value) {}
+    // Built-in compatibility for existing paint/tests/reaction definitions.
+    LiquidComponent(SubstanceId sid, float value) : id(runtimeBuiltIn(sid)), amount(value) {}
 };
 
 struct LiquidComponentView {
@@ -57,22 +63,39 @@ struct LiquidComponentView {
     int count = 0;
 };
 
-inline bool validLiquidComponentId(SubstanceId id) {
-    return validSubstance(id)
-        && id != SUBSTANCE_NONE
-        && supportsPhase(id, MatterPhase::Liquid)
-        && hasFluidProperties(id);
+inline bool validLiquidComponentId(RuntimeSubstanceRef id) {
+    if (runtimeSubstanceIsBuiltIn(id)) {
+        SubstanceId sid = runtimeBuiltinId(id);
+        return validSubstance(sid)
+            && sid != SUBSTANCE_NONE
+            && supportsPhase(sid, MatterPhase::Liquid)
+            && hasFluidProperties(sid);
+    }
+    return runtimeSubstanceIsGenerated(id)
+        && runtimeSupportsPhase(id, MatterPhase::Liquid);
 }
 
-inline int findLiquidComponent(LiquidComponent const *items, int count, SubstanceId id) {
+inline bool validLiquidComponentId(SubstanceId id) {
+    return validLiquidComponentId(runtimeBuiltIn(id));
+}
+
+inline int findLiquidComponent(LiquidComponent const *items, int count, RuntimeSubstanceRef id) {
     for (int n = 0; n < count; ++n)
         if (items[n].id == id) return n;
     return -1;
 }
 
-inline float liquidPayloadAmount(LiquidComponent const *items, int count, SubstanceId id) {
+inline int findLiquidComponent(LiquidComponent const *items, int count, SubstanceId id) {
+    return findLiquidComponent(items, count, runtimeBuiltIn(id));
+}
+
+inline float liquidPayloadAmount(LiquidComponent const *items, int count, RuntimeSubstanceRef id) {
     int n = findLiquidComponent(items, count, id);
     return n >= 0 ? items[n].amount : 0.0f;
+}
+
+inline float liquidPayloadAmount(LiquidComponent const *items, int count, SubstanceId id) {
+    return liquidPayloadAmount(items, count, runtimeBuiltIn(id));
 }
 
 inline float liquidPayloadSum(LiquidComponent const *items, int count) {
@@ -82,7 +105,7 @@ inline float liquidPayloadSum(LiquidComponent const *items, int count) {
 }
 
 // Merge id into a fixed payload. Returns the amount that did not fit (overflow).
-inline float addLiquidPayload(LiquidComponent *items, int &count, SubstanceId id, float amount) {
+inline float addLiquidPayload(LiquidComponent *items, int &count, RuntimeSubstanceRef id, float amount) {
     if (!validLiquidComponentId(id) || !(amount > kMinLiquidComponent)) return 0.0f;
     int n = findLiquidComponent(items, count, id);
     if (n >= 0) {
@@ -90,8 +113,12 @@ inline float addLiquidPayload(LiquidComponent *items, int &count, SubstanceId id
         return 0.0f;
     }
     if (count >= kMaxLiquidComponents) return amount;
-    items[count++] = {id, amount};
+    items[count++] = LiquidComponent{id, amount};
     return 0.0f;
+}
+
+inline float addLiquidPayload(LiquidComponent *items, int &count, SubstanceId id, float amount) {
+    return addLiquidPayload(items, count, runtimeBuiltIn(id), amount);
 }
 
 inline void compactLiquidPayload(LiquidComponent *items, int &count) {
