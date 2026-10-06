@@ -29,8 +29,16 @@ namespace {
 constexpr float kDefaultMaxExtentPerSecond = 1.0f;
 
 
+struct InventoryItem {
+    SubstanceId id = SUBSTANCE_NONE;
+    float amount = 0.0f;
+};
+
 struct Inventory {
-    LiquidComponent items[kMaxLiquidComponents]{};
+    // Reaction definitions are still SubstanceId-based in Phase 19B1.
+    // Keep this private work inventory independent from RuntimeSubstanceRef
+    // world payloads; synthetic diagnostics intentionally use unregistered IDs.
+    InventoryItem items[kMaxLiquidComponents]{};
     int count = 0;
     float fill = 0.0f;
     float heat = 0.0f;
