@@ -387,7 +387,7 @@ LiquidComponentView FluidEngine::liquidComponents(int index) const {
 }
 
 SubstanceId FluidEngine::dominantLiquidSubstance(int index) const {
-    SubstanceId best = runtimeNone();
+    SubstanceId best = SUBSTANCE_NONE;
     float bestAmt = 0.0f;
     forEachLiquidComponent(index, [&](SubstanceId id, float amt) {
         if (amt > bestAmt) {
@@ -597,7 +597,7 @@ void FluidEngine::clearSolidifyPending(int index) {
     if (index < 0 || index >= GW * GH) return;
     size_t i = static_cast<size_t>(index);
     bool occupied = std::isfinite(solidifyPendingKg[i]) && solidifyPendingKg[i] > 1.0e-12f;
-    solidifyPendingId[i] = runtimeNone();
+    solidifyPendingId[i] = SUBSTANCE_NONE;
     solidifyPendingKg[i] = 0.0f;
     solidifyPendingHeatJ[i] = 0.0f;
     if (occupied && pendingSolidCellCount > 0) --pendingSolidCellCount;
@@ -612,7 +612,7 @@ bool FluidEngine::addSolidifyPendingKg(int index, SubstanceId id, float kg, floa
     SubstanceId &pendId = solidifyPendingId[i];
     float &heat = solidifyPendingHeatJ[i];
     float addHeat = (std::isfinite(heatJ) && heatJ > 0.0f) ? heatJ : 0.0f;
-    bool wasOccupied = std::isfinite(pending) && pending > 1.0e-12f && pendId != runtimeNone();
+    bool wasOccupied = std::isfinite(pending) && pending > 1.0e-12f && pendId != SUBSTANCE_NONE;
     if (!(pending > 1.0e-12f) || !std::isfinite(pending) || pendId == SUBSTANCE_NONE) {
         pendId = id;
         pending = kg;
@@ -644,7 +644,7 @@ bool FluidEngine::takeSolidifyPendingKg(int index, SubstanceId id, float kg, flo
     if (!(pending > 1.0e-12f) || !std::isfinite(pending)) {
         pending = 0.0f;
         heat = 0.0f;
-        solidifyPendingId[i] = runtimeNone();
+        solidifyPendingId[i] = SUBSTANCE_NONE;
         if (wasOccupied && pendingSolidCellCount > 0) --pendingSolidCellCount;
     } else if (!(heat > 0.0f) || !std::isfinite(heat)) {
         heat = 0.0f;
