@@ -34,14 +34,14 @@ struct FluidEngine {
     std::vector<float> liquidHeat;
     std::vector<float> nextHeat;
     std::vector<float> dyeR, dyeG, dyeB; // dye mass; concentration = dye / fill
-    std::vector<SubstanceId> liquidCompId; // SoA: cell * kMaxLiquidComponents + slot
+    std::vector<RuntimeSubstanceRef> liquidCompId; // SoA runtime identity: cell * kMaxLiquidComponents + slot
     std::vector<float> liquidCompAmt;
     std::vector<uint8_t> liquidCompCount;
     std::vector<SubstanceId> solidifyPendingId; // one pending solid SubstanceId per cell
     std::vector<float> solidifyPendingKg;       // sub-pixel solid mass waiting for a rigid pixel
     std::vector<float> solidifyPendingHeatJ;    // sensible energy of that pending solid mass
     std::vector<float> nextDyeR, nextDyeG, nextDyeB;
-    std::vector<SubstanceId> nextCompId;
+    std::vector<RuntimeSubstanceRef> nextCompId;
     std::vector<float> nextCompAmt;
     std::vector<uint8_t> nextCompCount;
     std::vector<float> pressure;
@@ -201,11 +201,28 @@ struct FluidEngine {
     LiquidCarry takeLiquidCarry(int index, float amount);
     float takeLiquidVolume(int index, float amount);
     float honeyFraction(int index) const; // transport convenience; = liquidComponentFraction(..., HONEY)
-    float liquidComponentAmount(int index, SubstanceId id) const;
-    float liquidComponentFraction(int index, SubstanceId id) const;
-    void setLiquidComponentAmount(int index, SubstanceId id, float amount);
-    void addLiquidComponentAmount(int index, SubstanceId id, float delta);
-    SubstanceId dominantLiquidSubstance(int index) const;
+    float liquidComponentAmount(int index, RuntimeSubstanceRef id) const;
+    float liquidComponentFraction(int index, RuntimeSubstanceRef id) const;
+    void setLiquidComponentAmount(int index, RuntimeSubstanceRef id, float amount);
+    void addLiquidComponentAmount(int index, RuntimeSubstanceRef id, float delta);
+    RuntimeSubstanceRef dominantLiquidRef(int index) const;
+
+    // Built-in compatibility wrappers. Storage is RuntimeSubstanceRef.
+    float liquidComponentAmount(int index, SubstanceId id) const {
+        return liquidComponentAmount(index, runtimeBuiltIn(id));
+    }
+    float liquidComponentFraction(int index, SubstanceId id) const {
+        return liquidComponentFraction(index, runtimeBuiltIn(id));
+    }
+    void setLiquidComponentAmount(int index, SubstanceId id, float amount) {
+        setLiquidComponentAmount(index, runtimeBuiltIn(id), amount);
+    }
+    void addLiquidComponentAmount(int index, SubstanceId id, float delta) {
+        addLiquidComponentAmount(index, runtimeBuiltIn(id), delta);
+    }
+    SubstanceId dominantLiquidSubstance(int index) const {
+        return runtimeBuiltinId(dominantLiquidRef(index));
+    }
     bool liquidCompositionValid(int index) const;
     LiquidComponentView liquidComponents(int index) const;
     template<typename Fn>
@@ -286,8 +303,8 @@ private:
     void compactComposition(int index);
     void copyCompositionToNext(int index);
     void commitNextComposition(int index);
-    float addComponentUntracked(int index, SubstanceId id, float amount);
-    float addNextComponentUntracked(int index, SubstanceId id, float amount);
+    float addComponentUntracked(int index, RuntimeSubstanceRef id, float amount);
+    float addNextComponentUntracked(int index, RuntimeSubstanceRef id, float amount);
     bool cellHasDuplicateComponents(int index) const;
     void returnAdvectOverflow(int origin, float vol, LiquidCarry &carry, int x0, int y0, int x1, int y1);
 };
