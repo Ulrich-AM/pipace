@@ -2,6 +2,7 @@
 
 #include "gas/GasTypes.h"
 #include "substance/SubstanceTypes.h"
+#include "substance/RuntimeSubstanceProperties.h"
 #include "thermal/ThermalTypes.h"
 
 #include <algorithm>
@@ -272,44 +273,100 @@ inline double molesToStorageAmount(SubstanceId id, MatterPhase phase, double mol
     return massKgToAmount(id, phase, molesToMassKg(id, moles), cellsPerMeter);
 }
 
-// Shared gas heat capacity: Σ mass_i · Cp_gas,i. Pure Air uses gasMassKg × air Cp.
-// Missing molar/density data uses Air's mass scale as a numerical fallback only.
+// Runtime gas property adapters used by composition storage. Built-ins retain
+// the existing SubstanceDefinition path; generated refs use the Phase-19A
+// compiled-property bridge. These helpers do not enable generated phase change.
+inline double runtimeGasReferenceDensityKgM3(RuntimeSubstanceRef ref) {
+    if (runtimeSubstanceIsBuiltIn(ref))
+        return referenceGasDensityKgM3(runtimeBuiltinId(ref));
+
+    RuntimeGasPropertySample sample{};
+    if (!sampleRuntimeGasProperties(ref, AMBIENT_TEMPERATURE_K, sample) || !sample.valid)
+        return 0.0;
+    double T = static_cast<double>(AMBIENT_TEMPERATURE_K);
+    if (!(T > 1.0)) T = 293.15;
+    double Mkg = static_cast<double>(sample.molarMassGPerMol) * 1.0e-3;
+    if (!(Mkg > 0.0) || !std::isfinite(Mkg)) return 0.0;
+    double rho = static_cast<double>(GAS_REFERENCE_PRESSURE_PA) * Mkg
+        / (static_cast<double>(UNIVERSAL_GAS_R_J_MOL_K) * T);
+    return std::isfinite(rho) && rho > 0.0 ? rho : 0.0;
+}
+
+inline float runtimeGasSpecificHeatJPerKgK(RuntimeSubstanceRef ref) {
+    if (runtimeSubstanceIsBuiltIn(ref))
+        return gasPhaseSpecificHeat(runtimeBuiltinId(ref));
+    RuntimeGasPropertySample sample{};
+    if (!sampleRuntimeGasProperties(ref, AMBIENT_TEMPERATURE_K, sample) || !sample.valid)
+        return 0.0f;
+    return sample.specificHeatJPerKgK;
+}
+
+inline float runtimeGasConductivityWPerMK(RuntimeSubstanceRef ref) {
+    if (runtimeSubstanceIsBuiltIn(ref))
+        return thermalForSubstance(runtimeBuiltinId(ref)).conductivity;
+    RuntimeGasPropertySample sample{};
+    if (!sampleRuntimeGasProperties(ref, AMBIENT_TEMPERATURE_K, sample) || !sample.valid)
+        return 0.0f;
+    return sample.thermalConductivityWPerMK;
+}
+
+// Shared gas heat capacity: Σ mass_i · Cp_gas,i. Pure Air preserves the
+// historical fast path. Generated species never borrow Air's material data.
 inline float gasMixtureThermalCapacity(GasComponentView const &view, float cellsPerMeter = 4.0f) {
     if (view.count <= 0) return 0.0f;
-    if (view.count == 1 && view.items[0].id == SUBSTANCE_AIR)
+    RuntimeSubstanceRef airRef = runtimeBuiltIn(SUBSTANCE_AIR);
+    if (view.count == 1 && view.items[0].id == airRef)
         return thermalCapacity(gasMassKg(view.items[0].amount, cellsPerMeter),
             thermalForSubstance(SUBSTANCE_AIR).specificHeat);
+
     float cap = 0.0f;
     for (int n = 0; n < view.count; ++n) {
-        SubstanceId id = view.items[n].id;
+        RuntimeSubstanceRef ref = view.items[n].id;
         float amt = view.items[n].amount;
-        if (!(amt > GAS_MIN_AMOUNT) || !validGasComponentId(id)) continue;
+        if (!(amt > GAS_MIN_AMOUNT) || !validGasComponentId(ref)) continue;
+
         float mass = 0.0f;
-        if (id == SUBSTANCE_AIR)
-            mass = gasMassKg(amt, cellsPerMeter);
-        else {
-            mass = static_cast<float>(gasAmountToMassKg(id, amt, static_cast<double>(cellsPerMeter)));
-            if (!(mass > 0.0f) || !std::isfinite(mass))
+        float cp = runtimeGasSpecificHeatJPerKgK(ref);
+        if (!(cp > 0.0f) || !std::isfinite(cp)) continue;
+
+        if (runtimeSubstanceIsBuiltIn(ref)) {
+            SubstanceId id = runtimeBuiltinId(ref);
+            if (id == SUBSTANCE_AIR) {
                 mass = gasMassKg(amt, cellsPerMeter);
+            } else {
+                mass = static_cast<float>(gasAmountToMassKg(id, amt,
+                    static_cast<double>(cellsPerMeter)));
+                if (!(mass > 0.0f) || !std::isfinite(mass))
+                    mass = gasMassKg(amt, cellsPerMeter);
+            }
+        } else {
+            double rho = runtimeGasReferenceDensityKgM3(ref);
+            double m = static_cast<double>(amt) * rho * sandboxCellVolumeM3(cellsPerMeter);
+            if (std::isfinite(m) && m > 0.0)
+                mass = static_cast<float>(m);
         }
-        cap += thermalCapacity(mass, gasPhaseSpecificHeat(id));
+        if (!(mass > 0.0f) || !std::isfinite(mass)) continue;
+        cap += thermalCapacity(mass, cp);
     }
     return cap;
 }
 
-// Amount-fraction mixture of referenceGasDensityKgM3. Pure-component fast path.
-// Missing/invalid density uses Air's tabulated rho as a numerical fallback only;
-// it does not relabel the substance as Air.
+// Amount-fraction mixture of reference gas density. Built-ins retain their
+// historical numerical Air fallback. Registered generated refs use their own
+// molar mass and fail closed if that data is unavailable.
 inline float gasMixtureReferenceDensityKgM3(GasComponentView const &view) {
     float airRho = AIR_DENSITY_KG_M3;
     if (!(airRho > 0.0f) || !std::isfinite(airRho)) airRho = 1.204f;
-    auto rhoOf = [&](SubstanceId id) {
-        double rho = referenceGasDensityKgM3(id);
+    auto rhoOf = [&](RuntimeSubstanceRef ref) {
+        double rho = runtimeGasReferenceDensityKgM3(ref);
         if (rho > 0.0 && std::isfinite(rho)) return static_cast<float>(rho);
-        return airRho;
+        return runtimeSubstanceIsBuiltIn(ref) ? airRho : 0.0f;
     };
     if (view.count <= 0) return airRho;
-    if (view.count == 1) return rhoOf(view.items[0].id);
+    if (view.count == 1) {
+        float rho = rhoOf(view.items[0].id);
+        return rho > 0.0f ? rho : airRho;
+    }
     float tot = 0.0f;
     for (int n = 0; n < view.count; ++n) {
         if (view.items[n].amount > GAS_MIN_AMOUNT && validGasComponentId(view.items[n].id))
@@ -317,28 +374,36 @@ inline float gasMixtureReferenceDensityKgM3(GasComponentView const &view) {
     }
     if (!(tot > GAS_MIN_AMOUNT)) return airRho;
     float rho = 0.0f;
+    float used = 0.0f;
     for (int n = 0; n < view.count; ++n) {
-        SubstanceId id = view.items[n].id;
+        RuntimeSubstanceRef ref = view.items[n].id;
         float amt = view.items[n].amount;
-        if (!(amt > GAS_MIN_AMOUNT) || !validGasComponentId(id)) continue;
-        rho += (amt / tot) * rhoOf(id);
+        if (!(amt > GAS_MIN_AMOUNT) || !validGasComponentId(ref)) continue;
+        float ri = rhoOf(ref);
+        if (!(ri > 0.0f)) continue;
+        float w = amt / tot;
+        rho += w * ri;
+        used += w;
     }
-    if (!(rho > 0.0f) || !std::isfinite(rho)) return airRho;
-    return rho;
+    if (!(rho > 0.0f) || !std::isfinite(rho) || !(used > 0.0f)) return airRho;
+    return rho / used;
 }
 
-// Amount-fraction mixture of thermal.conductivity. Pure-component fast path.
-// Missing/invalid k uses Air conductivity as a numerical fallback only.
+// Amount-fraction mixture of gas thermal conductivity. Built-ins retain the
+// existing tables; generated refs evaluate their own Gharagheizi model.
 inline float gasMixtureConductivity(GasComponentView const &view) {
     float airK = thermalForSubstance(SUBSTANCE_AIR).conductivity;
     if (!(airK > 0.0f) || !std::isfinite(airK)) airK = 0.026f;
-    auto kOf = [&](SubstanceId id) {
-        float k = thermalForSubstance(id).conductivity;
+    auto kOf = [&](RuntimeSubstanceRef ref) {
+        float k = runtimeGasConductivityWPerMK(ref);
         if (k > 0.0f && std::isfinite(k)) return k;
-        return airK;
+        return runtimeSubstanceIsBuiltIn(ref) ? airK : 0.0f;
     };
     if (view.count <= 0) return airK;
-    if (view.count == 1) return kOf(view.items[0].id);
+    if (view.count == 1) {
+        float k = kOf(view.items[0].id);
+        return k > 0.0f ? k : airK;
+    }
     float tot = 0.0f;
     for (int n = 0; n < view.count; ++n) {
         if (view.items[n].amount > GAS_MIN_AMOUNT && validGasComponentId(view.items[n].id))
@@ -346,14 +411,19 @@ inline float gasMixtureConductivity(GasComponentView const &view) {
     }
     if (!(tot > GAS_MIN_AMOUNT)) return airK;
     float k = 0.0f;
+    float used = 0.0f;
     for (int n = 0; n < view.count; ++n) {
-        SubstanceId id = view.items[n].id;
+        RuntimeSubstanceRef ref = view.items[n].id;
         float amt = view.items[n].amount;
-        if (!(amt > GAS_MIN_AMOUNT) || !validGasComponentId(id)) continue;
-        k += (amt / tot) * kOf(id);
+        if (!(amt > GAS_MIN_AMOUNT) || !validGasComponentId(ref)) continue;
+        float ki = kOf(ref);
+        if (!(ki > 0.0f)) continue;
+        float w = amt / tot;
+        k += w * ki;
+        used += w;
     }
-    if (!(k > 0.0f) || !std::isfinite(k)) return airK;
-    return k;
+    if (!(k > 0.0f) || !std::isfinite(k) || !(used > 0.0f)) return airK;
+    return k / used;
 }
 
 // Closed accounting only. Does not mutate FluidEngine / GasEngine / rigid storage.

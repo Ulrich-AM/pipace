@@ -54,8 +54,12 @@ constexpr int kMaxGasComponents = 4;
 constexpr float kMinGasComponent = GAS_MIN_AMOUNT;
 
 struct GasComponent {
-    SubstanceId id = SUBSTANCE_NONE;
+    RuntimeSubstanceRef id{};
     float amount = 0.0f;
+
+    GasComponent() = default;
+    GasComponent(RuntimeSubstanceRef ref, float value) : id(ref), amount(value) {}
+    GasComponent(SubstanceId sid, float value) : id(runtimeBuiltIn(sid)), amount(value) {}
 };
 
 struct GasComponentView {
@@ -63,21 +67,38 @@ struct GasComponentView {
     int count = 0;
 };
 
-inline bool validGasComponentId(SubstanceId id) {
-    return validSubstance(id)
-        && id != SUBSTANCE_NONE
-        && supportsPhase(id, MatterPhase::Gas);
+inline bool validGasComponentId(RuntimeSubstanceRef id) {
+    if (runtimeSubstanceIsBuiltIn(id)) {
+        SubstanceId sid = runtimeBuiltinId(id);
+        return validSubstance(sid)
+            && sid != SUBSTANCE_NONE
+            && supportsPhase(sid, MatterPhase::Gas);
+    }
+    return runtimeSubstanceIsGenerated(id)
+        && runtimeSupportsPhase(id, MatterPhase::Gas);
 }
 
-inline int findGasComponent(GasComponent const *items, int count, SubstanceId id) {
+inline bool validGasComponentId(SubstanceId id) {
+    return validGasComponentId(runtimeBuiltIn(id));
+}
+
+inline int findGasComponent(GasComponent const *items, int count, RuntimeSubstanceRef id) {
     for (int n = 0; n < count; ++n)
         if (items[n].id == id) return n;
     return -1;
 }
 
-inline float gasPayloadAmount(GasComponent const *items, int count, SubstanceId id) {
+inline int findGasComponent(GasComponent const *items, int count, SubstanceId id) {
+    return findGasComponent(items, count, runtimeBuiltIn(id));
+}
+
+inline float gasPayloadAmount(GasComponent const *items, int count, RuntimeSubstanceRef id) {
     int n = findGasComponent(items, count, id);
     return n >= 0 ? items[n].amount : 0.0f;
+}
+
+inline float gasPayloadAmount(GasComponent const *items, int count, SubstanceId id) {
+    return gasPayloadAmount(items, count, runtimeBuiltIn(id));
 }
 
 inline float gasPayloadSum(GasComponent const *items, int count) {
@@ -87,7 +108,7 @@ inline float gasPayloadSum(GasComponent const *items, int count) {
 }
 
 // Merge id into a fixed payload. Returns the amount that did not fit (overflow).
-inline float addGasPayload(GasComponent *items, int &count, SubstanceId id, float amount) {
+inline float addGasPayload(GasComponent *items, int &count, RuntimeSubstanceRef id, float amount) {
     if (!validGasComponentId(id) || !(amount > kMinGasComponent)) return 0.0f;
     int n = findGasComponent(items, count, id);
     if (n >= 0) {
@@ -95,8 +116,12 @@ inline float addGasPayload(GasComponent *items, int &count, SubstanceId id, floa
         return 0.0f;
     }
     if (count >= kMaxGasComponents) return amount;
-    items[count++] = {id, amount};
+    items[count++] = GasComponent{id, amount};
     return 0.0f;
+}
+
+inline float addGasPayload(GasComponent *items, int &count, SubstanceId id, float amount) {
+    return addGasPayload(items, count, runtimeBuiltIn(id), amount);
 }
 
 inline void compactGasPayload(GasComponent *items, int &count) {
@@ -122,7 +147,7 @@ inline void copyGasPayload(GasComponent *dst, int &dstCount,
 }
 
 // True if every occupied src species can merge into dst's fixed slots
-// (existing id or a free slot). Used to reject a whole transfer rather than
+// (existing ref or a free slot). Used to reject a whole transfer rather than
 // drop a species or move identity-less amount.
 inline bool gasPayloadCanMerge(GasComponent const *dst, int dstCount,
     GasComponent const *src, int srcCount)
@@ -131,14 +156,14 @@ inline bool gasPayloadCanMerge(GasComponent const *dst, int dstCount,
     if (dstCount > kMaxGasComponents) return false;
     int extra = 0;
     for (int s = 0; s < srcCount; ++s) {
-        if (!(src[s].amount > kMinGasComponent) || src[s].id == SUBSTANCE_NONE) continue;
+        if (!(src[s].amount > kMinGasComponent) || runtimeSubstanceIsNone(src[s].id)) continue;
         if (findGasComponent(dst, dstCount, src[s].id) >= 0) continue;
         ++extra;
     }
     return dstCount + extra <= kMaxGasComponents;
 }
 
-// Compatibility labels only. Authoritative storage is SubstanceId slots:
+// Compatibility labels only. Authoritative storage is RuntimeSubstanceRef slots:
 // Air = SUBSTANCE_AIR, water vapor = SUBSTANCE_WATER + MatterPhase::Gas.
 enum class GasSpecies : uint8_t { Air = 0, WaterVapor = 1 };
 constexpr int GAS_SPECIES_COUNT = 2;

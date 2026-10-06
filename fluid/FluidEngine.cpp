@@ -27,7 +27,7 @@ FluidEngine::FluidEngine()
     , dyeR(GW * GH, 0.0f)
     , dyeG(GW * GH, 0.0f)
     , dyeB(GW * GH, 0.0f)
-    , liquidCompId(static_cast<size_t>(GW * GH) * kMaxLiquidComponents, SUBSTANCE_NONE)
+    , liquidCompId(static_cast<size_t>(GW * GH) * kMaxLiquidComponents, runtimeNone())
     , liquidCompAmt(static_cast<size_t>(GW * GH) * kMaxLiquidComponents, 0.0f)
     , liquidCompCount(GW * GH, 0)
     , solidifyPendingId(GW * GH, SUBSTANCE_NONE)
@@ -36,7 +36,7 @@ FluidEngine::FluidEngine()
     , nextDyeR(GW * GH, 0.0f)
     , nextDyeG(GW * GH, 0.0f)
     , nextDyeB(GW * GH, 0.0f)
-    , nextCompId(static_cast<size_t>(GW * GH) * kMaxLiquidComponents, SUBSTANCE_NONE)
+    , nextCompId(static_cast<size_t>(GW * GH) * kMaxLiquidComponents, runtimeNone())
     , nextCompAmt(static_cast<size_t>(GW * GH) * kMaxLiquidComponents, 0.0f)
     , nextCompCount(GW * GH, 0)
     , pressure(GW * GH, 0.0f)
@@ -160,7 +160,7 @@ void FluidEngine::clearComposition(int index) {
     int base = compositionSlot(index, 0);
     int n = liquidCompCount[static_cast<size_t>(index)];
     for (int s = 0; s < n; ++s) {
-        liquidCompId[static_cast<size_t>(base + s)] = SUBSTANCE_NONE;
+        liquidCompId[static_cast<size_t>(base + s)] = runtimeNone();
         liquidCompAmt[static_cast<size_t>(base + s)] = 0.0f;
     }
     liquidCompCount[static_cast<size_t>(index)] = 0;
@@ -172,7 +172,7 @@ void FluidEngine::compactComposition(int index) {
     int n = liquidCompCount[static_cast<size_t>(index)];
     int w = 0;
     for (int s = 0; s < n; ++s) {
-        SubstanceId id = liquidCompId[static_cast<size_t>(base + s)];
+        RuntimeSubstanceRef id = liquidCompId[static_cast<size_t>(base + s)];
         float amt = liquidCompAmt[static_cast<size_t>(base + s)];
         if (amt > kMinLiquidComponent) {
             if (w != s) {
@@ -183,7 +183,7 @@ void FluidEngine::compactComposition(int index) {
         }
     }
     for (int s = w; s < n; ++s) {
-        liquidCompId[static_cast<size_t>(base + s)] = SUBSTANCE_NONE;
+        liquidCompId[static_cast<size_t>(base + s)] = runtimeNone();
         liquidCompAmt[static_cast<size_t>(base + s)] = 0.0f;
     }
     liquidCompCount[static_cast<size_t>(index)] = static_cast<uint8_t>(w);
@@ -208,13 +208,13 @@ void FluidEngine::commitNextComposition(int index) {
         liquidCompAmt[static_cast<size_t>(base + s)] = nextCompAmt[static_cast<size_t>(base + s)];
     }
     for (int s = n; s < kMaxLiquidComponents; ++s) {
-        liquidCompId[static_cast<size_t>(base + s)] = SUBSTANCE_NONE;
+        liquidCompId[static_cast<size_t>(base + s)] = runtimeNone();
         liquidCompAmt[static_cast<size_t>(base + s)] = 0.0f;
     }
     compactComposition(index);
 }
 
-float FluidEngine::addComponentUntracked(int index, SubstanceId id, float amount) {
+float FluidEngine::addComponentUntracked(int index, RuntimeSubstanceRef id, float amount) {
     if (index < 0 || index >= GW * GH || !validLiquidComponentId(id)) return std::max(0.0f, amount);
     if (!(amount > kMinLiquidComponent)) return 0.0f;
     int base = compositionSlot(index, 0);
@@ -232,7 +232,7 @@ float FluidEngine::addComponentUntracked(int index, SubstanceId id, float amount
     return 0.0f;
 }
 
-float FluidEngine::addNextComponentUntracked(int index, SubstanceId id, float amount) {
+float FluidEngine::addNextComponentUntracked(int index, RuntimeSubstanceRef id, float amount) {
     if (index < 0 || index >= GW * GH || !validLiquidComponentId(id)) return std::max(0.0f, amount);
     if (!(amount > kMinLiquidComponent)) return 0.0f;
     int base = compositionSlot(index, 0);
@@ -281,7 +281,7 @@ float FluidEngine::honeyFraction(int index) const {
     return liquidComponentFraction(index, SUBSTANCE_HONEY);
 }
 
-float FluidEngine::liquidComponentAmount(int index, SubstanceId id) const {
+float FluidEngine::liquidComponentAmount(int index, RuntimeSubstanceRef id) const {
     if (index < 0 || index >= GW * GH || !validLiquidComponentId(id)) return 0.0f;
     int base = compositionSlot(index, 0);
     int n = liquidCompCount[static_cast<size_t>(index)];
@@ -292,7 +292,7 @@ float FluidEngine::liquidComponentAmount(int index, SubstanceId id) const {
     return 0.0f;
 }
 
-float FluidEngine::liquidComponentFraction(int index, SubstanceId id) const {
+float FluidEngine::liquidComponentFraction(int index, RuntimeSubstanceRef id) const {
     if (index < 0 || index >= GW * GH) return 0.0f;
     float f = fill[static_cast<size_t>(index)];
     if (f <= kMinLiquidComponent) return 0.0f;
@@ -301,7 +301,7 @@ float FluidEngine::liquidComponentFraction(int index, SubstanceId id) const {
     return std::clamp(amt / f, 0.0f, 1.0f);
 }
 
-void FluidEngine::setLiquidComponentAmount(int index, SubstanceId id, float amount) {
+void FluidEngine::setLiquidComponentAmount(int index, RuntimeSubstanceRef id, float amount) {
     if (index < 0 || index >= GW * GH) return;
     if (!validLiquidComponentId(id)) return;
     if (!std::isfinite(amount) || amount < 0.0f) amount = 0.0f;
@@ -368,7 +368,7 @@ void FluidEngine::setLiquidComponentAmount(int index, SubstanceId id, float amou
     clearEmptyLiquidCell(index);
 }
 
-void FluidEngine::addLiquidComponentAmount(int index, SubstanceId id, float delta) {
+void FluidEngine::addLiquidComponentAmount(int index, RuntimeSubstanceRef id, float delta) {
     setLiquidComponentAmount(index, id, liquidComponentAmount(index, id) + delta);
 }
 
@@ -379,17 +379,17 @@ LiquidComponentView FluidEngine::liquidComponents(int index) const {
     int n = liquidCompCount[static_cast<size_t>(index)];
     for (int s = 0; s < n && view.count < kMaxLiquidComponents; ++s) {
         float amt = liquidCompAmt[static_cast<size_t>(base + s)];
-        SubstanceId id = liquidCompId[static_cast<size_t>(base + s)];
+        RuntimeSubstanceRef id = liquidCompId[static_cast<size_t>(base + s)];
         if (amt > kMinLiquidComponent && validLiquidComponentId(id))
             view.items[view.count++] = {id, amt};
     }
     return view;
 }
 
-SubstanceId FluidEngine::dominantLiquidSubstance(int index) const {
-    SubstanceId best = SUBSTANCE_NONE;
+RuntimeSubstanceRef FluidEngine::dominantLiquidRef(int index) const {
+    RuntimeSubstanceRef best = runtimeNone();
     float bestAmt = 0.0f;
-    forEachLiquidComponent(index, [&](SubstanceId id, float amt) {
+    forEachLiquidComponent(index, [&](RuntimeSubstanceRef id, float amt) {
         if (amt > bestAmt) {
             bestAmt = amt;
             best = id;
@@ -409,7 +409,7 @@ bool FluidEngine::liquidCompositionValid(int index) const {
     float sum = 0.0f;
     int validPositive = 0;
     for (int s = 0; s < n; ++s) {
-        SubstanceId id = liquidCompId[static_cast<size_t>(base + s)];
+        RuntimeSubstanceRef id = liquidCompId[static_cast<size_t>(base + s)];
         float amt = liquidCompAmt[static_cast<size_t>(base + s)];
         if (!std::isfinite(amt) || amt < 0.0f) return false;
         if (amt > kMinLiquidComponent) {
@@ -418,7 +418,7 @@ bool FluidEngine::liquidCompositionValid(int index) const {
         }
         sum += amt;
         for (int b = s + 1; b < n; ++b)
-            if (id != SUBSTANCE_NONE && liquidCompId[static_cast<size_t>(base + b)] == id)
+            if (!runtimeSubstanceIsNone(id) && liquidCompId[static_cast<size_t>(base + b)] == id)
                 return false;
     }
     if (f <= kMinLiquidComponent)
@@ -472,7 +472,7 @@ bool FluidEngine::tryCommitLiquidOccupancy(int index, LiquidComponentView const 
     int n = 0;
     float sum = 0.0f;
     for (int s = 0; s < view.count; ++s) {
-        SubstanceId id = view.items[s].id;
+        RuntimeSubstanceRef id = view.items[s].id;
         float amt = view.items[s].amount;
         if (!std::isfinite(amt) || amt < 0.0f) return false;
         if (!(amt > kMinLiquidComponent)) continue;
@@ -489,7 +489,7 @@ bool FluidEngine::tryCommitLiquidOccupancy(int index, LiquidComponentView const 
             liquidCompId[static_cast<size_t>(base + s)] = packed[s].id;
             liquidCompAmt[static_cast<size_t>(base + s)] = packed[s].amount;
         } else {
-            liquidCompId[static_cast<size_t>(base + s)] = SUBSTANCE_NONE;
+            liquidCompId[static_cast<size_t>(base + s)] = runtimeNone();
             liquidCompAmt[static_cast<size_t>(base + s)] = 0.0f;
         }
     }
@@ -2567,14 +2567,14 @@ void FluidEngine::zeroFluidState() {
     std::fill(fill.begin(), fill.end(), 0.0f); std::fill(nextFill.begin(), nextFill.end(), 0.0f);
     std::fill(liquidHeat.begin(), liquidHeat.end(), 0.0f); std::fill(nextHeat.begin(), nextHeat.end(), 0.0f);
     std::fill(dyeR.begin(), dyeR.end(), 0.0f); std::fill(dyeG.begin(), dyeG.end(), 0.0f); std::fill(dyeB.begin(), dyeB.end(), 0.0f);
-    std::fill(liquidCompId.begin(), liquidCompId.end(), SUBSTANCE_NONE);
+    std::fill(liquidCompId.begin(), liquidCompId.end(), runtimeNone());
     std::fill(liquidCompAmt.begin(), liquidCompAmt.end(), 0.0f);
     std::fill(liquidCompCount.begin(), liquidCompCount.end(), 0);
     std::fill(solidifyPendingId.begin(), solidifyPendingId.end(), SUBSTANCE_NONE);
     std::fill(solidifyPendingKg.begin(), solidifyPendingKg.end(), 0.0f);
     std::fill(solidifyPendingHeatJ.begin(), solidifyPendingHeatJ.end(), 0.0f);
     std::fill(nextDyeR.begin(), nextDyeR.end(), 0.0f); std::fill(nextDyeG.begin(), nextDyeG.end(), 0.0f); std::fill(nextDyeB.begin(), nextDyeB.end(), 0.0f);
-    std::fill(nextCompId.begin(), nextCompId.end(), SUBSTANCE_NONE);
+    std::fill(nextCompId.begin(), nextCompId.end(), runtimeNone());
     std::fill(nextCompAmt.begin(), nextCompAmt.end(), 0.0f);
     std::fill(nextCompCount.begin(), nextCompCount.end(), 0);
     std::fill(pressure.begin(), pressure.end(), 0.0f); std::fill(divergenceField.begin(), divergenceField.end(), 0.0f);
@@ -3121,7 +3121,7 @@ void FluidEngine::runLiquidCompositionDiagnostics() {
     };
     auto componentSum = [&](int idx) {
         float s = 0.0f;
-        forEachLiquidComponent(idx, [&](SubstanceId, float amt) { s += amt; });
+        forEachLiquidComponent(idx, [&](RuntimeSubstanceRef, float amt) { s += amt; });
         return s;
     };
 
@@ -3235,13 +3235,13 @@ void FluidEngine::runLiquidCompositionDiagnostics() {
     resetCell();
     {
         int base = compositionSlot(i, 0);
-        liquidCompId[static_cast<size_t>(base + 0)] = SUBSTANCE_HONEY;
+        liquidCompId[static_cast<size_t>(base + 0)] = runtimeBuiltIn(SUBSTANCE_HONEY);
         liquidCompAmt[static_cast<size_t>(base + 0)] = 0.40f;
-        liquidCompId[static_cast<size_t>(base + 1)] = SUBSTANCE_WOOD;
+        liquidCompId[static_cast<size_t>(base + 1)] = runtimeBuiltIn(SUBSTANCE_WOOD);
         liquidCompAmt[static_cast<size_t>(base + 1)] = 0.20f;
-        liquidCompId[static_cast<size_t>(base + 2)] = SUBSTANCE_STONE;
+        liquidCompId[static_cast<size_t>(base + 2)] = runtimeBuiltIn(SUBSTANCE_STONE);
         liquidCompAmt[static_cast<size_t>(base + 2)] = 0.20f;
-        liquidCompId[static_cast<size_t>(base + 3)] = SUBSTANCE_AIR;
+        liquidCompId[static_cast<size_t>(base + 3)] = runtimeBuiltIn(SUBSTANCE_AIR);
         liquidCompAmt[static_cast<size_t>(base + 3)] = 0.20f;
         liquidCompCount[static_cast<size_t>(i)] = static_cast<uint8_t>(kMaxLiquidComponents);
         fill[static_cast<size_t>(i)] = 1.0f;

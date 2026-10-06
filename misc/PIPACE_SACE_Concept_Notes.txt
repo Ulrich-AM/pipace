@@ -955,3 +955,17 @@ Implemented under substance/RuntimeSubstanceProperties.* :
 - Generated model-domain failures fail closed; Water/Air are not borrowed as generated material fallbacks.
 - This is preparation for component identity migration. LiquidComponent/GasComponent storage remains SubstanceId in 19A.
 - Generated matter remains unspawnable. SUBSTANCE_COUNT remains 12.
+
+
+PHASE 19B LANDING (RUNTIME COMPONENT IDENTITY)
+===============================================
+
+- LiquidComponent and GasComponent now store RuntimeSubstanceRef, not raw SubstanceId.
+- FluidEngine/GasEngine SoA component identity arrays use the same compact 32-bit runtime handle.
+- Built-in SubstanceId APIs remain as compatibility wrappers over runtimeBuiltIn(id).
+- Registered generated refs can survive component commit, copy, scale, liquid extraction/carry, and gas payload transport without aliasing a built-in.
+- Liquid/gas mixture property helpers resolve generated density/Cp/conductivity/viscosity/surface tension through the Phase 19A property bridge.
+- Generated live reactions and generated phase changes are intentionally still disabled; those systems only act after converting a runtime ref back to a valid built-in SubstanceId.
+- Inspector/world MatterIdentity and player spawning remain deferred to Phase 20.
+- Catalog reset invalidates generated refs; stale component refs fail validation rather than resolving to a new material.
+- Generated records remain spawnable = false. SUBSTANCE_COUNT remains 12.

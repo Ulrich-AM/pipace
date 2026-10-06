@@ -1,5 +1,8 @@
 #include "substance/LiquidMixtureProperties.h"
 
+#include "substance/GeneratedMaterialRegistry.h"
+#include "substance/RuntimeSubstanceProperties.h"
+
 #include <cmath>
 
 namespace {
@@ -16,12 +19,12 @@ float safeViscosity(float mu) {
 }
 
 int collectValidComponents(LiquidComponentView const &composition,
-    SubstanceId *ids, float *amts, float &tot)
+    RuntimeSubstanceRef *ids, float *amts, float &tot)
 {
     int n = 0;
     tot = 0.0f;
     for (int i = 0; i < composition.count && i < kMaxLiquidComponents; ++i) {
-        SubstanceId id = composition.items[i].id;
+        RuntimeSubstanceRef id = composition.items[i].id;
         float amt = composition.items[i].amount;
         if (!validLiquidComponentId(id) || !std::isfinite(amt) || amt <= kMinLiquidComponent)
             continue;
@@ -44,28 +47,60 @@ void sanitizeIntrinsic(LiquidMixtureProperties &out) {
         out.surfaceTension = sandboxReferenceLiquid().surfaceTension;
 }
 
-LiquidMixtureProperties fromPureIntrinsic(SubstanceId id) {
-    FluidProperties const &f = fluidForSubstance(id);
-    ThermalProperties const &th = thermalForSubstance(id);
+LiquidMixtureProperties fromPureIntrinsic(RuntimeSubstanceRef id) {
     LiquidMixtureProperties out;
-    out.density = f.density;
-    out.specificHeat = th.specificHeat;
-    out.conductivity = th.conductivity;
-    out.viscosity = 0.0f;
-    out.surfaceTension = f.surfaceTension;
-    sanitizeIntrinsic(out);
-    return out;
+    if (runtimeSubstanceIsBuiltIn(id)) {
+        SubstanceId sid = runtimeBuiltinId(id);
+        FluidProperties const &f = fluidForSubstance(sid);
+        ThermalProperties const &th = thermalForSubstance(sid);
+        out.density = f.density;
+        out.specificHeat = th.specificHeat;
+        out.conductivity = th.conductivity;
+        out.viscosity = 0.0f;
+        out.surfaceTension = f.surfaceTension;
+        sanitizeIntrinsic(out);
+        return out;
+    }
+
+    // Generated storage becomes legal in Phase 19B, but the intrinsic values
+    // still come from its own Phase-17 compiled profile. Never relabel it as
+    // Water merely to obtain finite properties.
+    SaceCompiledLiquidProfile const *p = runtimeLiquidProfile(id);
+    if (p && p->valid) {
+        out.density = p->densityRelativeToWater;
+        out.specificHeat = p->specificHeatJPerKgK;
+        out.conductivity = p->thermalConductivityWPerMK;
+        out.viscosity = 0.0f;
+        out.surfaceTension = p->solverSurfaceTension;
+        return out;
+    }
+
+    // Invalid/stale generated refs should have been rejected by component
+    // validation. Keep numerical safety for malformed external views only.
+    return LiquidMixtureProperties{};
+}
+
+float viscosityFor(RuntimeSubstanceRef id, float temperatureK) {
+    if (runtimeSubstanceIsBuiltIn(id))
+        return safeViscosity(fluidForSubstance(runtimeBuiltinId(id)).viscosityAtTemperature(temperatureK));
+
+    RuntimeLiquidPropertySample sample{};
+    if (sampleRuntimeLiquidProperties(id, temperatureK, sample) && sample.valid)
+        return safeViscosity(sample.solverViscosity);
+
+    SaceCompiledLiquidProfile const *p = runtimeLiquidProfile(id);
+    return p && p->valid ? safeViscosity(p->solverViscosity) : kMinMixtureViscosity;
 }
 
 } // namespace
 
 LiquidMixtureProperties referenceLiquidMixture() {
-    return fromPureIntrinsic(SUBSTANCE_WATER);
+    return fromPureIntrinsic(runtimeBuiltIn(SUBSTANCE_WATER));
 }
 
 LiquidMixtureProperties evaluateLiquidMixture(LiquidComponentView const &composition) {
-    SubstanceId ids[kMaxLiquidComponents];
-    float amts[kMaxLiquidComponents];
+    RuntimeSubstanceRef ids[kMaxLiquidComponents]{};
+    float amts[kMaxLiquidComponents]{};
     float tot = 0.0f;
     int n = collectValidComponents(composition, ids, amts, tot);
     if (n == 0 || !(tot > kMinLiquidComponent))
@@ -80,13 +115,12 @@ LiquidMixtureProperties evaluateLiquidMixture(LiquidComponentView const &composi
     float massSum = 0.0f;
     for (int i = 0; i < n; ++i) {
         float phi = amts[i] / tot;
-        FluidProperties const &f = fluidForSubstance(ids[i]);
-        ThermalProperties const &th = thermalForSubstance(ids[i]);
-        rho += phi * f.density;
-        k += phi * th.conductivity;
-        gamma += phi * f.surfaceTension;
-        float m = amts[i] * std::max(0.0f, f.density);
-        massCp += m * th.specificHeat;
+        LiquidMixtureProperties pure = fromPureIntrinsic(ids[i]);
+        rho += phi * pure.density;
+        k += phi * pure.conductivity;
+        gamma += phi * pure.surfaceTension;
+        float m = amts[i] * std::max(0.0f, pure.density);
+        massCp += m * pure.specificHeat;
         massSum += m;
     }
 
@@ -103,20 +137,19 @@ LiquidMixtureProperties evaluateLiquidMixture(LiquidComponentView const &composi
 
 float evaluateLiquidMixtureViscosity(LiquidComponentView const &composition, float temperatureK) {
     float T = sanitizeTemperatureK(temperatureK);
-    SubstanceId ids[kMaxLiquidComponents];
-    float amts[kMaxLiquidComponents];
+    RuntimeSubstanceRef ids[kMaxLiquidComponents]{};
+    float amts[kMaxLiquidComponents]{};
     float tot = 0.0f;
     int n = collectValidComponents(composition, ids, amts, tot);
     if (n == 0 || !(tot > kMinLiquidComponent))
         return safeViscosity(sandboxReferenceLiquid().viscosityAtTemperature(T));
     if (n == 1)
-        return safeViscosity(fluidForSubstance(ids[0]).viscosityAtTemperature(T));
+        return viscosityFor(ids[0], T);
 
     float logMu = 0.0f;
     for (int i = 0; i < n; ++i) {
         float phi = amts[i] / tot;
-        float mu = fluidForSubstance(ids[i]).viscosityAtTemperature(T);
-        logMu += phi * std::log(safeViscosity(mu));
+        logMu += phi * std::log(viscosityFor(ids[i], T));
     }
     return safeViscosity(std::exp(logMu));
 }
@@ -124,12 +157,13 @@ float evaluateLiquidMixtureViscosity(LiquidComponentView const &composition, flo
 bool liquidCompositionIsPureWater(LiquidComponentView const &composition) {
     float water = 0.0f;
     float other = 0.0f;
+    RuntimeSubstanceRef waterRef = runtimeBuiltIn(SUBSTANCE_WATER);
     for (int i = 0; i < composition.count && i < kMaxLiquidComponents; ++i) {
-        SubstanceId id = composition.items[i].id;
+        RuntimeSubstanceRef id = composition.items[i].id;
         float amt = composition.items[i].amount;
         if (!validLiquidComponentId(id) || !std::isfinite(amt) || amt <= kMinLiquidComponent)
             continue;
-        if (id == SUBSTANCE_WATER) water += amt;
+        if (id == waterRef) water += amt;
         else other += amt;
     }
     return water > kMinLiquidComponent && other <= kMeaningfulLiquidComponent;

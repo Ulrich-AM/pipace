@@ -44,8 +44,6 @@ SaceCompiledLiquidProfile const *runtimeLiquidProfile(RuntimeSubstanceRef ref);
 SaceCompiledGasProfile const *runtimeGasProfile(RuntimeSubstanceRef ref);
 SaceCompiledPhaseProfile const *runtimeLiquidGasPhaseProfile(RuntimeSubstanceRef ref);
 
-bool runtimeSupportsPhase(RuntimeSubstanceRef ref, MatterPhase phase);
-
 // Writes a display label. Not canonical identity. Not a lookup key.
 bool runtimeFormatDisplayName(RuntimeSubstanceRef ref, char *out, int cap);
 
