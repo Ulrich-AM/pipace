@@ -1637,7 +1637,9 @@ void FluidEngine::advectLiquidVolume(float dt) {
         for (int s = 0; s < n; ++s) {
             float d = liquidCompAmt[static_cast<size_t>(base + s)] * frac;
             nextCompAmt[static_cast<size_t>(base + s)] -= d;
-            float unplaced = addNextComponentUntracked(receiver, liquidCompId[static_cast<size_t>(base + s)], d);
+            RuntimeSubstanceRef storedId = liquidCompId[static_cast<size_t>(base + s)];
+            if (!runtimeSubstanceIsBuiltIn(storedId)) continue;
+            float unplaced = addNextComponentUntracked(receiver, runtimeBuiltinId(storedId), d);
             if (unplaced > 0.0f) {
                 nextCompAmt[static_cast<size_t>(base + s)] += unplaced;
                 nextFill[receiver] -= unplaced;
@@ -1929,7 +1931,9 @@ void FluidEngine::consolidateResidualVolume() {
         for (int s = 0; s < n; ++s) {
             float d = liquidCompAmt[static_cast<size_t>(base + s)] * frac;
             nextCompAmt[static_cast<size_t>(base + s)] -= d;
-            float unplaced = addNextComponentUntracked(receiver, liquidCompId[static_cast<size_t>(base + s)], d);
+            RuntimeSubstanceRef storedId = liquidCompId[static_cast<size_t>(base + s)];
+            if (!runtimeSubstanceIsBuiltIn(storedId)) continue;
+            float unplaced = addNextComponentUntracked(receiver, runtimeBuiltinId(storedId), d);
             if (unplaced > 0.0f) {
                 nextCompAmt[static_cast<size_t>(base + s)] += unplaced;
                 nextFill[receiver] -= unplaced;
