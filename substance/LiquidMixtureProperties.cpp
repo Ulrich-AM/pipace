@@ -1,5 +1,7 @@
 #include "substance/LiquidMixtureProperties.h"
 
+#include "substance/GeneratedMaterialRegistry.h"
+
 #include <cmath>
 
 namespace {
@@ -16,12 +18,12 @@ float safeViscosity(float mu) {
 }
 
 int collectValidComponents(LiquidComponentView const &composition,
-    SubstanceId *ids, float *amts, float &tot)
+    RuntimeSubstanceRef *ids, float *amts, float &tot)
 {
     int n = 0;
     tot = 0.0f;
     for (int i = 0; i < composition.count && i < kMaxLiquidComponents; ++i) {
-        SubstanceId id = composition.items[i].id;
+        RuntimeSubstanceRef id = composition.items[i].id;
         float amt = composition.items[i].amount;
         if (!validLiquidComponentId(id) || !std::isfinite(amt) || amt <= kMinLiquidComponent)
             continue;
@@ -44,28 +46,61 @@ void sanitizeIntrinsic(LiquidMixtureProperties &out) {
         out.surfaceTension = sandboxReferenceLiquid().surfaceTension;
 }
 
-LiquidMixtureProperties fromPureIntrinsic(SubstanceId id) {
-    FluidProperties const &f = fluidForSubstance(id);
-    ThermalProperties const &th = thermalForSubstance(id);
-    LiquidMixtureProperties out;
-    out.density = f.density;
-    out.specificHeat = th.specificHeat;
-    out.conductivity = th.conductivity;
+bool intrinsicFor(RuntimeSubstanceRef id, LiquidMixtureProperties &out) {
+    out = {};
+    if (runtimeSubstanceIsBuiltIn(id)) {
+        SubstanceId sid = runtimeBuiltinId(id);
+        if (!validLiquidComponentId(sid)) return false;
+        FluidProperties const &f = fluidForSubstance(sid);
+        ThermalProperties const &th = thermalForSubstance(sid);
+        out.density = f.density;
+        out.specificHeat = th.specificHeat;
+        out.conductivity = th.conductivity;
+        out.viscosity = 0.0f;
+        out.surfaceTension = f.surfaceTension;
+        sanitizeIntrinsic(out);
+        return true;
+    }
+
+    SaceCompiledLiquidProfile const *p = runtimeLiquidProfile(id);
+    if (!p || !p->valid) return false;
+    out.density = p->densityRelativeToWater;
+    out.specificHeat = p->specificHeatJPerKgK;
+    out.conductivity = p->thermalConductivityWPerMK;
     out.viscosity = 0.0f;
-    out.surfaceTension = f.surfaceTension;
-    sanitizeIntrinsic(out);
+    out.surfaceTension = p->solverSurfaceTension;
+    return std::isfinite(out.density) && out.density > 0.0f
+        && std::isfinite(out.specificHeat) && out.specificHeat > 0.0f
+        && std::isfinite(out.conductivity) && out.conductivity > 0.0f
+        && std::isfinite(out.surfaceTension) && out.surfaceTension > 0.0f;
+}
+
+float viscosityFor(RuntimeSubstanceRef id, float temperatureK) {
+    if (runtimeSubstanceIsBuiltIn(id))
+        return safeViscosity(fluidForSubstance(runtimeBuiltinId(id)).viscosityAtTemperature(temperatureK));
+    SaceCompiledLiquidProfile const *p = runtimeLiquidProfile(id);
+    float mu = 0.0f;
+    if (!p || !saceCompiledSolverViscosityAtTemperature(*p, temperatureK, mu))
+        return kMinMixtureViscosity;
+    return safeViscosity(mu);
+}
+
+LiquidMixtureProperties fromPureIntrinsic(RuntimeSubstanceRef id) {
+    LiquidMixtureProperties out;
+    if (!intrinsicFor(id, out))
+        return LiquidMixtureProperties{};
     return out;
 }
 
 } // namespace
 
 LiquidMixtureProperties referenceLiquidMixture() {
-    return fromPureIntrinsic(SUBSTANCE_WATER);
+    return fromPureIntrinsic(runtimeBuiltIn(SUBSTANCE_WATER));
 }
 
 LiquidMixtureProperties evaluateLiquidMixture(LiquidComponentView const &composition) {
-    SubstanceId ids[kMaxLiquidComponents];
-    float amts[kMaxLiquidComponents];
+    RuntimeSubstanceRef ids[kMaxLiquidComponents]{};
+    float amts[kMaxLiquidComponents]{};
     float tot = 0.0f;
     int n = collectValidComponents(composition, ids, amts, tot);
     if (n == 0 || !(tot > kMinLiquidComponent))
@@ -79,14 +114,14 @@ LiquidMixtureProperties evaluateLiquidMixture(LiquidComponentView const &composi
     float massCp = 0.0f;
     float massSum = 0.0f;
     for (int i = 0; i < n; ++i) {
+        LiquidMixtureProperties p{};
+        if (!intrinsicFor(ids[i], p)) continue;
         float phi = amts[i] / tot;
-        FluidProperties const &f = fluidForSubstance(ids[i]);
-        ThermalProperties const &th = thermalForSubstance(ids[i]);
-        rho += phi * f.density;
-        k += phi * th.conductivity;
-        gamma += phi * f.surfaceTension;
-        float m = amts[i] * std::max(0.0f, f.density);
-        massCp += m * th.specificHeat;
+        rho += phi * p.density;
+        k += phi * p.conductivity;
+        gamma += phi * p.surfaceTension;
+        float m = amts[i] * std::max(0.0f, p.density);
+        massCp += m * p.specificHeat;
         massSum += m;
     }
 
@@ -103,20 +138,19 @@ LiquidMixtureProperties evaluateLiquidMixture(LiquidComponentView const &composi
 
 float evaluateLiquidMixtureViscosity(LiquidComponentView const &composition, float temperatureK) {
     float T = sanitizeTemperatureK(temperatureK);
-    SubstanceId ids[kMaxLiquidComponents];
-    float amts[kMaxLiquidComponents];
+    RuntimeSubstanceRef ids[kMaxLiquidComponents]{};
+    float amts[kMaxLiquidComponents]{};
     float tot = 0.0f;
     int n = collectValidComponents(composition, ids, amts, tot);
     if (n == 0 || !(tot > kMinLiquidComponent))
         return safeViscosity(sandboxReferenceLiquid().viscosityAtTemperature(T));
     if (n == 1)
-        return safeViscosity(fluidForSubstance(ids[0]).viscosityAtTemperature(T));
+        return viscosityFor(ids[0], T);
 
     float logMu = 0.0f;
     for (int i = 0; i < n; ++i) {
         float phi = amts[i] / tot;
-        float mu = fluidForSubstance(ids[i]).viscosityAtTemperature(T);
-        logMu += phi * std::log(safeViscosity(mu));
+        logMu += phi * std::log(viscosityFor(ids[i], T));
     }
     return safeViscosity(std::exp(logMu));
 }
@@ -125,7 +159,7 @@ bool liquidCompositionIsPureWater(LiquidComponentView const &composition) {
     float water = 0.0f;
     float other = 0.0f;
     for (int i = 0; i < composition.count && i < kMaxLiquidComponents; ++i) {
-        SubstanceId id = composition.items[i].id;
+        RuntimeSubstanceRef id = composition.items[i].id;
         float amt = composition.items[i].amount;
         if (!validLiquidComponentId(id) || !std::isfinite(amt) || amt <= kMinLiquidComponent)
             continue;
