@@ -955,3 +955,13 @@ Implemented under substance/RuntimeSubstanceProperties.* :
 - Generated model-domain failures fail closed; Water/Air are not borrowed as generated material fallbacks.
 - This is preparation for component identity migration. LiquidComponent/GasComponent storage remains SubstanceId in 19A.
 - Generated matter remains unspawnable. SUBSTANCE_COUNT remains 12.
+
+PHASE 19B1 LANDING (RUNTIME COMPONENT PAYLOADS)
+===============================================
+- LiquidComponent.id and GasComponent.id are now RuntimeSubstanceRef.
+- Built-in SubstanceId overloads remain for compatibility; generated refs never compare equal to built-ins.
+- Payload add/find/merge/copy/scale/compact support registered generated liquid/gas refs.
+- LiquidMixtureProperties and gas mixture thermal/density/conductivity helpers can consume generated compiled profiles.
+- FluidEngine/GasEngine internal SoA composition arrays remain SubstanceId in 19B1.
+- Engine occupancy commits explicitly reject generated refs until 19B2; there is no silent down-cast or Water/Air relabeling.
+- Generated matter remains unspawnable and SUBSTANCE_COUNT remains 12.
