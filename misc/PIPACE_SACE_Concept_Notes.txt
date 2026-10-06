@@ -943,3 +943,15 @@ substance/GeneratedMaterialRegistry.* :
 
 
 
+
+PHASE 19A LANDING (RUNTIME PROPERTY BRIDGE)
+===========================================
+Implemented under substance/RuntimeSubstanceProperties.* :
+
+- RuntimeSubstanceRef can now be sampled through one read-only liquid/gas property API.
+- Built-ins preserve the existing SubstanceDefinition tables and temperature helpers.
+- Generated liquids evaluate COSTALD density, Rowlinson-Poling Cp, Sato-Riedel k, compiled Joback solver viscosity, and Sastri-Rao surface tension at query T.
+- Generated gases evaluate Joback ideal-gas Cp and Gharagheizi k at query T and retain generated molar mass.
+- Generated model-domain failures fail closed; Water/Air are not borrowed as generated material fallbacks.
+- This is preparation for component identity migration. LiquidComponent/GasComponent storage remains SubstanceId in 19A.
+- Generated matter remains unspawnable. SUBSTANCE_COUNT remains 12.
