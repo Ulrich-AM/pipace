@@ -371,9 +371,13 @@ bool GasEngine::tryCommitGasOccupancy(int index, GasComponentView const &view) {
     int packedCount = 0;
     float sum = 0.0f;
     for (int n = 0; n < view.count; ++n) {
-        SubstanceId id = view.items[n].id;
+        RuntimeSubstanceRef ref = view.items[n].id;
         float amt = view.items[n].amount;
         if (!(amt > kMinGasComponent)) continue;
+        // Phase 19B1: payloads may name generated matter, but GasEngine's SoA
+        // storage is still SubstanceId until 19B2.
+        if (!runtimeSubstanceIsBuiltIn(ref)) return false;
+        SubstanceId id = runtimeBuiltinId(ref);
         if (!validGasComponentId(id)) return false;
         if (addGasPayload(packed, packedCount, id, amt) > 0.0f) return false;
         sum += amt;
@@ -382,7 +386,7 @@ bool GasEngine::tryCommitGasOccupancy(int index, GasComponentView const &view) {
     int base = compositionSlot(index, 0);
     for (int s = 0; s < kMaxGasComponents; ++s) {
         if (s < packedCount) {
-            gasCompId[static_cast<size_t>(base + s)] = packed[s].id;
+            gasCompId[static_cast<size_t>(base + s)] = runtimeBuiltinId(packed[s].id);
             gasCompAmt[static_cast<size_t>(base + s)] = packed[s].amount;
         } else {
             gasCompId[static_cast<size_t>(base + s)] = SUBSTANCE_NONE;
@@ -613,7 +617,8 @@ float GasEngine::relocateAmount(FluidEngine const &fluid, int x, int y, GasCompo
                 float accepted = 0.0f;
                 for (int s = 0; s < parcel.count; ++s) {
                     float d = parcel.items[s].amount * frac;
-                    float unplaced = addGasComponentUntracked(i, parcel.items[s].id, d);
+                    if (!runtimeSubstanceIsBuiltIn(parcel.items[s].id)) continue;
+                    float unplaced = addGasComponentUntracked(i, runtimeBuiltinId(parcel.items[s].id), d);
                     float got = d - unplaced;
                     parcel.items[s].amount -= got;
                     accepted += got;
@@ -655,8 +660,10 @@ void GasEngine::displaceBlocked(FluidEngine const &fluid) {
             maxAtm = config.ambientPressureAtm * 1.12f;
         float rem = relocateAmount(fluid, x, y, parcel, a > GAS_MIN_AMOUNT ? h / a : 0.0f, maxAtm);
         if (rem > 0.0f && std::isfinite(rem)) {
-            for (int s = 0; s < parcel.count; ++s)
-                (void)addGasComponentUntracked(i, parcel.items[s].id, parcel.items[s].amount);
+            for (int s = 0; s < parcel.count; ++s) {
+                if (!runtimeSubstanceIsBuiltIn(parcel.items[s].id)) continue;
+                (void)addGasComponentUntracked(i, runtimeBuiltinId(parcel.items[s].id), parcel.items[s].amount);
+            }
             amount[static_cast<size_t>(i)] += rem;
             clampSpecies(i);
             heat[static_cast<size_t>(i)] += rem * (a > GAS_MIN_AMOUNT ? h / a : 0.0f);
@@ -693,8 +700,10 @@ void GasEngine::displaceLiquidOverflow(FluidEngine const &fluid) {
         float rem = relocateAmount(fluid, x, y, parcel,
             pushed > GAS_MIN_AMOUNT ? hPush / pushed : 0.0f, config.ambientPressureAtm * 1.12f);
         if (rem > GAS_MIN_AMOUNT) {
-            for (int s = 0; s < parcel.count; ++s)
-                (void)addGasComponentUntracked(i, parcel.items[s].id, parcel.items[s].amount);
+            for (int s = 0; s < parcel.count; ++s) {
+                if (!runtimeSubstanceIsBuiltIn(parcel.items[s].id)) continue;
+                (void)addGasComponentUntracked(i, runtimeBuiltinId(parcel.items[s].id), parcel.items[s].amount);
+            }
             amount[static_cast<size_t>(i)] += rem;
             clampSpecies(i);
             heat[static_cast<size_t>(i)] += rem * (hPush / pushed);
