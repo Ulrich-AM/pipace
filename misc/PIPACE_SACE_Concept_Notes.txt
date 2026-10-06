@@ -965,3 +965,13 @@ PHASE 19B1 LANDING (RUNTIME COMPONENT PAYLOADS)
 - FluidEngine/GasEngine internal SoA composition arrays remain SubstanceId in 19B1.
 - Engine occupancy commits explicitly reject generated refs until 19B2; there is no silent down-cast or Water/Air relabeling.
 - Generated matter remains unspawnable and SUBSTANCE_COUNT remains 12.
+
+PHASE 19B2A LANDING (LIQUID INTERNAL ID STORAGE)
+================================================
+- FluidEngine liquidCompId and nextCompId now store RuntimeSubstanceRef.
+- Public FluidEngine liquid mutation/query APIs remain SubstanceId-based for this subphase.
+- Existing Water/Honey writes are explicitly wrapped as built-in runtime refs.
+- Conservative liquid transport still unwraps built-ins before using legacy mutation APIs.
+- Generated runtime refs are not yet accepted into live FluidEngine transport; that is Phase 19B2b.
+- GasEngine storage is unchanged.
+- Spawnability, reactions, phase-change behavior, rendering, and UI are unchanged.
